@@ -64,7 +64,7 @@ jobs:
       contents: read
       packages: write
     env:
-      IMAGE: ghcr.io/itsthelore/rac
+      IMAGE: ghcr.io/itsthelore/asdecided-core
       TAG: ${{ github.event.release.tag_name }}
     steps:
       - uses: actions/checkout@v5

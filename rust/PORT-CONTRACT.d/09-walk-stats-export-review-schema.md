@@ -597,7 +597,7 @@ append `<blank>` + `No artifacts yet — create your first with: rac quickstart`
 - `_document`: results sorted by `(uri, startLine|0, ruleId, message.text)`. `rules` =
   `[{"id": code} for code in sorted(set(ruleIds))]` (unique codes, sorted). Top document:
   `{version:"2.1.0", $schema:<schemastore url>, runs:[{tool.driver:{name:"rac",
-  informationUri:"https://github.com/itsthelore/rac-core", version:__version__, rules}, results}]}`.
+  informationUri:"https://github.com/itsthelore/asdecided-core", version:__version__, rules}, results}]}`.
   `json.dumps(indent=2)` (ensure_ascii=True). `driver.version` = env version.
 
 ---

@@ -7,7 +7,7 @@ does — a Git tree of Markdown files with YAML front matter. This page is RAC's
 presents itself as a conformant OKF bundle. It is a derived, interoperability
 view; RAC Core and `decided validate` remain the source of truth, and adopting this
 profile loosens none of RAC's guarantees. The decision behind it is
-[ADR-048](https://github.com/itsthelore/rac-core/blob/main/decisions/decisions/adr-048-okf-carrier-profile.md),
+[ADR-048](https://github.com/itsthelore/asdecided-core/blob/main/decisions/decisions/adr-048-okf-carrier-profile.md),
 scoped by the `rac-okf-carrier-profile` requirement.
 
 > The key words MUST, SHOULD, and MAY in this document are to be interpreted as

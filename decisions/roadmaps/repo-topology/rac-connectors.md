@@ -42,7 +42,7 @@ item applies the `rac-*` name and the wider remit.
 
 ## Success Measures
 
-- `itsthelore/rac-connectors` exists with the subdir-per-integration layout; the
+- `itsthelore/asdecided-connectors` exists with the subdir-per-integration layout; the
   old name redirects.
 - No `rac-core` doc or corpus reference points to `lore-connectors`.
 - Connectors still consume only the published export/ingest contracts and the

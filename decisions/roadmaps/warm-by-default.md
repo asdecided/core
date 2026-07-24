@@ -122,4 +122,4 @@ stat-rung part of it to scheduled work and flips the posture, per ADR-112.
 
 ## Related Tickets
 
-- itsthelore/rac-core#340
+- itsthelore/asdecided-core#340

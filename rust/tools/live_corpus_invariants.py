@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Exercise the live RAC corpus without pinning its output bytes.
 
-Compatibility bytes belong to rac-spec. The repository's evolving corpus is
+Compatibility bytes belong to asdecided-spec. The repository's evolving corpus is
 instead required to remain valid, deterministic, fresh, and cache-neutral.
 """
 

@@ -12,7 +12,7 @@ Proposed
 Classification: `[internal]` — the publication-grade evidence the paper
 needs. Initiative 2 of the `decision-grounding-paper` roadmap. The multi-arm
 head-to-head already exists as the `decisiongrounding` implementation in
-`itsthelore/rac-benchmarks` (ADR-092), whose published dataset/paper identity
+`itsthelore/asdecided-benchmarks` (ADR-092), whose published dataset/paper identity
 is **SWE-DecisionBench** (the name already recorded in
 `external-benchmark-evidence`). This requirement scopes the deltas that take
 it from a working benchmark to a citable SWE-family study; it does not build a

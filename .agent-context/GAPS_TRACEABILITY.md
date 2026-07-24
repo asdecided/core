@@ -161,7 +161,7 @@ purpose (growth-programme success measure).
 
 The open/partial gaps are now promoted to the trusted corpus (the pattern set by
 `rac-traceability-self-relationships`): the `relationship-vocabulary` roadmap with
-a requirement per gap, tracked under epic **itsthelore/rac-core#236**.
+a requirement per gap, tracked under epic **itsthelore/asdecided-core#236**.
 
 | Gap(s) | Requirement |
 | --- | --- |

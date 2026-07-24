@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
-"""Certify RAC engines against rac-spec's output-parity conformance tier.
+"""Certify RAC engines against asdecided-spec's output-parity conformance tier.
 
 ADR-063 Guard 2: a cross-language conformance fixture suite proves output
-parity. The neutral suite lives in `itsthelore/rac-spec`
+parity. The neutral suite lives in `itsthelore/asdecided-spec`
 (`conformance/output-parity.json` + `conformance/vectors/`): each case pins the
 byte-for-byte stdout and exit code an engine must produce for a deterministic,
 recency-free command over an example corpus. This runner replays every case
 against one or more engines and asserts each reproduces the golden bytes exactly
 — certifying the engine against the specification, not against another engine.
 
-Point DECIDED_SPEC_DIR (or --spec-dir) at a rac-spec checkout. Give one or more
-engines as `label=command` pairs (command is shell-split, run from the rac-spec
+Point DECIDED_SPEC_DIR (or --spec-dir) at a asdecided-spec checkout. Give one or more
+engines as `label=command` pairs (command is shell-split, run from the asdecided-spec
 root). With no engines and no DECIDED_SPEC_DIR, the runner skips with exit 0 so CI
-stays green until rac-spec is wired in.
+stays green until asdecided-spec is wired in.
 
 Usage:
-    DECIDED_SPEC_DIR=/path/to/rac-spec python rust/tools/conformance_certify.py \
+    DECIDED_SPEC_DIR=/path/to/asdecided-spec python rust/tools/conformance_certify.py \
         --engine "python=/path/.venv/bin/rac" \
         --engine "rust=/path/rust/target/release/decided"
 
@@ -54,7 +54,7 @@ def main() -> int:
     args = ap.parse_args()
 
     if not args.spec_dir:
-        print("SKIP: no --spec-dir / DECIDED_SPEC_DIR — rac-spec not available")
+        print("SKIP: no --spec-dir / DECIDED_SPEC_DIR — asdecided-spec not available")
         return 0
     spec_dir = Path(args.spec_dir)
     manifest_path = spec_dir / "conformance/output-parity.json"

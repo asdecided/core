@@ -197,4 +197,4 @@ by PR (ADR-065).
 
 ## Related Tickets
 
-- itsthelore/rac-core#267
+- itsthelore/asdecided-core#267

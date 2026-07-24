@@ -107,7 +107,7 @@ maintainer-run org actions, sequenced in the deferred roadmap rewrite.
   by platform, so the ADR-090 "capability-first" intent holds; `lore-pipelines` is
   not created. Accepted tradeoffs: coupled version tags (one suite version, which
   is simpler for consumers) and no per-action Marketplace listing (consumed via
-  `uses: itsthelore/rac-ci/<capability>@<ref>`).
+  `uses: itsthelore/asdecided-ci/<capability>@<ref>`).
 - **`rac-connectors` is one repo** covering inbound (`rac ingest`) + outbound
   (`rac export`) + provider suites; **Atlassian is a subdir**, not its own repo —
   deployment and multi-direction do not force a repo boundary.

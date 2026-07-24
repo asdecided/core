@@ -1,4 +1,4 @@
-//! Artifact specs, loaded from the vendored, language-neutral rac-spec registry
+//! Artifact specs, loaded from the vendored, language-neutral asdecided-spec registry
 //! embedded at build time. Field, section, and map order are preserved
 //! everywhere (PORT-CONTRACT.d/04 §1, PORT-CONTRACT.d/09, PORT-CONTRACT.d/05 §3.1).
 //!
@@ -12,7 +12,7 @@ use std::sync::OnceLock;
 
 use serde_json::Value;
 
-/// Embedded spec data synced from `itsthelore/rac-spec`.
+/// Embedded spec data synced from `itsthelore/asdecided-spec`.
 const SPEC_JSON: &str = include_str!("../assets/spec/artifact-specs.json");
 
 /// One artifact type's schema. Field names/order mirror the Python dataclass.

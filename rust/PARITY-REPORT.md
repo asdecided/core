@@ -90,9 +90,9 @@ argparse choices list gains `retrieve`) is deliberately not adopted
 until the branch merges. With this, every command the six-tool Lore MCP
 surface depends on has a parity-proven Rust implementation.
 
-## rac-spec acceptance suite
+## asdecided-spec acceptance suite
 
-The public specification repo (itsthelore/rac-spec, v0.1.0) ships an
+The public specification repo (itsthelore/asdecided-spec, v0.1.0) ships an
 executable acceptance suite (`examples/manifest.json`: 2 valid corpora +
 16 invalid cases with expected blocking finding codes). Both engines were
 run over all 18 cases with identical argv/env: **18/18 byte-identical
@@ -100,7 +100,7 @@ stdout and exit codes**, every exit matching the manifest's expectation.
 This is the first second implementation of the spec, and it makes the
 spec's implementation-neutrality claim ("any conformant implementation
 must agree") a demonstrated property rather than an intention. At
-mainline, the Rust engine should be certified against rac-spec's
+mainline, the Rust engine should be certified against asdecided-spec's
 `schema/` and `vocabulary/` directly, retiring this spike's derived
 `rust/spec/artifact-specs.json` extraction.
 

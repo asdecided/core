@@ -14,7 +14,7 @@ Planned
 
 ADR-092 places the non-Python language SDKs in a single `rac-sdk` repository,
 subdir per language (`ts/`, `go/`, …). The existing `rac-sdk-ts` (extracted in
-v0.22.5, published to npm as `@itsthelore/rac-sdk`) becomes `rac-sdk/ts/`. The
+v0.22.5, published to npm as `@itsthelore/asdecided-sdk`) becomes `rac-sdk/ts/`. The
 **Python SDK stays in `rac-core`** — its public surface *is* `rac.__all__`
 shipped inside the engine package (ADR-062), and the engine plus its server are
 one package (ADR-029). Non-Python clients remain thin contract clients over the
@@ -22,9 +22,9 @@ stable `--json` surface (ADR-063).
 
 ## Outcomes
 
-- `itsthelore/rac-sdk` exists with `ts/` holding the former `rac-sdk-ts`; further
+- `itsthelore/asdecided-sdk` exists with `ts/` holding the former `rac-sdk-ts`; further
   languages land as sibling subdirs.
-- The published npm package name is unchanged (`@itsthelore/rac-sdk`), so no
+- The published npm package name is unchanged (`@itsthelore/asdecided-sdk`), so no
   consumer break — only the source repository moves.
 - The Python SDK remains in `rac-core`; no Python SDK repo is created.
 
@@ -32,7 +32,7 @@ stable `--json` surface (ADR-063).
 
 - **Seed `rac-sdk`** with the `rac-sdk-ts` history under `ts/`; archive
   `rac-sdk-ts` with a redirect note.
-- **Preserve the npm identity**: continue publishing `@itsthelore/rac-sdk` from
+- **Preserve the npm identity**: continue publishing `@itsthelore/asdecided-sdk` from
   `rac-sdk/ts/`, with per-subdir release tags (polyglot-monorepo cost accepted,
   ADR-092).
 - **Update references** in `rac-core` docs/corpus that point at `rac-sdk-ts` to
@@ -40,9 +40,9 @@ stable `--json` surface (ADR-063).
 
 ## Success Measures
 
-- `itsthelore/rac-sdk` exists with `ts/`; `rac-sdk-ts` is archived with a
+- `itsthelore/asdecided-sdk` exists with `ts/`; `rac-sdk-ts` is archived with a
   redirect.
-- `@itsthelore/rac-sdk` continues to publish and resolve for existing consumers
+- `@itsthelore/asdecided-sdk` continues to publish and resolve for existing consumers
   with no version break.
 - The Python SDK surface (`rac.__all__`) stays in `rac-core`; no `rac-sdk-py`
   repo appears.
@@ -59,7 +59,7 @@ stable `--json` surface (ADR-063).
 ## Risks
 
 - **npm-consumer break** if the package name or publish flow changes. Mitigation:
-  keep `@itsthelore/rac-sdk` exactly; move only the source repo, behind a GitHub
+  keep `@itsthelore/asdecided-sdk` exactly; move only the source repo, behind a GitHub
   redirect.
 - **Toolchain friction** across languages in one repo. Mitigation: isolate each
   language in its subdir with its own build and release tag.

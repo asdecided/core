@@ -9,7 +9,7 @@ type: roadmap
 
 Achieved
 
-Delivered across all three initiatives (epic itsthelore/rac-core#273):
+Delivered across all three initiatives (epic itsthelore/asdecided-core#273):
 decisions declare validated code scope via `## Applies To` (#274); a
 deterministic path→decisions lookup answers over the `rac decisions-for` CLI
 and the additive `find_decisions` MCP `path` argument (#275); and the Explorer
@@ -212,4 +212,4 @@ everywhere.
 
 ## Related Tickets
 
-- itsthelore/rac-core#273
+- itsthelore/asdecided-core#273

@@ -21,7 +21,7 @@ lives at the marketplace listing, not the repository name (ADR-092).
 
 ## Outcomes
 
-- `itsthelore/rac-editors` exists with the VS Code / Cursor extension under
+- `itsthelore/asdecided-editors` exists with the VS Code / Cursor extension under
   `vscode/`; further IDE clients land as sibling subdirs.
 - The Marketplace / OpenVSX listing identity and the published extension id are
   unchanged, so installed users are unaffected — only the source repo moves.
@@ -38,7 +38,7 @@ lives at the marketplace listing, not the repository name (ADR-092).
 
 ## Success Measures
 
-- `itsthelore/rac-editors` exists with `vscode/`; `lore-vscode` is archived with
+- `itsthelore/asdecided-editors` exists with `vscode/`; `lore-vscode` is archived with
   a redirect.
 - The extension continues to publish and update for existing users with no
   identity break.
@@ -46,7 +46,7 @@ lives at the marketplace listing, not the repository name (ADR-092).
 
 ## Assumptions
 
-- The extension consumes the published `@itsthelore/rac-sdk` and the public CLI,
+- The extension consumes the published `@itsthelore/asdecided-sdk` and the public CLI,
   never engine internals (ADR-063), so the repo move needs no contract change.
 - A shared VSIX serves VS Code and its Cursor fork (ADR-068's surviving client
   decision), so `vscode/` covers both today.

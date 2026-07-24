@@ -9,7 +9,7 @@ type: roadmap
 
 Achieved
 
-Delivered across all four initiatives (itsthelore/rac-core#227). `rac ingest`
+Delivered across all four initiatives (itsthelore/asdecided-core#227). `rac ingest`
 now imports note-tool exports by normalisation through the ADR-072 registry
 (ADR-079): Obsidian vaults (#292), Logseq graphs (#297), Notion "Markdown & CSV"
 exports (#298), and Roam JSON graphs (#303). Each note becomes a reviewable
@@ -134,4 +134,4 @@ the candidate-link review step.
 
 ## Related Tickets
 
-- itsthelore/rac-core#227
+- itsthelore/asdecided-core#227

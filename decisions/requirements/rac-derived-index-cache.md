@@ -12,7 +12,7 @@ Accepted
 Classification: `[internal]` — per-call work stops scaling with corpus
 size. Initiative 2 of the `lore-at-team-scale` roadmap: a
 content-addressed, rebuild-on-change cache behind the ADR-032 seam,
-shipped under its own ADR. Delivered (itsthelore/rac-core#264): the
+shipped under its own ADR. Delivered (itsthelore/asdecided-core#264): the
 `DerivedIndexCache` persists the repository index, resolved relationship
 graph, and tokenised field vectors keyed on `corpus_content_hash`, enabled
 opt-in via `rac mcp --cache`, byte-identical to the uncached path — under

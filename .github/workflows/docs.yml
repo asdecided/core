@@ -2,7 +2,7 @@ name: Docs
 
 # Build-only check for the docs/ MkDocs source. Strict mode turns broken
 # links and nav entries into build failures. This no longer deploys to
-# GitHub Pages (ADR-101): itsthelore.github.io/rac-core/ is now served by
+# GitHub Pages (ADR-101): itsthelore.github.io/asdecided-core/ is now served by
 # the itsthelore/itsthelore.github.io umbrella site, which vendors docs/ at
 # build time. Once that repo's site is live, disable Pages on this repo
 # (Settings -> Pages -> Source) so its own project-page deployment stops

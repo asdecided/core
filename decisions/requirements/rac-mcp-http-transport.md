@@ -12,7 +12,7 @@ Accepted
 Classification: `[internal]` — one always-current endpoint for the whole
 team. Initiative 1 of the `lore-at-team-scale` roadmap: an HTTP transport
 for `rac mcp`, shipped under its own serving ADR. Delivered
-(itsthelore/rac-core#263): `rac mcp --transport http` serves the five tools
+(itsthelore/asdecided-core#263): `rac mcp --transport http` serves the five tools
 statelessly over streamable HTTP, payload-identical to stdio, mandatory
 audit-on, with authentication delegated to the deployment proxy — under
 ADR-098, which resolves the ADR-091 stdio-only premise against ADR-080's

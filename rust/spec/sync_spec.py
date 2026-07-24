@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Cross-repo sync gate for the shared artifact-spec registry (ADR-063 Guard 1).
 
-The registry's source of truth is the upstream `itsthelore/rac-spec`
+The registry's source of truth is the upstream `itsthelore/asdecided-spec`
 (`schema/artifact-specs.json`); rac-core vendors it into
 `rust/rac-engine/assets/spec/artifact-specs.json`, which the native engine embeds.
 This gate proves the vendored copy has not drifted from the upstream: it
@@ -11,12 +11,12 @@ differs by design between the upstream (source) and the vendored (copy) roles,
 so it is not compared.
 
 The upstream location is given by the DECIDED_SPEC_DIR environment variable (a path
-to a rac-spec checkout). When it is unset, the gate skips with exit 0 — until
-rac-spec is wired into CI there is nothing to compare against, and the in-repo
+to a asdecided-spec checkout). When it is unset, the gate skips with exit 0 — until
+asdecided-spec is wired into CI there is nothing to compare against, and the in-repo
 native contract tests still prove the embedded registry is valid.
 
 Usage:
-    DECIDED_SPEC_DIR=/path/to/rac-spec python rust/spec/sync_spec.py
+    DECIDED_SPEC_DIR=/path/to/asdecided-spec python rust/spec/sync_spec.py
 Exit 0 = in sync (or skipped); 1 = drift; 2 = setup error.
 """
 

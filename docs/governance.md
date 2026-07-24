@@ -10,9 +10,9 @@ The policy is governed, not hardcoded. A repository declares which finding
 classes block the gate in its committed `.decided/config.yaml`, so the same policy
 travels with the corpus and applies identically in the editor and in CI. The
 decisions behind this are
-[ADR-049](https://github.com/itsthelore/rac-core/blob/main/decisions/decisions/adr-049-enforcement-is-the-product.md)
+[ADR-049](https://github.com/itsthelore/asdecided-core/blob/main/decisions/decisions/adr-049-enforcement-is-the-product.md)
 (enforcement is the product) and
-[ADR-063](https://github.com/itsthelore/rac-core/blob/main/decisions/decisions/adr-063-non-python-clients-are-thin.md)
+[ADR-063](https://github.com/itsthelore/asdecided-core/blob/main/decisions/decisions/adr-063-non-python-clients-are-thin.md)
 (policy lives in the corpus, not in any consumer).
 
 ## Running the gate
@@ -134,7 +134,7 @@ data in `.decided/config.yaml`, a team can standardise it across a fleet:
 - **Adopt warnings-first, then ratchet.** A new team can start with broad
   `advisory`/`off` entries to get the gate green on a legacy corpus, then move
   codes back to `blocking` one at a time as the corpus is cleaned up — the same
-  ratchet the severity overrides ([ADR-053](https://github.com/itsthelore/rac-core/blob/main/decisions/decisions/adr-053-validation-severity-overrides.md))
+  ratchet the severity overrides ([ADR-053](https://github.com/itsthelore/asdecided-core/blob/main/decisions/decisions/adr-053-validation-severity-overrides.md))
   offer for `decided validate`, now spanning the whole gate.
 
 Because the same file governs both the editor and the PR action, a fleet-wide
@@ -146,7 +146,7 @@ AI coding agents are the place a settled decision is most likely to be quietly
 re-litigated, because the agent never sees the corpus. RAC integrates with agents
 through two deterministic, engine-owned channels and enforces with structural
 validation — **not** a semantic verdict and **not** a cross-platform interceptor
-([ADR-067](https://github.com/itsthelore/rac-core/blob/main/decisions/decisions/adr-067-agent-integration-boundary.md)):
+([ADR-067](https://github.com/itsthelore/asdecided-core/blob/main/decisions/decisions/adr-067-agent-integration-boundary.md)):
 
 - **Context supply.** `decided export --agent-rules` generates committed,
   drift-guarded rules files (`CLAUDE.md`, `AGENTS.md`, `.cursor/rules`,
@@ -179,7 +179,7 @@ not itself the interceptor. The generated hook:
 
 It is **opt-in and Claude-Code-specific**. All validation stays in `rac` — the
 hook computes nothing
-([ADR-063](https://github.com/itsthelore/rac-core/blob/main/decisions/decisions/adr-063-non-python-clients-are-thin.md)).
+([ADR-063](https://github.com/itsthelore/asdecided-core/blob/main/decisions/decisions/adr-063-non-python-clients-are-thin.md)).
 Disabling it (**"RAC: Disable Claude Code pre-edit hook"**, or deleting the
 registration) falls back cleanly to the post-edit diagnostics above. RAC makes no
 claim of intercepting Copilot inline suggestions or Cursor agent edits — no

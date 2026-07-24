@@ -5,7 +5,7 @@ by every engineer's agent — including in repositories that have no corpus of
 their own. This page is the recipe for standing that up on surfaces that
 already ship: an ordinary corpus, the [shared server](shared-server.md), and
 one line of client wiring
-([ADR-117](https://github.com/itsthelore/rac-core/blob/main/decisions/decisions/adr-117-org-grounding-plane-topology.md)).
+([ADR-117](https://github.com/itsthelore/asdecided-core/blob/main/decisions/decisions/adr-117-org-grounding-plane-topology.md)).
 
 It is a deployment topology, not a new engine capability: no cross-corpus
 resolution, no federation semantics, no authentication code. Those boundaries
@@ -19,7 +19,7 @@ agents most need — platform standards, golden paths, firm-wide ADRs — are
 org-wide. A per-repository corpus gives those decisions a reach of one.
 
 Corpus federation
-([ADR-089](https://github.com/itsthelore/rac-core/blob/main/decisions/decisions/adr-089-corpus-federation.md))
+([ADR-089](https://github.com/itsthelore/asdecided-core/blob/main/decisions/decisions/adr-089-corpus-federation.md))
 is the eventual mechanism, and it is deliberately paced. The org grounding
 plane is the day-1 answer: put the firm-wide knowledge in **one** corpus,
 serve it from **one** endpoint, and point **every** agent at it. Rollout cost
@@ -126,7 +126,7 @@ working: grounding at the agent, accountability at the endpoint.
   identity, or precedence: a repository's artifacts cannot yet cite an org
   ADR as a validated relationship, and duplicate ids across the two corpora
   are not detected. Those semantics arrive with the
-  [federation programme](https://github.com/itsthelore/rac-core/blob/main/decisions/roadmaps/corpus-federation.md),
+  [federation programme](https://github.com/itsthelore/asdecided-core/blob/main/decisions/roadmaps/corpus-federation.md),
   under its recorded constraints.
 - **Endpoint reach is corpus visibility.** Anyone the proxy admits can read
   the whole org corpus. Partition sensitive knowledge by corpus topology —
@@ -142,6 +142,6 @@ When the ADR-089 mechanism ships, the org corpus you stood up here becomes
 the pinned, materialised **parent**: references resolve across the boundary,
 collisions surface as findings, overrides become explicit and attributable,
 and the enterprise profile gains its parent declaration
-([ADR-088](https://github.com/itsthelore/rac-core/blob/main/decisions/decisions/adr-088-enterprise-profile-scaffold.md)).
+([ADR-088](https://github.com/itsthelore/asdecided-core/blob/main/decisions/decisions/adr-088-enterprise-profile-scaffold.md)).
 Nothing about this topology needs to be undone — starting here is starting
 early, not starting over.

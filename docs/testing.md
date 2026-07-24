@@ -1,6 +1,6 @@
 # Testing
 
-`rac-core` is a native Rust workspace. The former Python engine and its pytest
+`asdecided-core` is a native Rust workspace. The former Python engine and its pytest
 suite are archived at the `python-engine-final` tag and do not run in normal CI.
 
 ## Native checks
@@ -14,12 +14,12 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 The committed Rust fixtures cover deterministic command behavior. Contract
 compatibility is certified against the language-neutral fixtures in
-[`rac-spec`](https://github.com/itsthelore/rac-spec):
+[`asdecided-spec`](https://github.com/itsthelore/asdecided-spec):
 
 ```bash
-DECIDED_SPEC_DIR=/path/to/rac-spec python rust/spec/sync_spec.py
+DECIDED_SPEC_DIR=/path/to/asdecided-spec python rust/spec/sync_spec.py
 python rust/tools/conformance_certify.py \
-  --spec-dir /path/to/rac-spec \
+  --spec-dir /path/to/asdecided-spec \
   --engine "rust=$PWD/rust/target/release/decided"
 ```
 

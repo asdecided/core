@@ -107,7 +107,7 @@ authoritative single-process path and discards partial results whole.
 
 Concrete latency and throughput figures — the before/after scale curve across a
 1k → millions-of-artifacts corpus on a fixed reference node — live in the
-[`rac-benchmarks`](https://github.com/itsthelore/rac-benchmarks) harness, which
+[`rac-benchmarks`](https://github.com/itsthelore/asdecided-benchmarks) harness, which
 consumes `rac` strictly as an external CLI so the numbers survive engine
 rebuilds. The design target is a **flat** warm-retrieval curve as the corpus
 grows and a cold build that scales linearly and parallel; the harness reports
@@ -117,9 +117,9 @@ levers here are single-node.
 
 ## Related decisions
 
-- [ADR-104](https://github.com/itsthelore/rac-core/blob/main/decisions/decisions/adr-104-persistent-mmap-index-store.md) — persistent memory-mapped index store
-- [ADR-105](https://github.com/itsthelore/rac-core/blob/main/decisions/decisions/adr-105-event-sourced-serving-freshness.md) — event-sourced serving freshness
-- [ADR-106](https://github.com/itsthelore/rac-core/blob/main/decisions/decisions/adr-106-incremental-validation.md) — incremental directory validation
-- [ADR-107](https://github.com/itsthelore/rac-core/blob/main/decisions/decisions/adr-107-parallel-cold-build.md) — parallel cold build
-- [ADR-108](https://github.com/itsthelore/rac-core/blob/main/decisions/decisions/adr-108-term-range-partitioned-parallel-merge.md) — term-range-partitioned parallel merge
-- [ADR-110](https://github.com/itsthelore/rac-core/blob/main/decisions/decisions/adr-110-one-shot-find-store-reuse.md) — one-shot `decided find` store reuse
+- [ADR-104](https://github.com/itsthelore/asdecided-core/blob/main/decisions/decisions/adr-104-persistent-mmap-index-store.md) — persistent memory-mapped index store
+- [ADR-105](https://github.com/itsthelore/asdecided-core/blob/main/decisions/decisions/adr-105-event-sourced-serving-freshness.md) — event-sourced serving freshness
+- [ADR-106](https://github.com/itsthelore/asdecided-core/blob/main/decisions/decisions/adr-106-incremental-validation.md) — incremental directory validation
+- [ADR-107](https://github.com/itsthelore/asdecided-core/blob/main/decisions/decisions/adr-107-parallel-cold-build.md) — parallel cold build
+- [ADR-108](https://github.com/itsthelore/asdecided-core/blob/main/decisions/decisions/adr-108-term-range-partitioned-parallel-merge.md) — term-range-partitioned parallel merge
+- [ADR-110](https://github.com/itsthelore/asdecided-core/blob/main/decisions/decisions/adr-110-one-shot-find-store-reuse.md) — one-shot `decided find` store reuse

@@ -10,7 +10,7 @@ This guide is the authoring contract for those recipes. The shapes recur — the
 `lore` invocation in three config dialects, the same push/pull/enforcement README
 structure, the same "verify with the grounding demo" close — so a new recipe is
 filling a template, not reverse-engineering an existing one. Every recipe adds
-**zero `rac-core` engine diff**: it consumes only the two stable surfaces (the
+**zero `asdecided-core` engine diff**: it consumes only the two stable surfaces (the
 export and the MCP server) as additive contracts (ADR-007, ADR-008, ADR-063), and
 stores and serves nothing new (ADR-024).
 
@@ -94,7 +94,7 @@ every other recipe points readers there rather than describing a hook of its own
 - [ ] Section 3 is the fixed ADR-067 paragraph, client name swapped, nothing else
       changed — no pre-edit hook described.
 - [ ] The "Verify it" close points at [`examples/guide/`](../examples/guide/demo.md).
-- [ ] The recipe adds **no** `rac-core` source diff (documentation only).
+- [ ] The recipe adds **no** `asdecided-core` source diff (documentation only).
 - [ ] The recipe carries the `verify against <client> <version>` marker and is
       **not** yet added to `docs/ecosystem.md` (see the verification gate below).
 
@@ -108,7 +108,7 @@ reader can trust every harness [`docs/ecosystem.md`](ecosystem.md) lists.
   `verify against <client> <version>` marker (the convention already used in
   [`docs/mcp.md`](mcp.md)) and **stays off** the `docs/ecosystem.md` table. It is
   useful documentation; it makes no verified-integration claim.
-- **Verified.** Smoke-test the recipe against a **released** `rac-core` version by
+- **Verified.** Smoke-test the recipe against a **released** `asdecided-core` version by
   running the grounding demo ([`examples/guide/`](../examples/guide/demo.md)) with
   the harness connected over the recipe's config — the same engine behaviour every
   recipe is proven against. Only then remove the marker and add a

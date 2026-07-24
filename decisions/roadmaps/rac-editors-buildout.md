@@ -31,7 +31,7 @@ rewriting it.
 ## Outcomes
 
 - The extension source lives, builds, and tests in `rac-editors/vscode/`,
-  consuming the published `@itsthelore/rac-sdk` — a thin client over the
+  consuming the published `@itsthelore/asdecided-sdk` — a thin client over the
   contract, never engine internals (ADR-063).
 - rac-editors has a merge-gated CI battery (ADR-027, ADR-075) and a
   tag-triggered release pipeline in which publishing is the last step,
@@ -48,7 +48,7 @@ rewriting it.
 Snapshot-import `typescript/rac-vscode` from rac-core `eed463e^` into
 `rac-editors/vscode/`, recording the source SHA in the commit body rather than
 replaying engine-scoped history onto the family trunk. Repoint the SDK
-dependency from `file:../rac-sdk` to the published `@itsthelore/rac-sdk`
+dependency from `file:../rac-sdk` to the published `@itsthelore/asdecided-sdk`
 (finishing the v0.22.5 repoint contract, which the removed tree never
 received). Prove the result: typecheck, test battery, and a packaged VSIX.
 
@@ -92,7 +92,7 @@ once the publisher decision lands, and the first publish waits for it.
 
 ## Assumptions
 
-- `@itsthelore/rac-sdk` is published on npm (verified: 0.1.0) and exposes the
+- `@itsthelore/asdecided-sdk` is published on npm (verified: 0.1.0) and exposes the
   API surface the extension consumes; if not, the fix is a new SDK release via
   the v0.22.3 flow, never vendored SDK code (ADR-063).
 - The Explorer webview keeps consuming `rac export --html` output at runtime
@@ -137,4 +137,4 @@ once the publisher decision lands, and the first publish waits for it.
 
 ## Related Tickets
 
-- itsthelore/rac-editors#2
+- itsthelore/asdecided-editors#2

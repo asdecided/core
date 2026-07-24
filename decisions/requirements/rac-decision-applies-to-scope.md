@@ -10,12 +10,12 @@ type: requirement
 Accepted
 
 Delivered as Initiative 1 of the `decision-to-code-proximity` roadmap
-(itsthelore/rac-core#274): the optional `## Applies To` section on decisions,
+(itsthelore/asdecided-core#274): the optional `## Applies To` section on decisions,
 with path entries existence-checked by `rac relationships --validate` and the
 scope surfaced as a filesystem-scoped edge via `get_related`. This also closes
-the decision-scope box on the traceability epic (itsthelore/rac-core#236). The
+the decision-scope box on the traceability epic (itsthelore/asdecided-core#236). The
 path→decisions lookup that queries this vocabulary is a separate requirement
-(`rac-path-decisions-lookup`, itsthelore/rac-core#275).
+(`rac-path-decisions-lookup`, itsthelore/asdecided-core#275).
 
 ## Problem
 

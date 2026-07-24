@@ -9,7 +9,7 @@ type: roadmap
 
 Achieved
 
-Delivered across all four initiatives (epic itsthelore/rac-core#262). `rac mcp`
+Delivered across all four initiatives (epic itsthelore/asdecided-core#262). `rac mcp`
 gained a streamable HTTP transport so a team points every agent at one
 always-current `main`-backed endpoint (#263, under the serving decision ADR-098);
 an opt-in, content-addressed derived-index cache keeps per-call latency flat as
@@ -224,4 +224,4 @@ engine.
 
 ## Related Tickets
 
-- itsthelore/rac-core#262
+- itsthelore/asdecided-core#262

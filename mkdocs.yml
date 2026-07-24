@@ -2,9 +2,9 @@ site_name: AsDecided
 site_description: >-
   Give your coding agent the decisions your team already made — typed
   Markdown artifacts in your repo, served over MCP.
-site_url: https://itsthelore.github.io/rac-core/
-repo_url: https://github.com/itsthelore/rac-core
-repo_name: itsthelore/rac-core
+site_url: https://itsthelore.github.io/asdecided-core/
+repo_url: https://github.com/itsthelore/asdecided-core
+repo_name: itsthelore/asdecided-core
 
 theme:
   name: material

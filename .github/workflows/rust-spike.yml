@@ -1,4 +1,4 @@
-# Native Rust CI. Contract bytes are owned by rac-spec; the evolving RAC
+# Native Rust CI. Contract bytes are owned by asdecided-spec; the evolving RAC
 # repository corpus is exercised through invariants rather than snapshots.
 
 name: rust-spike
@@ -71,21 +71,21 @@ jobs:
         working-directory: rust
         run: cargo clippy --release --no-deps -- -D warnings
 
-      - name: Checkout authoritative rac-spec fixtures
+      - name: Checkout authoritative asdecided-spec fixtures
         uses: actions/checkout@v4
         with:
-          repository: itsthelore/rac-spec
-          path: rac-spec
+          repository: itsthelore/asdecided-spec
+          path: asdecided-spec
 
-      - name: Guard 1 — vendored registry matches rac-spec
+      - name: Guard 1 — vendored registry matches asdecided-spec
         env:
-          DECIDED_SPEC_DIR: ${{ github.workspace }}/rac-spec
+          DECIDED_SPEC_DIR: ${{ github.workspace }}/asdecided-spec
         run: python rust/spec/sync_spec.py
 
-      - name: Guard 2 — Rust reproduces rac-spec contract bytes
+      - name: Guard 2 — Rust reproduces asdecided-spec contract bytes
         run: |
           python rust/tools/conformance_certify.py \
-            --spec-dir "${{ github.workspace }}/rac-spec" \
+            --spec-dir "${{ github.workspace }}/asdecided-spec" \
             --engine "rust=${{ github.workspace }}/rust/target/release/decided"
 
       - name: Live RAC corpus invariants

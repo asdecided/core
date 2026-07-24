@@ -6,7 +6,7 @@
       "tool": {
         "driver": {
           "name": "rac",
-          "informationUri": "https://github.com/itsthelore/rac-core",
+          "informationUri": "https://github.com/itsthelore/asdecided-core",
           "version": "0.15.2",
           "rules": [
             {

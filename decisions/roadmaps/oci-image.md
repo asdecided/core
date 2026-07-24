@@ -11,7 +11,7 @@ Achieved
 
 Delivered as recorded (ADR-061 terminal lifecycle): the root `Dockerfile`
 installs the released `rac-core` on a minimal Python base with `rac` as the
-entrypoint, and the official image publishes to `ghcr.io/itsthelore/rac`,
+entrypoint, and the official image publishes to `ghcr.io/itsthelore/asdecided-core`,
 CalVer- and digest-pinned in the quickstart with GitLab CI, Bitbucket, and
 Jenkins usage snippets — matching this item's recorded scope. A member of the
 `agnostic-surfaces` programme, Track 1 (distribution and CI reach), named by
@@ -40,7 +40,7 @@ consume the image rather than re-solving installation.
 - Add a publish workflow that builds and pushes the image on the same
   release tags as the PyPI publish, tagging both the CalVer version and
   `latest`, to an official registry home (for example
-  `ghcr.io/itsthelore/rac`; final home decided at pickup).
+  `ghcr.io/itsthelore/asdecided-core`; final home decided at pickup).
 - Document the image on the install page: pull, pin-by-digest, and
   usage snippets for GitLab CI, Bitbucket Pipelines, and Jenkins docker
   agents running `rac validate` / `rac gate`.
@@ -96,4 +96,4 @@ consume the image rather than re-solving installation.
 
 ## Related Tickets
 
-- itsthelore/rac-core#280
+- itsthelore/asdecided-core#280

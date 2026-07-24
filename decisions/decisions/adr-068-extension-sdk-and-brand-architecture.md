@@ -82,7 +82,7 @@ ADR-039): PyPI `requirements-as-code`, CLI `rac`, import `rac`, server `lore`.
 | --- | --- | --- |
 | `rac-core` | The engine `src/rac/` (incl. the Python SDK surface, ADR-062), the dogfood corpus `rac/`, `examples/`, and the vendored viewer dir `rac-localview/` | The engine and its build-coupled internals. PyPI name stays `requirements-as-code` (ADR-036). |
 | `rac-localview` | The local Portal / graph viewer, vendored into the engine via a build script + drift-guard | Build-coupled internal of the engine; not separately installed while vendored. |
-| `rac-sdk-ts` | The TypeScript client `@rac/sdk`, published to npm as `@itsthelore/rac-sdk` | A typed client mirroring the engine contract (ADR-063). |
+| `rac-sdk-ts` | The TypeScript client `@rac/sdk`, published to npm as `@itsthelore/asdecided-sdk` | A typed client mirroring the engine contract (ADR-063). |
 | `lore-vscode` | The VS Code extension — one VSIX to Marketplace + OpenVSX; runs in VS Code and, as a fork, Cursor | A surface a user installs (the first per-client repo). |
 | `lore-watchkeeper` | The Watchkeeper action (root `action.yml`) | A surface a team installs into CI. |
 | `lore-gatekeeper` | The gate action = `pr-gate-action` (`rac gate`); the older `validate-action` is folded in / deprecated by it (ADR-058 moves with the gate) | A surface a team installs into CI; the real enforcement gate (ADR-049). |
@@ -98,7 +98,7 @@ per-client repositories.
 ### Per-client integration repositories
 
 Each client integration is **its own `lore-<client>` repository**, consuming the
-published `@itsthelore/rac-sdk` — never engine internals (ADR-063). One repo per
+published `@itsthelore/asdecided-sdk` — never engine internals (ADR-063). One repo per
 client is the model; a single `lore-extensions` container is rejected (it fights
 independent per-client cadence and ownership). Today there is exactly one:
 `lore-vscode`. Planned siblings — created when each is built, and **not part of

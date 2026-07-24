@@ -14,7 +14,7 @@ FROM debian:bookworm-slim
 ARG DECIDED_VERSION=dev
 LABEL org.opencontainers.image.title="rac" \
       org.opencontainers.image.description="RAC (Lore) requirements-as-code CLI" \
-      org.opencontainers.image.source="https://github.com/itsthelore/rac-core" \
+      org.opencontainers.image.source="https://github.com/itsthelore/asdecided-core" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.version="${DECIDED_VERSION}"
 

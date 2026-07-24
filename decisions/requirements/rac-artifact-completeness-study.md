@@ -12,7 +12,7 @@ Proposed
 Classification: `[internal]` — the testable contract for
 **SWE-CompletenessBench**. Initiative 2 of the
 `artifact-completeness-benchmark` roadmap; the harness executes in
-`itsthelore/rac-benchmarks` (ADR-092), never in `rac-core`. Referenced in
+`itsthelore/asdecided-benchmarks` (ADR-092), never in `rac-core`. Referenced in
 prose because there is no relationship type for an external-repository
 artifact.
 

@@ -18,7 +18,7 @@ recorded here.
 
 ## Outcomes
 
-- `@itsthelore/rac-sdk` publishes 1.0: a stated stable surface with a
+- `@itsthelore/asdecided-sdk` publishes 1.0: a stated stable surface with a
   semver policy, so consumers (the VS Code extension first) can depend
   on it without tracking pre-1.0 churn.
 - The documented API and the actual client surface are the same thing:

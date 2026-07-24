@@ -27,8 +27,8 @@ GitHub→other-platform work is in the thin wrappers, not the engine.
 
 ## Outcomes
 
-- A single `itsthelore/rac-ci` repository holds every CI wrapper, a subdir per
-  capability, consumed as `uses: itsthelore/rac-ci/<capability>@<ref>`.
+- A single `itsthelore/asdecided-ci` repository holds every CI wrapper, a subdir per
+  capability, consumed as `uses: itsthelore/asdecided-ci/<capability>@<ref>`.
 - `rac-actions`, `lore-watchkeeper`, and `lore-gatekeeper` are consolidated into
   it and archived; the in-repo `action.yml`, `pr-gate-action/`, and
   `validate-action/` sources are removed from `rac-core` once `rac-ci` carries
@@ -51,7 +51,7 @@ GitHub→other-platform work is in the thin wrappers, not the engine.
 
 ## Success Measures
 
-- `itsthelore/rac-ci` exists with the capability subdirs and a pinnable suite
+- `itsthelore/asdecided-ci` exists with the capability subdirs and a pinnable suite
   tag; the three predecessor action repos are archived with redirects.
 - No consumer reference traces to an in-repo action path or a `lore-*` action
   repo; `rac-core`'s dogfood CI is green against the new locations.
@@ -63,7 +63,7 @@ GitHub→other-platform work is in the thin wrappers, not the engine.
 - The actions consume only the public `rac` CLI, never engine internals, so they
   run from any repo once published.
 - Coupled suite version tags (one `rac-ci` version) and consumption via
-  `uses: itsthelore/rac-ci/<capability>@<ref>` rather than per-action
+  `uses: itsthelore/asdecided-ci/<capability>@<ref>` rather than per-action
   Marketplace listings are acceptable (ADR-092).
 - The maintainer can create `rac-ci` and archive the predecessor repos.
 

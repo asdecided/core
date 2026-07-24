@@ -33,6 +33,6 @@ cargo test --workspace --release
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-CI also runs contract certification against `rac-spec` and live-corpus
+CI also runs contract certification against `asdecided-spec` and live-corpus
 invariants. This is a self-attested open-source security posture, not a
 third-party certification.

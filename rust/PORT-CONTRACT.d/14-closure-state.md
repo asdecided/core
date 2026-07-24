@@ -68,7 +68,7 @@ mcp-stats' summary (§2.2), path included.
   {schema_version,total,sessions,commands[],recent{}}, guide:
   <full guide to_dict>}`. The guide dict is always full (never `{}`),
   including nulls for `first_ts`/`last_ts` when empty.
-- SHARE: one line, `https://github.com/itsthelore/rac-core/issues/new?
+- SHARE: one line, `https://github.com/itsthelore/asdecided-core/issues/new?
   template=guide-usage-report.yml&report=<quote_plus(combined JSON)>`.
   The report INCLUDES `guide.path` — usage does not strip the path;
   mcp-stats does (§2.3). Do not copy the strip across.

@@ -121,4 +121,4 @@ candidates and a tracked tier:
 
 ## Related Tickets
 
-- itsthelore/rac-benchmarks#10
+- itsthelore/asdecided-benchmarks#10

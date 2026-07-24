@@ -141,4 +141,4 @@ between "documented" and "verified" explicit.
 
 ## Related Tickets
 
-- itsthelore/rac-core#248
+- itsthelore/asdecided-core#248

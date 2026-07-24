@@ -5,7 +5,7 @@
 # severity policy live in the package (ADR-015 / ADR-053); the action never
 # reinterprets findings. The Watchkeeper action lives at the repository root;
 # this validate action is referenced as
-# `uses: itsthelore/rac-core/validate-action@<ref>`.
+# `uses: itsthelore/asdecided-core/validate-action@<ref>`.
 name: "AsDecided validate"
 description: >-
   Validate an AsDecided corpus and surface findings on the pull request via

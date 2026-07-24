@@ -314,7 +314,7 @@ trailing `\n`. Document shape:
     {
       "tool": { "driver": {
         "name": "rac",
-        "informationUri": "https://github.com/itsthelore/rac-core",
+        "informationUri": "https://github.com/itsthelore/asdecided-core",
         "version": <rac.__version__>,
         "rules": [ {"id": <code>}, ... ]
       }},

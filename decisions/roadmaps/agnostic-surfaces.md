@@ -48,7 +48,7 @@ graduates to execution with a GitHub issue per ADR-093.
 - Track 1 — Distribution and CI reach:
   - Official OCI image (`oci-image`): one published image bundling the
     CLI; the single artifact that unlocks every docker-native CI
-    platform with zero wrapper code. Shipped (`ghcr.io/itsthelore/rac`,
+    platform with zero wrapper code. Shipped (`ghcr.io/itsthelore/asdecided-core`,
     quickstart-documented); its artifact is now Achieved and lives
     top-level, no longer under `future/`.
   - CI report formats (`ci-report-formats`): GitLab code-quality JSON
@@ -146,4 +146,4 @@ graduates to execution with a GitHub issue per ADR-093.
 
 ## Related Tickets
 
-- itsthelore/rac-core#280
+- itsthelore/asdecided-core#280

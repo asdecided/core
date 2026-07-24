@@ -14,7 +14,7 @@ observability lives. It assumes you have read the [MCP Server](mcp.md) page.
 Everything here is deployment wrapper — containers, proxies, collectors — around
 an unchanged engine. AsDecided gains no hosted service, no database, and no
 authentication code; git stays the source of truth
-([ADR-080](https://github.com/itsthelore/rac-core/blob/main/decisions/decisions/adr-080-single-source-of-truth-git-not-database.md)).
+([ADR-080](https://github.com/itsthelore/asdecided-core/blob/main/decisions/decisions/adr-080-single-source-of-truth-git-not-database.md)).
 
 ## 1. Do you need it?
 
@@ -61,7 +61,7 @@ as an explicit affirmation.
 
 ```bash
 docker run --rm --entrypoint decided-mcp -p 8000:8000 -v "$PWD:/corpus:ro" \
-  ghcr.io/itsthelore/rac:latest \
+  ghcr.io/itsthelore/asdecided-core:latest \
   --root /corpus --transport http \
   --host 0.0.0.0 --port 8000
 ```
@@ -84,11 +84,11 @@ internet.
 ## 4. The authenticating proxy
 
 The engine does not authenticate — by design
-([ADR-085](https://github.com/itsthelore/rac-core/blob/main/decisions/decisions/adr-085-enterprise-configuration-not-mode.md)).
+([ADR-085](https://github.com/itsthelore/asdecided-core/blob/main/decisions/decisions/adr-085-enterprise-configuration-not-mode.md)).
 Put a reverse proxy in front to terminate TLS, authenticate the caller, and
 assert the caller's identity to the audit log via the **`X-AsDecided-Principal`**
 header. The engine records that header as the per-request principal
-([ADR-098](https://github.com/itsthelore/rac-core/blob/main/decisions/decisions/adr-098-shared-http-mcp-serving.md)).
+([ADR-098](https://github.com/itsthelore/asdecided-core/blob/main/decisions/decisions/adr-098-shared-http-mcp-serving.md)).
 
 ```nginx
 location /mcp {
@@ -136,15 +136,15 @@ container: knowledge changes only by pull from `main`, never by the server.
 ## 6. Observability, and the engine boundary
 
 Observability for the shared server lives in the **wrapper**, not the engine
-([ADR-091](https://github.com/itsthelore/rac-core/blob/main/decisions/decisions/adr-091-engine-observability-boundary.md)):
+([ADR-091](https://github.com/itsthelore/asdecided-core/blob/main/decisions/decisions/adr-091-engine-observability-boundary.md)):
 
 - **Engine diagnostics go to stderr.** `decided-mcp` writes startup and operational
   notices to stderr (stdout is the protocol channel). Collect the container's
   stderr with your normal log pipeline.
 - **The audit log is your read-access record.** It is a local JSONL file by
   design; shipping it to Loki, S3, or Elastic is a collector's job, never the
-  engine's ([ADR-084](https://github.com/itsthelore/rac-core/blob/main/decisions/decisions/adr-084-read-access-audit-recorder.md),
-  [ADR-073](https://github.com/itsthelore/rac-core/blob/main/decisions/decisions/adr-073-backend-connectors-consolidate.md)).
+  engine's ([ADR-084](https://github.com/itsthelore/asdecided-core/blob/main/decisions/decisions/adr-084-read-access-audit-recorder.md),
+  [ADR-073](https://github.com/itsthelore/asdecided-core/blob/main/decisions/decisions/adr-073-backend-connectors-consolidate.md)).
   Tail the audit volume with a sidecar and forward it.
 - **A metrics scrape endpoint belongs to the wrapper, not the engine.** The
   engine ships no Prometheus `/metrics` surface. If you need scrape metrics,
@@ -165,7 +165,7 @@ stand (ADR-085):
 - **No database or hosted multi-tenant service.** Git `main` is the single
   source of truth; the server is one reader of it (ADR-080).
 - **No write path.** Knowledge changes only by pull request to `main` behind
-  human review ([ADR-065](https://github.com/itsthelore/rac-core/blob/main/decisions/decisions/adr-065-artifact-content-untrusted.md));
+  human review ([ADR-065](https://github.com/itsthelore/asdecided-core/blob/main/decisions/decisions/adr-065-artifact-content-untrusted.md));
   no transport exposes a write.
 
 These are not limitations to work around — they are the properties that let one

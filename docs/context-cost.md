@@ -24,7 +24,7 @@ schemas a client loads every session — is measured deterministically and offli
 measures ~915 tokens against a 1000 budget — roughly 25× under the ~23k figure the
 context-tax critique cited. A description or schema edit that inflates the surface
 fails CI rather than quietly taxing every session (see the
-[`decided-mcp-surface-budget`](https://github.com/itsthelore/rac-core/blob/main/decisions/requirements/decided-mcp-surface-budget.md)
+[`decided-mcp-surface-budget`](https://github.com/itsthelore/asdecided-core/blob/main/decisions/requirements/decided-mcp-surface-budget.md)
 requirement and `decisions/mcp/surface.py`).
 
 ## 2. Retrieval is selective and on-demand by default

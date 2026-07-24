@@ -46,7 +46,7 @@ traversal, and incremental recompute.
 ## Initiatives
 
 - Baseline and before-evidence: a deterministic scale-corpus generator and a
-  rerunnable performance harness in `itsthelore/rac-benchmarks`
+  rerunnable performance harness in `itsthelore/asdecided-benchmarks`
   (`scalecorpus/`), measuring the legacy engine across a 1k → 3M curve.
 - Examiner hardening: characterization tests for unpinned behavior and a
   performance gate asserting the scale target, both human-approved before

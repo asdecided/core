@@ -20,7 +20,7 @@ ADR-081; it does not alter it.
 
 Initiative 1 is complete: the `decision-grounding-thesis` design is Accepted
 with its open questions resolved. Initiative 2 is run-ready in
-`itsthelore/rac-benchmarks`: the paired-significance statistics, the
+`itsthelore/asdecided-benchmarks`: the paired-significance statistics, the
 GitChameleon executable co-primary pipeline, the 49-scenario study-grade
 roster, and the frozen analysis-plan amendment are landed; only the funded
 model runs remain (the refreshed funded-run handoff covers both co-primary
@@ -166,4 +166,4 @@ call at pickup.
 
 ## Related Tickets
 
-- itsthelore/rac-core#293
+- itsthelore/asdecided-core#293

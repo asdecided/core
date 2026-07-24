@@ -15,7 +15,7 @@ measures how completely a recorded corpus specifies a system: an external
 agent reconstructs a target component from its Lore artifacts alone, and the
 *residual* — the fraction that cannot be recovered from the record — is the
 reported result. Sibling to SWE-DecisionBench (`decisiongrounding`); the
-harness executes in `itsthelore/rac-benchmarks` (ADR-092), never in
+harness executes in `itsthelore/asdecided-benchmarks` (ADR-092), never in
 `rac-core`. Framed as a completeness diagnostic, not a reconstruction
 scoreboard, so it stays clear of the spec-as-source line the corpus refuses
 (ADR-081: "Lore is not an SDD/codegen tool").
@@ -156,4 +156,4 @@ honestly whichever way it falls.
 
 ## Related Tickets
 
-- itsthelore/rac-core#299
+- itsthelore/asdecided-core#299

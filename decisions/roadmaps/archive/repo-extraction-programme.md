@@ -24,7 +24,7 @@ Planned
 
 ADR-064 records the decision to adopt a small multi-repo topology under the
 `itsthelore` organisation: extract the standalone components and keep the
-engine, its shipped resources, and its governing corpus in `itsthelore/rac-core`
+engine, its shipped resources, and its governing corpus in `itsthelore/asdecided-core`
 (the renamed `requirements-as-code` repository). ADR-068 extends that topology
 for the surfaces that post-date ADR-064 — the editor extension and the
 TypeScript SDK — and sharpens the Actions picture. This programme sequences the
@@ -86,8 +86,8 @@ leave a deprecation note for the old paths, and repoint this repository's own
 
 The surfaces that post-date ADR-064. The TypeScript SDK (`@rac/sdk`) is a typed
 thin client over the engine contract (ADR-063), so it takes the `rac-*` prefix
-and moves to `itsthelore/rac-sdk-ts`, **published to npm** as
-`@itsthelore/rac-sdk`. The VS Code / Cursor extension is a surface a user
+and moves to `itsthelore/asdecided-sdk-ts`, **published to npm** as
+`@itsthelore/asdecided-sdk`. The VS Code / Cursor extension is a surface a user
 installs, so it takes the `lore-*` prefix and moves to
 `itsthelore/lore-vscode` (one VSIX to Marketplace + OpenVSX). Sequencing:
 publish the SDK first, then repoint the extension from `file:../rac-sdk` to the
@@ -157,9 +157,9 @@ git remote add origin <decisiongrounding-url> && git push -u origin main
 root `action.yml` into `lore-watchkeeper`. ADR-058 moves with the gatekeeper.
 Add a README documenting the new `uses:` references, tag each `v1`, and push.
 
-**Seed the TypeScript repos** (`itsthelore/rac-sdk-ts`,
+**Seed the TypeScript repos** (`itsthelore/asdecided-sdk-ts`,
 `itsthelore/lore-vscode`) after the SDK is npm-publishable (v0.22.3): publish
-`@itsthelore/rac-sdk` from `rac-sdk-ts`, then seed `lore-vscode` and repoint
+`@itsthelore/asdecided-sdk` from `rac-sdk-ts`, then seed `lore-vscode` and repoint
 it to the published package.
 
 **Removal + rewire PRs on `rac-core`**: remove `decisiongrounding/`, the
@@ -195,7 +195,7 @@ and `pytest` passes.
 - The extracted actions consume only the public `rac` CLI, not engine
   internals, so they run from any repo once published.
 - The extracted TypeScript SDK and extension consume the published
-  `@itsthelore/rac-sdk` and the public CLI, never engine internals.
+  `@itsthelore/asdecided-sdk` and the public CLI, never engine internals.
 - `rac-localview` (the renamed `lore-web`) stays in this repository until its
   vendoring contract exists, so no Portal-shell drift-guard breaks during this
   programme.

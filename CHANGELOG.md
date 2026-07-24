@@ -6,6 +6,12 @@ details, release history over commit history.
 
 ## Unreleased
 
+- Renamed the native engine repository to `itsthelore/asdecided-core`, the
+  language-neutral contract repository to `itsthelore/asdecided-spec`, and the
+  CI delivery repository to `itsthelore/asdecided-ci`. Active documentation,
+  release metadata, CI checkouts, and OCI publication now use the canonical
+  AsDecided repository names. Stable `RAC-*` artifact IDs remain unchanged.
+
 ## v0.23.1 — 2026-07-24
 
 - Fixed native Windows compilation by using portable filesystem metadata,
@@ -25,7 +31,7 @@ published machine-schema keys remain unchanged. Rust is the normal product
 engine, Explorer is retired, and ingest leaves core as an ancillary connector.
 The Python engine, package, PyPI release path, compatibility oracle, Explorer,
 and ingest implementation have been removed from `rac-core`. Python API access
-belongs in `itsthelore/rac-sdk`; the final former engine remains available only
+belongs in `itsthelore/asdecided-sdk`; the final former engine remains available only
 at the immutable `python-engine-final` Git tag for historical review.
 
 **Decisions on pull requests — the Herald action**
@@ -37,9 +43,9 @@ a merge gate (ADR-034/067): the check never fails on findings, and on
 forks the comment degrades to the step summary. A thin client over
 `rac decisions-for --json` (ADR-063) with no engine change; the action
 ships in the CI delivery repo as
-`itsthelore/rac-ci/herald/github` beside Watchkeeper, Gatekeeper, and
+`itsthelore/asdecided-ci/herald/github` beside Watchkeeper, Gatekeeper, and
 Registrar, and is documented on the new
-[Decisions on PRs](https://itsthelore.github.io/rac-core/decisions-on-pr/)
+[Decisions on PRs](https://itsthelore.github.io/asdecided-core/decisions-on-pr/)
 page.
 
 **The org grounding plane** (ADR-117). One org-standards corpus behind the
@@ -49,7 +55,7 @@ wires a repository to it: the `lore-org` streamable-HTTP entry is ensured in
 `.mcp.json` and `.cursor/mcp.json`, on fresh **and** already-initialized
 repositories, merging into existing files (only the `lore-org` key is
 touched, nothing you wrote is removed) and writing nothing on an unchanged
-re-run. The new [Org Grounding](https://itsthelore.github.io/rac-core/org-grounding/)
+re-run. The new [Org Grounding](https://itsthelore.github.io/asdecided-core/org-grounding/)
 page is the operator runbook: the org corpus, the shared-server recipe, fleet
 wiring, boundaries, and the federation handoff (ADR-089 stays untouched — no
 cross-corpus resolution enters the engine). The `rac init --json` contract
@@ -178,7 +184,7 @@ as candidate relationships.
   shared HTTP serving blocks a call if the audit sink write fails
   (ADR-098). stdio behaviour is unchanged.
 - **Operator guide for the shared server.** A new
-  [Shared Server](https://itsthelore.github.io/rac-core/shared-server/) doc
+  [Shared Server](https://itsthelore.github.io/asdecided-core/shared-server/) doc
   covers when to run one, the container and authenticating-proxy recipe, keeping
   the checkout current with `main`, and where observability lives — the whole
   topology is deployment wrapper around an unchanged, database-free engine.
@@ -373,8 +379,8 @@ why this release now carries a `vX.Y.Z` number; compatibility stays on
 ### Changed
 
 - The TypeScript stack moved out of this repository (v0.22.5). The client SDK
-  now lives in `itsthelore/rac-sdk-ts`, published to npm as
-  `@itsthelore/rac-sdk`, and the VS Code extension in `itsthelore/lore-vscode`,
+  now lives in `itsthelore/asdecided-sdk-ts`, published to npm as
+  `@itsthelore/asdecided-sdk`, and the VS Code extension in `itsthelore/lore-vscode`,
   consuming that published package instead of the former in-repo
   `file:../rac-sdk` path. The in-repo `typescript/` directory and its CI
   (`typescript.yml`, `sdk-release.yml`, `extension-release.yml`) are removed.

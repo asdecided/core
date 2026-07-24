@@ -11,7 +11,7 @@
 #
 # The Watchkeeper action lives at the repository root and the single-command
 # validate action at `validate-action/`; this gate is referenced as
-# `uses: itsthelore/rac-core/pr-gate-action@<ref>`.
+# `uses: itsthelore/asdecided-core/pr-gate-action@<ref>`.
 name: "AsDecided PR gate"
 description: >-
   Enforce an AsDecided corpus on a pull request with a single `decided gate`

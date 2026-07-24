@@ -19,10 +19,10 @@ brew install itsthelore/tap/rac-full
 ```
 
 Native `decided` and `decided-mcp` archives are also published on
-[GitHub Releases](https://github.com/itsthelore/rac-core/releases).
+[GitHub Releases](https://github.com/itsthelore/asdecided-core/releases).
 
 `rac-core` is no longer distributed through PyPI. Python API consumers should
-use [`itsthelore/rac-sdk`](https://github.com/itsthelore/rac-sdk), which is a
+use [`itsthelore/asdecided-sdk`](https://github.com/itsthelore/asdecided-sdk), which is a
 client SDK rather than a second engine implementation.
 
 ## Start a repository
@@ -72,13 +72,13 @@ refuses to overwrite either destination.
 
 Rust is the product engine and the only CLI/MCP runtime in this repository.
 The authoritative language-neutral compatibility fixtures live in
-[`rac-spec`](https://github.com/itsthelore/rac-spec). Live-corpus validation is
+[`asdecided-spec`](https://github.com/itsthelore/asdecided-spec). Live-corpus validation is
 based on validity, determinism, freshness, and cache/no-cache equality.
 
 Document ingestion remains an ancillary Python connector rather than part of
 the core engine. The retired Python engine is preserved for historical review
 at the immutable
-[`python-engine-final`](https://github.com/itsthelore/rac-core/tree/python-engine-final)
+[`python-engine-final`](https://github.com/itsthelore/asdecided-core/tree/python-engine-final)
 tag; it is not maintained or run in normal CI.
 
 ## License

@@ -128,4 +128,4 @@ the committed baseline before the ranking change ships.
 
 ## Related Tickets
 
-- itsthelore/rac-core#226
+- itsthelore/asdecided-core#226

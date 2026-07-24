@@ -99,7 +99,7 @@ tools:
 The tool travels with the agent definition, so it stays attached whichever
 harness Omnigent routes to. A worked setup — including pointing the agent's
 `instructions` at the generated `AGENTS.md` — is in
-[`examples/omnigent/`](https://github.com/itsthelore/rac-core/blob/main/examples/omnigent/README.md).
+[`examples/omnigent/`](https://github.com/itsthelore/asdecided-core/blob/main/examples/omnigent/README.md).
 
 <!-- TODO: verify against Omnigent <version> before release -->
 
@@ -319,7 +319,7 @@ nothing at all — `decided telemetry status` will say so.
 For regulated installs that must record *who consulted which decision, when, and
 which artifact IDs came back* — the audit trail telemetry deliberately does not
 keep — the server can append one JSON line per read-tool call to a local file
-([ADR-084](https://github.com/itsthelore/rac-core/blob/main/decisions/decisions/adr-084-read-access-audit-recorder.md)).
+([ADR-084](https://github.com/itsthelore/asdecided-core/blob/main/decisions/decisions/adr-084-read-access-audit-recorder.md)).
 
 It is **content-bearing by design and off by default**: with no `audit:` stanza
 nothing is written and responses are byte-identical to a server with no recorder.
@@ -361,7 +361,7 @@ so a single construction-time principal would record every caller as the host.
 Each request instead asserts who it is with the **`X-AsDecided-Principal`** header, and
 the audit line records that per-request principal with `transport: http` and
 `attribution: asserted`
-([ADR-098](https://github.com/itsthelore/rac-core/blob/main/decisions/decisions/adr-098-shared-http-mcp-serving.md)):
+([ADR-098](https://github.com/itsthelore/asdecided-core/blob/main/decisions/decisions/adr-098-shared-http-mcp-serving.md)):
 
 ```
 X-AsDecided-Principal: Alice Ng <alice@example.com>
@@ -384,7 +384,7 @@ that developer's own checkout. At team scale you may instead want **one
 always-current endpoint** every agent points at, so reads come from a single
 `main`-backed source of truth rather than checkouts that lag between pulls. The
 server gains a streamable **HTTP transport** for exactly this
-([ADR-098](https://github.com/itsthelore/rac-core/blob/main/decisions/decisions/adr-098-shared-http-mcp-serving.md)):
+([ADR-098](https://github.com/itsthelore/asdecided-core/blob/main/decisions/decisions/adr-098-shared-http-mcp-serving.md)):
 
 ```bash
 decided-mcp --root /path/to/your/repo --transport http --host 127.0.0.1 --port 8000 --path /mcp
@@ -422,7 +422,7 @@ container, authenticating proxy, keep-current step, and observability — is on 
 By default the server reuses the derived structures — the repository index, the
 relationship graph, and the search token vectors — across calls, kept fresh by
 an event-sourced watcher
-([ADR-099](https://github.com/itsthelore/rac-core/blob/main/decisions/decisions/adr-099-derived-index-cache.md),
+([ADR-099](https://github.com/itsthelore/asdecided-core/blob/main/decisions/decisions/adr-099-derived-index-cache.md),
 default-on per ADR-112):
 
 ```bash
@@ -487,4 +487,4 @@ the repository has not been initialized. See the troubleshooting steps above.
 - [CLI reference](cli.md) — every `rac` command including `decided-mcp`
 - [Artifact types](artifacts.md) — what requirements, decisions, designs, roadmaps, and prompts look like
 - [Repository workflow](repo-workflow.md) — how to organize a RAC repository
-- [Examples corpus](https://github.com/itsthelore/rac-core/tree/main/examples/guide/) — the ready-made guide corpus
+- [Examples corpus](https://github.com/itsthelore/asdecided-core/tree/main/examples/guide/) — the ready-made guide corpus

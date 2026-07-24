@@ -25,7 +25,7 @@ lockstep by a regeneration script — precisely the drift surface Guard 1 exists
 remove. The file was also derived *from* Python, so Python, not the file, was the
 source of truth; "both engines read one shared file" was not true.
 
-The neutral cross-repo home for RAC's contracts is `itsthelore/rac-spec`
+The neutral cross-repo home for RAC's contracts is `itsthelore/asdecided-spec`
 (ADR-064, ADR-092), which today carries the prose specification, a structural
 JSON Schema, and vocabulary — but not the complete machine-readable registry
 (section sets, metadata enums, descriptions, guidance, synonyms, starter bodies)
@@ -47,7 +47,7 @@ source of truth that **both** engines read.
 - The Rust engine embeds the **same bytes** of the same file via `include_str!`.
 - The two engines therefore read one artifact and cannot drift by construction: a
   section, enum, synonym, or ordering added once is reflected in both.
-- The upstream source of truth is `itsthelore/rac-spec`; the in-repo
+- The upstream source of truth is `itsthelore/asdecided-spec`; the in-repo
   `src/rac/spec/artifact-specs.json` is the vendored copy both in-tree engines
   embed, kept byte-identical to the upstream by a sync gate. (In-tree engines can
   only read an in-tree file at build/runtime, so a vendored copy plus an equality

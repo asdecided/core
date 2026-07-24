@@ -646,7 +646,7 @@ human). Message + uri per code:
 ```json
 {"version":"2.1.0","$schema":"https://json.schemastore.org/sarif-2.1.0.json",
  "runs":[{"tool":{"driver":{"name":"rac",
-   "informationUri":"https://github.com/itsthelore/rac-core",
+   "informationUri":"https://github.com/itsthelore/asdecided-core",
    "version":<__version__>,"rules":[…]}},"results":[…]}]}
 ```
 

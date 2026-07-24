@@ -16,7 +16,7 @@ Product
 ## Context
 
 > **Amended by ADR-101.** This ADR's project-page hosting model — `rac-core`
-> publishing its own `docs/` to `itsthelore.github.io/rac-core/` via its own
+> publishing its own `docs/` to `itsthelore.github.io/asdecided-core/` via its own
 > `docs.yml` — is retired in favor of an org-wide umbrella site
 > (`itsthelore.github.io`) that vendors `docs/` from each product repo at
 > build time. ADR-101 governs where the two differ (the publishing repo and

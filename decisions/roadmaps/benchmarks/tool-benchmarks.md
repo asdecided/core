@@ -18,7 +18,7 @@ was top-5 while `search_artifacts` serves the full match list; the P@1 / R@5
 gate was blind to ordering within ranks 2–5; `get_related`'s outgoing
 direction was unscored; and the eval scores pre-budget output while agents
 receive ADR-033 budget-truncated responses. This roadmap builds one benchmark
-per Lore MCP tool in `itsthelore/rac-benchmarks` (subdir per benchmark,
+per Lore MCP tool in `itsthelore/asdecided-benchmarks` (subdir per benchmark,
 ADR-092) on a shared harness, under the family contract of ADR-097.
 
 Known corpus inconsistencies observed during the stress-test, flagged here
@@ -108,11 +108,11 @@ gating CI.
 
 ## Related Tickets
 
-- itsthelore/rac-benchmarks#2
-- itsthelore/rac-benchmarks#3
-- itsthelore/rac-benchmarks#4
-- itsthelore/rac-benchmarks#5
-- itsthelore/rac-benchmarks#6
-- itsthelore/rac-benchmarks#7
-- itsthelore/rac-benchmarks#8
-- itsthelore/rac-benchmarks#9
+- itsthelore/asdecided-benchmarks#2
+- itsthelore/asdecided-benchmarks#3
+- itsthelore/asdecided-benchmarks#4
+- itsthelore/asdecided-benchmarks#5
+- itsthelore/asdecided-benchmarks#6
+- itsthelore/asdecided-benchmarks#7
+- itsthelore/asdecided-benchmarks#8
+- itsthelore/asdecided-benchmarks#9

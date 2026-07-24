@@ -71,7 +71,7 @@ Each entry is a provider-specific key or a full URL:
 The engine does **format-lint only, offline**: `decided validate` flags an entry that
 is not a well-formed key or URL for the configured provider
 (`malformed-ticket-reference`, overridable per
-[ADR-053](https://github.com/itsthelore/rac-core/blob/main/decisions/decisions/adr-053-validation-severity-overrides.md)),
+[ADR-053](https://github.com/itsthelore/asdecided-core/blob/main/decisions/decisions/adr-053-validation-severity-overrides.md)),
 and `decided relationships --validate` never reports a ticket as a broken reference.
 With no provider configured the section still works, simply unvalidated. Because
 the provider is named in config, shape-identical keys across trackers (Linear's
@@ -92,7 +92,7 @@ only the external one is marked).
 A decision can declare the code paths or components it governs with an optional
 `## Applies To` section, so "which recorded decisions apply to the file I'm
 editing?" becomes corpus data rather than prose (ADR-019,
-[decision-to-code-proximity](https://github.com/itsthelore/rac-core/blob/main/decisions/roadmaps/decision-to-code-proximity.md)).
+[decision-to-code-proximity](https://github.com/itsthelore/asdecided-core/blob/main/decisions/roadmaps/decision-to-code-proximity.md)).
 The section is recognised on decisions only:
 
 ```markdown

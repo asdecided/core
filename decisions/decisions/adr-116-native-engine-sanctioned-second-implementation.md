@@ -44,7 +44,7 @@ Crucially, ADR-063's two guards are now **closed**, with evidence on this branch
 - **Guard 1 — shared spec (closed).** One language-neutral registry is the
   single source of truth both engines read: the Python engine loads
   `ARTIFACT_SPECS` from `src/rac/spec/artifact-specs.json` and the Rust engine
-  embeds the same bytes; itsthelore/rac-spec hosts the canonical
+  embeds the same bytes; itsthelore/asdecided-spec hosts the canonical
   `schema/artifact-specs.json` upstream and rac-core vendors it, with a sync
   gate enforcing equality. Recorded in ADR-115; landed at commit `bdd369c`, sync
   gate at `40557f2`, proven behavior-neutral (full Python suite green, every

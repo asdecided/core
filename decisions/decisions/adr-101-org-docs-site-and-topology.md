@@ -17,7 +17,7 @@ Product
 ## Context
 
 ADR-042 hosts `rac-core`'s user documentation at
-`https://itsthelore.github.io/rac-core/` — a GitHub Pages *project* page built
+`https://itsthelore.github.io/asdecided-core/` — a GitHub Pages *project* page built
 by `rac-core`'s own `docs.yml` workflow from that repository's `docs/` with
 MkDocs (Material theme). That scope was correct when `rac-core` was the only
 public surface, but ADR-092 now names a small constellation of `rac-*`
@@ -70,7 +70,7 @@ than linking out to per-repo project pages.
   the site, in `rac-core` or any other member repo.
 - `rac-core`'s project-page deployment is **retired**: `docs.yml`'s Pages
   publish step is removed once the umbrella site's `/rac-core/` section is
-  live, so `itsthelore.github.io/rac-core/` is served by the umbrella
+  live, so `itsthelore.github.io/asdecided-core/` is served by the umbrella
   deployment instead of `rac-core`'s own. `rac-core` keeps its `docs/`
   directory and MkDocs config for local `mkdocs serve` authoring; it stops
   being a second published surface at that URL. Disabling the old Pages
@@ -103,7 +103,7 @@ than linking out to per-repo project pages.
   build time; a broken or unreachable source repo can fail the umbrella
   build even though `itsthelore.github.io` itself has not changed.
 - Retiring `rac-core`'s project-page deployment is a breaking change for
-  anyone who bookmarked or linked `itsthelore.github.io/rac-core/` expecting
+  anyone who bookmarked or linked `itsthelore.github.io/asdecided-core/` expecting
   `rac-core`'s own MkDocs build; the URL keeps working but the rendering
   engine and look change underneath it.
 - One more repository (`itsthelore.github.io`) with its own build pipeline
@@ -148,7 +148,7 @@ Aggregate other repos into the umbrella site but leave `rac-core`'s own
 
 #### Advantages
 
-- No breaking change to the existing `itsthelore.github.io/rac-core/` URL's
+- No breaking change to the existing `itsthelore.github.io/asdecided-core/` URL's
   rendering engine.
 
 #### Disadvantages

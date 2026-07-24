@@ -9,7 +9,7 @@ type: roadmap
 
 Achieved
 
-Delivered across all three initiatives (epic itsthelore/rac-core#348), under
+Delivered across all three initiatives (epic itsthelore/asdecided-core#348), under
 the topology decision ADR-117: the recorded shape (one org-standards corpus
 served over the shipped ADR-098 HTTP endpoint, co-mounted as `lore-org`
 beside any local `lore` server); the fleet-wiring command (`rac init
@@ -176,4 +176,4 @@ unresolved cross-references, and what changes when federation ships.
 
 ## Related Tickets
 
-- itsthelore/rac-core#348
+- itsthelore/asdecided-core#348

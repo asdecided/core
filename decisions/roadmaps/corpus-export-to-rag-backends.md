@@ -16,7 +16,7 @@ companion (ADR-095) with cognee, letta, mem0, neo4j (self-hostable),
 supermemory, and zep modules. The residual Initiative-3 deliverable — the
 documentation page naming targets and the verify-in-Lore loop — is absorbed
 into the `corpus-sync` programme's contracts-documentation work
-(itsthelore/rac-core#255, itsthelore/rac-core#256). Consumption-plane
+(itsthelore/asdecided-core#255, itsthelore/asdecided-core#256). Consumption-plane
 evolution continues under `corpus-sync`; this artifact remains the durable
 record of the original intent.
 

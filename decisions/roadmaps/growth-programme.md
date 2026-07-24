@@ -96,4 +96,4 @@ traceability work from real corpus usage.
 
 ## Related Tickets
 
-- itsthelore/rac-core#230
+- itsthelore/asdecided-core#230

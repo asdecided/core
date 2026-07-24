@@ -21,7 +21,7 @@ not slideware completeness.
 ## Context
 
 The only non-Python SDK today is the TypeScript thin client
-(`rac-sdk/ts/`, npm `@itsthelore/rac-sdk`, pre-1.0). ADR-063 fixes *how*
+(`rac-sdk/ts/`, npm `@itsthelore/asdecided-sdk`, pre-1.0). ADR-063 fixes *how*
 any further client is built — a thin client over the stable contract
 (`--json` outputs, `rac export` payloads, exit codes, MCP), shelling out
 to the installed `rac` binary, never a native engine port without the two

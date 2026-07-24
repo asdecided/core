@@ -5,7 +5,7 @@
 #
 #   jobs:
 #     watchkeeper:
-#       uses: itsthelore/rac-core/.github/workflows/watchkeeper.yml@<tag>
+#       uses: itsthelore/asdecided-core/.github/workflows/watchkeeper.yml@<tag>
 #       with:
 #         path: decisions
 #
@@ -52,7 +52,7 @@ jobs:
       # Reusable workflows run in the caller's repository, so the action is
       # referenced by full path. Update this ref when cutting a release tag;
       # until the first v0.12.x release it tracks main.
-      - uses: itsthelore/rac-core@main
+      - uses: itsthelore/asdecided-core@main
         with:
           path: ${{ inputs.path }}
           base: ${{ inputs.base }}

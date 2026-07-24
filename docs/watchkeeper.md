@@ -45,7 +45,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: itsthelore/rac-core@<release-tag>
+      - uses: itsthelore/asdecided-core@<release-tag>
 ```
 
 On every pull request that touches your corpus you get:
@@ -75,7 +75,7 @@ Prefer calling a workflow instead of composing steps:
 ```yaml
 jobs:
   watchkeeper:
-    uses: itsthelore/rac-core/.github/workflows/watchkeeper.yml@<release-tag>
+    uses: itsthelore/asdecided-core/.github/workflows/watchkeeper.yml@<release-tag>
     with:
       path: rac
 ```

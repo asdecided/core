@@ -3,14 +3,14 @@
   "name": "io.github.tcballard/lore",
   "description": "Serve your repo's recorded product knowledge - requirements, decisions (ADRs), designs, roadmaps - to coding agents. Deterministic, read-only.",
   "repository": {
-    "url": "https://github.com/itsthelore/rac-core",
+    "url": "https://github.com/itsthelore/asdecided-core",
     "source": "github"
   },
   "version": "0.11.0",
   "packages": [
     {
       "registryType": "pypi",
-      "identifier": "rac-core",
+      "identifier": "asdecided-core",
       "version": "0.11.0",
       "transport": {
         "type": "stdio"

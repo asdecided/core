@@ -207,4 +207,4 @@ benchmark evidence, not phase 1. No requirement is minted yet.
 
 ## Related Tickets
 
-- itsthelore/rac-core#277
+- itsthelore/asdecided-core#277

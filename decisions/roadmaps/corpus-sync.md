@@ -257,4 +257,4 @@ rather than duplicating them.
 
 ## Related Tickets
 
-- itsthelore/rac-core#255
+- itsthelore/asdecided-core#255

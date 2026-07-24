@@ -29,7 +29,7 @@ Pointing `decided validate` at a legacy corpus for the first time can surface ma
 pre-existing findings at once. Rather than fail the build on all of them, a
 repository can downgrade or silence specific findings in its committed
 `.decided/config.yaml`, then tighten the gate over time. The decision behind this is
-[ADR-053](https://github.com/itsthelore/rac-core/blob/main/decisions/decisions/adr-053-validation-severity-overrides.md).
+[ADR-053](https://github.com/itsthelore/asdecided-core/blob/main/decisions/decisions/adr-053-validation-severity-overrides.md).
 Overrides are **repository-wide**: a downgrade applies to `decided review`,
 `decided watchkeeper`, and `decided portfolio` as well as `decided validate`.
 
@@ -74,7 +74,7 @@ cleaned up.
 document covering core validation findings and OKF conformance findings, so a CI
 job can upload it and have GitHub Code Scanning annotate findings inline on a
 pull request. The decision behind this is
-[ADR-054](https://github.com/itsthelore/rac-core/blob/main/decisions/decisions/adr-054-sarif-validation-output.md).
+[ADR-054](https://github.com/itsthelore/asdecided-core/blob/main/decisions/decisions/adr-054-sarif-validation-output.md).
 
 ```bash
 decided validate decisions/ --sarif > rac.sarif
@@ -121,7 +121,7 @@ decided review decisions/ --sarif > review.sarif
 A composite GitHub Action wraps `decided validate --sarif` and uploads the result to
 GitHub Code Scanning, so findings annotate the pull request inline. The decision
 behind it is
-[ADR-058](https://github.com/itsthelore/rac-core/blob/main/decisions/decisions/adr-058-validation-github-action.md);
+[ADR-058](https://github.com/itsthelore/asdecided-core/blob/main/decisions/decisions/adr-058-validation-github-action.md);
 it is a thin wrapper — the `rac` CLI stays the source of truth.
 
 ```yaml
@@ -136,7 +136,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: itsthelore/rac-core/validate-action@v0
+      - uses: itsthelore/asdecided-core/validate-action@v0
         with:
           path: decisions/
 ```
@@ -163,7 +163,7 @@ under the corpus **enforcement policy**, and emits one combined SARIF document
 (v0.21.14). The `pr-gate-action` runs it and uploads that single SARIF to Code
 Scanning under one category (`rac-gate`), failing when any finding is *blocking*.
 It is the same thin wrapper — the engine decides what is blocking, the action
-computes nothing ([ADR-063](https://github.com/itsthelore/rac-core/blob/main/decisions/decisions/adr-063-non-python-clients-are-thin.md)):
+computes nothing ([ADR-063](https://github.com/itsthelore/asdecided-core/blob/main/decisions/decisions/adr-063-non-python-clients-are-thin.md)):
 
 ```yaml
 # .github/workflows/rac.yml
@@ -177,7 +177,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: itsthelore/rac-core/pr-gate-action@v0
+      - uses: itsthelore/asdecided-core/pr-gate-action@v0
         with:
           path: decisions/
 ```
