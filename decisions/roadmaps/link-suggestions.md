@@ -129,4 +129,4 @@ is advisory, and how to promote a suggestion to a declared edge.
 
 ## Related Tickets
 
-- itsthelore/asdecided-core#225
+- asdecided/core#225

@@ -24,7 +24,7 @@ use crate::pyjson;
 pub const SCHEMA_VERSION: &str = "1";
 const TELEMETRY_FILENAME: &str = "guide-telemetry.jsonl";
 
-pub const SHARE_ISSUE_URL: &str = "https://github.com/itsthelore/decided-core/issues/new";
+pub const SHARE_ISSUE_URL: &str = "https://github.com/asdecided/core/issues/new";
 pub const SHARE_TEMPLATE: &str = "guide-usage-report.yml";
 pub const SHARE_FIELD: &str = "report";
 

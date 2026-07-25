@@ -2,7 +2,7 @@
 
 Source of truth: `src/asdecided/services/relationships.py` (1477 LOC), plus its pure
 foundation `src/asdecided/services/references.py`, the edge schema
-`src/asdecided/core/relationship_types.py`, identity `src/asdecided/core/identity.py`,
+`src/rac/core/relationship_types.py`, identity `src/rac/core/identity.py`,
 scope helpers `src/asdecided/services/scope_paths.py`, and the renderers
 `src/asdecided/output/{human,json,sarif}.py`. CLI wiring: `cmd_relationships` in
 `src/asdecided/cli.py`.
@@ -646,7 +646,7 @@ human). Message + uri per code:
 ```json
 {"version":"2.1.0","$schema":"https://json.schemastore.org/sarif-2.1.0.json",
  "runs":[{"tool":{"driver":{"name":"rac",
-   "informationUri":"https://github.com/itsthelore/asdecided-core",
+   "informationUri":"https://github.com/asdecided/core",
    "version":<__version__>,"rules":[…]}},"results":[…]}]}
 ```
 

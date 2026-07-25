@@ -1,4 +1,4 @@
-//! Frontmatter parsing — port of `src/asdecided/core/frontmatter.py` plus the
+//! Frontmatter parsing — port of `src/rac/core/frontmatter.py` plus the
 //! bounded PyYAML-1.1 SafeLoader subset it rides on (PORT-CONTRACT.d/02).
 //!
 //! This is parity landmine #1: the oracle is PyYAML 6.0.3's pure-Python
@@ -29,7 +29,7 @@ use std::collections::HashMap;
 use crate::pycompat::{py_float_repr, py_repr_str, py_strip};
 
 // ---------------------------------------------------------------------------
-// Limits (src/asdecided/core/limits.py)
+// Limits (src/rac/core/limits.py)
 // ---------------------------------------------------------------------------
 
 pub const DEFAULT_MAX_FILE_BYTES: u64 = 1 << 20; // 1 MiB
@@ -104,7 +104,7 @@ pub fn file_cap_from(raw: Option<&str>) -> FileCap {
 }
 
 // ---------------------------------------------------------------------------
-// Issue / metadata models (src/asdecided/core/models.py, metadata.py)
+// Issue / metadata models (src/rac/core/models.py, metadata.py)
 // ---------------------------------------------------------------------------
 
 #[derive(Clone, Debug, PartialEq)]
@@ -4304,7 +4304,7 @@ fn validate_fields(
 }
 
 // ---------------------------------------------------------------------------
-// parse_file support (src/asdecided/core/markdown.py read stage) — the frontmatter
+// parse_file support (src/rac/core/markdown.py read stage) — the frontmatter
 // contract owns the wordings; the markdown module sequences the issues.
 // ---------------------------------------------------------------------------
 

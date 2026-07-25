@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Cross-repo sync gate for the shared artifact-spec registry (ADR-063 Guard 1).
 
-The registry's source of truth is the upstream `itsthelore/asdecided-spec`
+The registry's source of truth is the upstream `asdecided/spec`
 (`schema/artifact-specs.json`); rac-core vendors it into
 `rust/rac-engine/assets/spec/artifact-specs.json`, which the native engine embeds.
 This gate proves the vendored copy has not drifted from the upstream: it

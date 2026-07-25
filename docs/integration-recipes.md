@@ -30,7 +30,7 @@ A recipe README has these parts, in this order:
 
 1. **Title and framing** — `# RAC with <Client>`, then one line naming the two
    surfaces (the context file the client reads, and the `lore` MCP server).
-2. **Prerequisites** — `brew install itsthelore/tap/rac-full` and a corpus under `decisions/`.
+2. **Prerequisites** — `brew install asdecided/tap/asdecided-core` and a corpus under `decisions/`.
 3. **Context file (the push)** — `decided export decisions/ --agent-rules`, and which
    generated file this client reads (`AGENTS.md` is the glob-free default;
    `CLAUDE.md` and `.github/copilot-instructions.md` are the other targets).

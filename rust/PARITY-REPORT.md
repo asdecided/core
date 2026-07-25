@@ -92,7 +92,7 @@ surface depends on has a parity-proven Rust implementation.
 
 ## asdecided-spec acceptance suite
 
-The public specification repo (itsthelore/asdecided-spec, v0.1.0) ships an
+The public specification repo (asdecided/spec, v0.1.0) ships an
 executable acceptance suite (`examples/manifest.json`: 2 valid corpora +
 16 invalid cases with expected blocking finding codes). Both engines were
 run over all 18 cases with identical argv/env: **18/18 byte-identical

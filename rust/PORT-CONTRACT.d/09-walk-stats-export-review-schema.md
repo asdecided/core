@@ -3,9 +3,9 @@
 Scope: the deterministic corpus walk (`rac.core.fs` + `rac.core.corpus`), and the
 `stats`, `export`, `review`, `schema`/`templates` commands. Every claim below was
 verified against the oracle (`.venv-oracle/bin/rac`, Python 3.11.15) unless marked
-`UNVERIFIED`. Source files: `src/asdecided/core/fs.py`, `src/asdecided/core/corpus.py`,
+`UNVERIFIED`. Source files: `src/rac/core/fs.py`, `src/rac/core/corpus.py`,
 `src/asdecided/services/stats.py`, `src/asdecided/services/export.py`,
-`src/asdecided/services/review.py`, `src/asdecided/core/schema.py`, `src/asdecided/output/{human,json,sarif,templates}.py`.
+`src/asdecided/services/review.py`, `src/rac/core/schema.py`, `src/asdecided/output/{human,json,sarif,templates}.py`.
 
 The producing oracle version string is `0.1.dev50+g21c8be403` (setuptools_scm). This
 string appears verbatim in two payloads (`export --json` `rac_version`, and every SARIF
@@ -77,7 +77,7 @@ round-half-even but the *string* forms differ (`0.0` vs `0.0`; but e.g. `10.0` i
 
 ---
 
-## 1. The corpus walk — `find_markdown_files` (`src/asdecided/core/fs.py`)
+## 1. The corpus walk — `find_markdown_files` (`src/rac/core/fs.py`)
 
 This is THE traversal every command in this section (and most others) uses. Get it
 byte-exact or every downstream ordering diverges.
@@ -597,7 +597,7 @@ append `<blank>` + `No artifacts yet — create your first with: rac quickstart`
 - `_document`: results sorted by `(uri, startLine|0, ruleId, message.text)`. `rules` =
   `[{"id": code} for code in sorted(set(ruleIds))]` (unique codes, sorted). Top document:
   `{version:"2.1.0", $schema:<schemastore url>, runs:[{tool.driver:{name:"rac",
-  informationUri:"https://github.com/itsthelore/asdecided-core", version:__version__, rules}, results}]}`.
+  informationUri:"https://github.com/asdecided/core", version:__version__, rules}, results}]}`.
   `json.dumps(indent=2)` (ensure_ascii=True). `driver.version` = env version.
 
 ---

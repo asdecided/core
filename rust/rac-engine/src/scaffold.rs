@@ -1,7 +1,7 @@
 //! Scaffold writes — `decided new`, `decided init`, `decided quickstart`,
 //! `decided migrate metadata` (PORT-CONTRACT.d/16).
 //!
-//! Ports of `src/asdecided/core/idgen.py` (`generate_id`), `src/asdecided/core/
+//! Ports of `src/rac/core/idgen.py` (`generate_id`), `src/rac/core/
 //! templates.py` (`load_template`), `src/asdecided/services/init.py`
 //! (`init_repository`, `load_repository_config`, `write_mcp_configs` via
 //! `src/asdecided/services/profiles.py`), `src/asdecided/services/create.py`

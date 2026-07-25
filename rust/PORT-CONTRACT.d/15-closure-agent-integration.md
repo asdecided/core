@@ -5,7 +5,7 @@ Scope: the B4 commands ported for roadmap:native-cli-closure —
 `rac eval` (the ADR-066 grounding benchmark and CI gate). Every claim
 below was verified against the oracle (`.venv-oracle/bin/rac`,
 `0.1.dev50+g21c8be403`, Python 3.11.15). Source files: `src/asdecided/cli.py`
-(`cmd_skill`/`cmd_hook`/`cmd_eval`), `src/asdecided/core/{skills,hooks}.py`,
+(`cmd_skill`/`cmd_hook`/`cmd_eval`), `src/rac/core/{skills,hooks}.py`,
 `src/asdecided/services/{skill,hook,eval}.py`, `src/asdecided/skills/*/SKILL.md`,
 `src/asdecided/hooks/*.sh`, `src/asdecided/output/{human,json}.py`
 (`render_skill_*`, `render_hook_*`). Rust: new `rac-engine/src/skill.rs`,

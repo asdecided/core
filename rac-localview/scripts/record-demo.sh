@@ -21,7 +21,7 @@ run() {
 }
 
 sleep 0.5
-run 'brew install itsthelore/tap/rac-full'
+run 'brew install asdecided/tap/asdecided-core'
 run 'claude mcp add lore -- rac mcp'
 run 'rac find "test topology" rac/'
 run 'rac resolve ADR-027 rac/'

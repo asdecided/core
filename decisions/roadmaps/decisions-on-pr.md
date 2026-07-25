@@ -9,9 +9,9 @@ type: roadmap
 
 Achieved
 
-Delivered (epic itsthelore/asdecided-core#351; itsthelore/asdecided-ci#3 merged) under
+Delivered (epic asdecided/core#351; asdecided/ci#3 merged) under
 the `pr-decision-surfacing` design's contract. The **Herald** capability —
-`itsthelore/asdecided-ci/herald/github` — computes the merge-base diff, runs
+`asdecided/ci/herald/github` — computes the merge-base diff, runs
 `rac decisions-for --json` per changed path (thin client, ADR-063; the
 engine owns matching and liveness), and posts one deterministic advisory
 comment: id, title, matched `## Applies To` scope, and a head-pinned link
@@ -147,4 +147,4 @@ a governed decision that is also suspect can be noted.
 
 ## Related Tickets
 
-- itsthelore/asdecided-core#351
+- asdecided/core#351

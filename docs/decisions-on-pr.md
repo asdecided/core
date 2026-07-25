@@ -13,7 +13,7 @@ review. It never gates the merge, never fails the check on findings, and the
 human PR review stays the trust boundary.
 
 Herald ships in the CI delivery repo,
-[`itsthelore/asdecided-ci`](https://github.com/itsthelore/asdecided-ci), beside the
+[`asdecided/ci`](https://github.com/asdecided/ci), beside the
 Watchkeeper, Gatekeeper, and Registrar wrappers.
 
 ## 1. Wire it up
@@ -35,7 +35,7 @@ jobs:
         with:
           fetch-depth: 0   # the diff needs the merge base
 
-      - uses: itsthelore/asdecided-ci/herald/github@main
+      - uses: asdecided/ci/herald/github@main
         with:
           path: rac
 ```

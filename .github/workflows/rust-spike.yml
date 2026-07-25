@@ -74,7 +74,7 @@ jobs:
       - name: Checkout authoritative asdecided-spec fixtures
         uses: actions/checkout@v4
         with:
-          repository: itsthelore/asdecided-spec
+          repository: asdecided/spec
           path: asdecided-spec
 
       - name: Guard 1 — vendored registry matches asdecided-spec

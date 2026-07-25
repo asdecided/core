@@ -16,7 +16,7 @@ Product
 
 ## Context
 
-ADR-101 made `itsthelore.github.io` the org-wide documentation site, and
+ADR-101 made `asdecided.github.io` the org-wide documentation site, and
 ADR-092 places the brand at the org rather than in repository slugs. The
 site's first iterations translated rac-localview's design system — amber on
 warm near-black, JetBrains Mono for all text, dashed chrome, pixel-art
@@ -40,7 +40,7 @@ fit for purpose where it lives.
 
 ## Decision
 
-The org documentation site (`itsthelore.github.io`, ADR-101) adopts its own
+The org documentation site (`asdecided.github.io`, ADR-101) adopts its own
 **light, restrained visual identity** rather than mirroring the rac-localview
 product-UI theme:
 

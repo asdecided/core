@@ -12,7 +12,7 @@ use std::sync::OnceLock;
 
 use serde_json::Value;
 
-/// Embedded spec data synced from `itsthelore/asdecided-spec`.
+/// Embedded spec data synced from `asdecided/spec`.
 const SPEC_JSON: &str = include_str!("../assets/spec/artifact-specs.json");
 
 /// One artifact type's schema. Field names/order mirror the Python dataclass.

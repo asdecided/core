@@ -13,7 +13,7 @@ Planned
 Unscheduled — captured as future intent, not yet on a release. Records the
 maintainer's stated direction: **rac-spec** (the RAC specification) and its
 associated **essays** are the next content added to the org documentation
-site (`itsthelore.github.io`, ADR-101), and they are to sit **front and
+site (`asdecided.github.io`, ADR-101), and they are to sit **front and
 centre on the home page** — headline placement, not another nav section.
 
 ## Context

@@ -3,7 +3,7 @@
 //! Bespoke CommonMark *block-boundary* tokenizer reproducing markdown-it-py
 //! 4.2.0's `"commonmark"` preset for the consumed surface only: `heading_open`
 //! (tag + 0-based start line) and `inline` (raw content + start line), plus
-//! the oracle's section-slicing walk on top (`src/asdecided/core/markdown.py`).
+//! the oracle's section-slicing walk on top (`src/rac/core/markdown.py`).
 //!
 //! The bake-off of PORT-CONTRACT decision 4 resolves to *bespoke*: external
 //! markdown crates are not in the dependency allowlist and the consumed
@@ -21,7 +21,7 @@ use std::sync::OnceLock;
 use crate::pycompat::{is_re_digit, py_casefold, py_is_space, py_repr_str, py_strip};
 
 // ---------------------------------------------------------------------------
-// Limits (src/asdecided/core/limits.py)
+// Limits (src/rac/core/limits.py)
 // ---------------------------------------------------------------------------
 
 pub const DEFAULT_MAX_FILE_BYTES: u128 = 1 << 20; // 1 MiB

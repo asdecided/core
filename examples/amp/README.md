@@ -13,7 +13,7 @@ the full text and relationships when it needs them.
 ## Prerequisites
 
 ```bash
-brew install itsthelore/tap/rac-full   # the `decided` CLI and the `decided-mcp` server
+brew install asdecided/tap/asdecided-core   # the `decided` CLI and the `decided-mcp` server
 ```
 
 You also need a repository with a RAC corpus under `decisions/` (run `decided quickstart`

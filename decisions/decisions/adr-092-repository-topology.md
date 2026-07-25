@@ -16,7 +16,7 @@ Architecture
 
 ## Context
 
-> **Extended by ADR-101.** ADR-101 adds `itsthelore.github.io` to the target
+> **Extended by ADR-101.** ADR-101 adds `asdecided.github.io` to the target
 > topology below as the org's documentation-aggregation site — its own repo
 > per GitHub's root-Pages naming rule, not a family-pattern member. That ADR
 > governs the site's hosting and vendoring model; this ADR governs its place
@@ -90,7 +90,7 @@ Distinct products keep their own brand and naming (`wayfinder-router`,
 | `rac-editors` | IDE clients | `vscode/` (VS Code/Cursor) (+ `jetbrains/`, …) |
 | `wayfinder-router` | separate product (ADR-069) | — |
 | `proofkeeper` | separate product (BYO-model QA agent) | — |
-| `itsthelore.github.io` | org presence + docs aggregation (ADR-101) | — |
+| `asdecided.github.io` | org presence + docs aggregation (ADR-101) | — |
 
 `rac-connectors` is the rename of the existing `lore-connectors`; `rac-ci` is the
 rename/absorption of `rac-actions` plus the standalone `lore-watchkeeper` /
@@ -107,7 +107,7 @@ maintainer-run org actions, sequenced in the deferred roadmap rewrite.
   by platform, so the ADR-090 "capability-first" intent holds; `lore-pipelines` is
   not created. Accepted tradeoffs: coupled version tags (one suite version, which
   is simpler for consumers) and no per-action Marketplace listing (consumed via
-  `uses: itsthelore/asdecided-ci/<capability>@<ref>`).
+  `uses: asdecided/ci/<capability>@<ref>`).
 - **`rac-connectors` is one repo** covering inbound (`rac ingest`) + outbound
   (`rac export`) + provider suites; **Atlassian is a subdir**, not its own repo —
   deployment and multi-direction do not force a repo boundary.
@@ -211,7 +211,7 @@ Flip ADR-068 to Superseded in this change.
 - ADR-069: Wayfinder is a separate product; Proofkeeper is its sibling.
 - ADR-029, ADR-039: engine + server stay one package; CLI `rac` and server `lore`
   identities unchanged.
-- ADR-101: adds `itsthelore.github.io` to this table and governs its docs
+- ADR-101: adds `asdecided.github.io` to this table and governs its docs
   hosting and vendoring model, including retiring `rac-core`'s project page.
 
 ## Related Decisions

@@ -34,7 +34,7 @@ pub const OUTCOME_ERROR: &str = "error";
 /// `recent` keeps the last N distinct UTC dates; the oracle's default.
 const RECENT_DAYS: usize = 7;
 
-pub const SHARE_ISSUE_URL: &str = "https://github.com/itsthelore/decided-core/issues/new";
+pub const SHARE_ISSUE_URL: &str = "https://github.com/asdecided/core/issues/new";
 pub const SHARE_TEMPLATE: &str = "guide-usage-report.yml";
 pub const SHARE_FIELD: &str = "report";
 

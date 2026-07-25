@@ -1,6 +1,6 @@
 # 03 — `rac.core.markdown`: Markdown → Product extraction (parity landmine #2)
 
-Source of truth: `/home/user/rac-core/src/asdecided/core/markdown.py` (frozen oracle).
+Source of truth: `/home/user/rac-core/src/rac/core/markdown.py` (frozen oracle).
 Parser: **markdown-it-py 4.2.0**, preset `"commonmark"`, one module-level shared
 instance (`_PARSER = MarkdownIt("commonmark")`). All behavior below was verified
 empirically with `.venv-oracle/bin/python` unless marked UNVERIFIED.

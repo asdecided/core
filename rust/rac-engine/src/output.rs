@@ -531,7 +531,7 @@ fn sarif_document(mut results: Vec<SarifResult>) -> String {
     driver.insert("name".into(), json!("decided"));
     driver.insert(
         "informationUri".into(),
-        json!("https://github.com/itsthelore/decided-core"),
+        json!("https://github.com/asdecided/core"),
     );
     driver.insert("version".into(), json!(rac_version()));
     driver.insert("rules".into(), Value::Array(rules));

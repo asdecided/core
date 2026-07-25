@@ -9,7 +9,7 @@ artifact, and run the three commands you'll use most: `validate`, `inspect`, and
 Install the native toolchain with Homebrew:
 
 ```bash
-brew install itsthelore/tap/rac-full
+brew install asdecided/tap/asdecided-core
 ```
 
 This installs `decided` and `decided-mcp`. Check it:
@@ -23,15 +23,15 @@ decided --version
 Every release also publishes a native container image to GHCR:
 
 ```bash
-docker run --rm -v "$PWD:/work" ghcr.io/itsthelore/asdecided-core:latest validate decisions/
+docker run --rm -v "$PWD:/work" ghcr.io/asdecided/core:latest validate decisions/
 ```
 
 In CI, pin a release tag rather than `latest`, or pin by digest for
 immutable builds (the release run prints the pushed digest in its summary):
 
 ```bash
-docker pull ghcr.io/itsthelore/asdecided-core:2026.6.1
-docker pull ghcr.io/itsthelore/asdecided-core@sha256:<digest>
+docker pull ghcr.io/asdecided/core:2026.6.1
+docker pull ghcr.io/asdecided/core@sha256:<digest>
 ```
 
 The image is the CLI and nothing more, so it drops into any docker-native
@@ -41,7 +41,7 @@ can run script steps):
 ```yaml
 rac-gate:
   image:
-    name: ghcr.io/itsthelore/asdecided-core:2026.6.1
+    name: ghcr.io/asdecided/core:2026.6.1
     entrypoint: [""]
   script:
     - decided gate decisions/
@@ -55,7 +55,7 @@ pipelines:
     '**':
       - step:
           name: decided gate
-          image: ghcr.io/itsthelore/asdecided-core:2026.6.1
+          image: ghcr.io/asdecided/core:2026.6.1
           script:
             - decided gate decisions/
 ```
@@ -64,7 +64,7 @@ Jenkins (declarative pipeline, docker agent):
 
 ```groovy
 pipeline {
-  agent { docker { image 'ghcr.io/itsthelore/asdecided-core:2026.6.1' } }
+  agent { docker { image 'ghcr.io/asdecided/core:2026.6.1' } }
   stages {
     stage('decided gate') {
       steps { sh 'decided gate decisions/' }

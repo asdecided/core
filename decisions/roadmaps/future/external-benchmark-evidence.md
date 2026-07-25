@@ -121,4 +121,4 @@ candidates and a tracked tier:
 
 ## Related Tickets
 
-- itsthelore/asdecided-benchmarks#10
+- asdecided/benchmarks#10
