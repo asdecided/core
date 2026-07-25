@@ -173,4 +173,4 @@ part of the contract every future family repeats.
 
 ## Related Tickets
 
-- itsthelore/asdecided-core#248
+- asdecided/core#248

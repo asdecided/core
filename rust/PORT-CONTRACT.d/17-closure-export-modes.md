@@ -6,7 +6,7 @@ verified against the oracle (`.venv-oracle/bin/rac`,
 `0.1.dev50+g21c8be403`, Python 3.11.15). Source files: `src/asdecided/cli.py`
 (`cmd_export`, `_cmd_agent_rules`, `_agent_rules_root`),
 `src/asdecided/output/{portal,okf}.py`, `src/asdecided/services/{agent_rules,
-recency}.py`, `src/asdecided/core/okf.py`, `src/asdecided/output/{human,json}.py`.
+recency}.py`, `src/rac/core/okf.py`, `src/asdecided/output/{human,json}.py`.
 Rust: new `rac-engine/src/{portal,agent_rules,okf}.rs`; the vendored
 shell under `rac-engine/assets/portal/`; `gitinfo.rs`
 (`first_committed`), `pycompat.rs` (`py_normpath`/`py_abspath`/

@@ -2,7 +2,7 @@
 """Certify RAC engines against asdecided-spec's output-parity conformance tier.
 
 ADR-063 Guard 2: a cross-language conformance fixture suite proves output
-parity. The neutral suite lives in `itsthelore/asdecided-spec`
+parity. The neutral suite lives in `asdecided/spec`
 (`conformance/output-parity.json` + `conformance/vectors/`): each case pins the
 byte-for-byte stdout and exit code an engine must produce for a deterministic,
 recency-free command over an example corpus. This runner replays every case

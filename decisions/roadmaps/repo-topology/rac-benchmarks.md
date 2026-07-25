@@ -22,7 +22,7 @@ repos.
 
 ## Outcomes
 
-- `itsthelore/asdecided-benchmarks` exists with the grounding benchmark under
+- `asdecided/benchmarks` exists with the grounding benchmark under
   `decisiongrounding/`; new benchmarks land as sibling subdirs.
 - The benchmark still consumes `rac` only as an external CLI on `PATH`, with no
   engine coupling and no change to its deterministic scoring (ADR-066).
@@ -40,7 +40,7 @@ repos.
 
 ## Success Measures
 
-- `itsthelore/asdecided-benchmarks` exists with `decisiongrounding/`; the standalone
+- `asdecided/benchmarks` exists with `decisiongrounding/`; the standalone
   repo is archived with a redirect.
 - The benchmark runs unchanged against the published `rac` CLI; its determinism
   guarantees (ADR-066) are untouched.

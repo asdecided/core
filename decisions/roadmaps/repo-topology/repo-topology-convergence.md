@@ -115,4 +115,4 @@ Each initiative is its own item in this series, executed independently:
 
 ## Related Tickets
 
-- itsthelore/asdecided-core#228
+- asdecided/core#228

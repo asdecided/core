@@ -5,7 +5,7 @@
 The toolchain is pinned by `rust/rust-toolchain.toml`.
 
 ```bash
-git clone https://github.com/itsthelore/asdecided-core.git
+git clone https://github.com/asdecided/core.git
 cd rac-core/rust
 rustup show
 cargo build --workspace --locked
@@ -26,7 +26,7 @@ target/release/decided relationships ../decisions/ --validate
 The small Python programs under `rust/tools/` and `rust/spec/` are repository
 verification utilities. They are not a Python product engine or installable
 SDK. Cross-repository compatibility is certified against
-[`asdecided-spec`](https://github.com/itsthelore/asdecided-spec).
+[`asdecided-spec`](https://github.com/asdecided/spec).
 
 ## Documentation expectations
 

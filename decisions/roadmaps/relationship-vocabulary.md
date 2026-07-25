@@ -94,4 +94,4 @@ requirement, designable independently.
 
 ## Related Tickets
 
-- itsthelore/asdecided-core#236
+- asdecided/core#236

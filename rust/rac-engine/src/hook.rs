@@ -1,6 +1,6 @@
 //! Bundled git hooks — `decided hook` (PORT-CONTRACT.d/15).
 //!
-//! Port of `src/asdecided/core/hooks.py` (registry + resource loading) and
+//! Port of `src/rac/core/hooks.py` (registry + resource loading) and
 //! `src/asdecided/services/hook.py` (`install_hook`). The packaged `<style>.sh`
 //! scripts are embedded verbatim from `rust/decided-engine/assets/hooks/`,
 //! vendored byte-identical copies of the Python package files (unit test

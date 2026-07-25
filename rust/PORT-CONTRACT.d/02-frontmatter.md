@@ -1,4 +1,4 @@
-# 02 — Frontmatter contract (`src/asdecided/core/frontmatter.py`)
+# 02 — Frontmatter contract (`src/rac/core/frontmatter.py`)
 
 Status: verified against the oracle venv (`.venv-oracle`, Python 3.11, PyYAML 6.0.3)
 on 2026-07-11 unless a claim is marked UNVERIFIED. This is parity landmine #1: the
@@ -12,7 +12,7 @@ Public surface consumed downstream:
 - `split_frontmatter(text: str) -> FrontmatterSplit`
 - `parse_frontmatter(raw: str) -> (ArtifactMetadata | None, list[Issue])`
 - Constants used: `MAX_FRONTMATTER_BYTES = 65536` (64 KiB), `MAX_FRONTMATTER_DEPTH = 32`
-  (both in `src/asdecided/core/limits.py`).
+  (both in `src/rac/core/limits.py`).
 - `Issue` (in `models.py`): `(severity, code, message, line=None)`. Every issue this
   module emits has `severity="error"` and `line=None`. (The one frontmatter-related
   issue with a line number — unterminated block — is emitted by `markdown.parse`,
@@ -320,7 +320,7 @@ Verified reprs: `'zzz'`, `2` (int key), `None` (null key), `datetime.date(2026, 
   stored None. Verified reprs: `'banana'`, `5`, `9`.
 - Registered names, exact case-sensitive match, in registry order:
   `requirement`, `decision`, `roadmap`, `prompt`, `design`
-  (`ARTIFACT_SPECS` in `src/asdecided/core/artifacts.py`; `Decision` ≠ `decision`,
+  (`ARTIFACT_SPECS` in `src/rac/core/artifacts.py`; `Decision` ≠ `decision`,
   capitalized → error. UNVERIFIED for the capitalized case specifically, but
   `spec_for` is a plain `==` loop).
 
@@ -373,7 +373,7 @@ Verified reprs: `'zzz'`, `2` (int key), `None` (null key), `datetime.date(2026, 
 
 ---
 
-## 7. `parse_file` interplay (`src/asdecided/core/markdown.py`, in-scope excerpts)
+## 7. `parse_file` interplay (`src/rac/core/markdown.py`, in-scope excerpts)
 
 `parse_file(path)` (all issues below land in `product.parse_issues`, and the
 product is a degraded empty `Product(title=None)` on the error paths):

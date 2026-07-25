@@ -1,6 +1,6 @@
 //! Bundled agent skills — `decided skill` (PORT-CONTRACT.d/15).
 //!
-//! Port of `src/asdecided/core/skills.py` (registry + resource loading) and
+//! Port of `src/rac/core/skills.py` (registry + resource loading) and
 //! `src/asdecided/services/skill.py` (`install_skills`). The packaged `SKILL.md`
 //! resources are embedded verbatim from `rust/decided-engine/assets/skills/`,
 //! vendored byte-identical copies of the Python package files — a unit test

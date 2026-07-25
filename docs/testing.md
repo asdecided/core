@@ -14,7 +14,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 The committed Rust fixtures cover deterministic command behavior. Contract
 compatibility is certified against the language-neutral fixtures in
-[`asdecided-spec`](https://github.com/itsthelore/asdecided-spec):
+[`asdecided-spec`](https://github.com/asdecided/spec):
 
 ```bash
 DECIDED_SPEC_DIR=/path/to/asdecided-spec python rust/spec/sync_spec.py

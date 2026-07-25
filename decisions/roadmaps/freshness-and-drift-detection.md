@@ -207,4 +207,4 @@ benchmark evidence, not phase 1. No requirement is minted yet.
 
 ## Related Tickets
 
-- itsthelore/asdecided-core#277
+- asdecided/core#277

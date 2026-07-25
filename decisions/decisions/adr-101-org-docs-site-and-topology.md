@@ -17,7 +17,7 @@ Product
 ## Context
 
 ADR-042 hosts `rac-core`'s user documentation at
-`https://itsthelore.github.io/asdecided-core/` — a GitHub Pages *project* page built
+`https://asdecided.github.io/core/` — a GitHub Pages *project* page built
 by `rac-core`'s own `docs.yml` workflow from that repository's `docs/` with
 MkDocs (Material theme). That scope was correct when `rac-core` was the only
 public surface, but ADR-092 now names a small constellation of `rac-*`
@@ -28,7 +28,7 @@ repositories (`rac-core`, `rac-ci`, `rac-connectors`, `rac-sdk`,
 
 GitHub serves a user/org root Pages site — with no `/repo-name/` path prefix —
 only from a repository named exactly `<org>.github.io`. `itsthelore/
-itsthelore.github.io` has been created for this purpose: it is public (a
+asdecided.github.io` has been created for this purpose: it is public (a
 private repo would need a paid org plan for Pages, and the rendered output is
 public by default anyway), and deploys via GitHub Actions
 (`actions/upload-pages-artifact` → `actions/deploy-pages@v4`), matching the
@@ -47,12 +47,12 @@ amendment.
 
 ## Decision
 
-`itsthelore.github.io` becomes the hosted documentation surface for the whole
+`asdecided.github.io` becomes the hosted documentation surface for the whole
 org. It **aggregates `docs/` from each product repo at build time** rather
 than linking out to per-repo project pages.
 
 - The site is built with Astro and deployed to GitHub Pages by a GitHub
-  Actions workflow in `itsthelore.github.io`, using the same
+  Actions workflow in `asdecided.github.io`, using the same
   `upload-pages-artifact` / `deploy-pages@v4` steps ADR-042 established.
 - **Vendor contract:** the build sparse-checks out each source repo's `docs/`
   directory at a pinned ref (a tag or `main`, per repo) into the Astro content
@@ -70,14 +70,14 @@ than linking out to per-repo project pages.
   the site, in `rac-core` or any other member repo.
 - `rac-core`'s project-page deployment is **retired**: `docs.yml`'s Pages
   publish step is removed once the umbrella site's `/rac-core/` section is
-  live, so `itsthelore.github.io/asdecided-core/` is served by the umbrella
+  live, so `asdecided.github.io/core/` is served by the umbrella
   deployment instead of `rac-core`'s own. `rac-core` keeps its `docs/`
   directory and MkDocs config for local `mkdocs serve` authoring; it stops
   being a second published surface at that URL. Disabling the old Pages
   deployment is a manual repository-settings action only the maintainer can
   take (the same class of manual step ADR-042 already required to enable
   Pages in the first place).
-- Naming: `itsthelore.github.io` is added to ADR-092's topology table as its
+- Naming: `asdecided.github.io` is added to ADR-092's topology table as its
   own repository — a distinct concern (org presence and docs aggregation),
   not a family-pattern member and not folded into any consolidated repo,
   because GitHub's root-Pages rule forces this exact name regardless of the
@@ -101,12 +101,12 @@ than linking out to per-repo project pages.
 
 - The umbrella build now depends on the state of every vendored repo at
   build time; a broken or unreachable source repo can fail the umbrella
-  build even though `itsthelore.github.io` itself has not changed.
+  build even though `asdecided.github.io` itself has not changed.
 - Retiring `rac-core`'s project-page deployment is a breaking change for
-  anyone who bookmarked or linked `itsthelore.github.io/asdecided-core/` expecting
+  anyone who bookmarked or linked `asdecided.github.io/core/` expecting
   `rac-core`'s own MkDocs build; the URL keeps working but the rendering
   engine and look change underneath it.
-- One more repository (`itsthelore.github.io`) with its own build pipeline
+- One more repository (`asdecided.github.io`) with its own build pipeline
   and brand/design surface to maintain, on top of ADR-092's topology.
 
 ### Risks
@@ -125,7 +125,7 @@ than linking out to per-repo project pages.
 
 ### Stand-alone landing site, link out to each product's own docs
 
-Keep `itsthelore.github.io` as a brand/landing page only, with outbound links
+Keep `asdecided.github.io` as a brand/landing page only, with outbound links
 to `rac-core`'s existing project page and to each future product's own Pages
 site.
 
@@ -148,7 +148,7 @@ Aggregate other repos into the umbrella site but leave `rac-core`'s own
 
 #### Advantages
 
-- No breaking change to the existing `itsthelore.github.io/asdecided-core/` URL's
+- No breaking change to the existing `asdecided.github.io/core/` URL's
   rendering engine.
 
 #### Disadvantages

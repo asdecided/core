@@ -8,7 +8,7 @@ type: design
 ## Context
 
 The `tool-benchmarks` roadmap builds one benchmark per Lore MCP tool in
-`itsthelore/asdecided-benchmarks` (subdir per benchmark, ADR-092). The non-trivial
+`asdecided/benchmarks` (subdir per benchmark, ADR-092). The non-trivial
 structure worth recording — sibling to `grounding-eval-scorecard` — is the
 shared harness those subdirs consume and the scorecard/gate shapes it emits,
 so five benchmarks stay one design rather than five drifting ones. Scoring

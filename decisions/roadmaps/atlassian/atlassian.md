@@ -97,4 +97,4 @@ consumers (ADR-073).
 
 ## Related Tickets
 
-- itsthelore/asdecided-connectors#4
+- asdecided/connectors#4

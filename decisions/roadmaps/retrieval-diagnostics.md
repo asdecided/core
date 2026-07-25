@@ -128,4 +128,4 @@ behaviour.
 
 ## Related Tickets
 
-- itsthelore/asdecided-core#248
+- asdecided/core#248

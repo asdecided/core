@@ -12,10 +12,10 @@ import demoUrl from './assets/demo.svg';
 import { CopyCommand } from './CopyCommand';
 import './landing.css';
 
-const REPO_URL = 'https://github.com/itsthelore/asdecided-core';
+const REPO_URL = 'https://github.com/asdecided/core';
 
 const DEMO_ALT =
-  'Recorded terminal session: brew install itsthelore/tap/rac-full, ' +
+  'Recorded terminal session: brew install asdecided/tap/asdecided-core, ' +
   'claude mcp add lore -- rac mcp, then rac find, rac resolve and ' +
   "rac validate run against this repository's corpus, ending in PASS";
 
@@ -223,7 +223,7 @@ export function LandingApp() {
                 <div className="get__steps">
                   <p className="get__step">
                     <span className="get__lead">Install:</span>{' '}
-                    <CopyCommand command="brew install itsthelore/tap/rac-full" />
+                    <CopyCommand command="brew install asdecided/tap/asdecided-core" />
                   </p>
                   <p className="get__step">
                     <span className="get__lead">
@@ -236,7 +236,7 @@ export function LandingApp() {
                   Lore is built on RAC — Requirements as Code — the
                   open-source engine underneath; for now the package, CLI
                   and MCP server ship under the rac name. Source:{' '}
-                  <a href={REPO_URL}>github.com/itsthelore/asdecided-core</a>
+                  <a href={REPO_URL}>github.com/asdecided/core</a>
                 </p>
               </section>
             </main>

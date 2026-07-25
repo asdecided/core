@@ -6,7 +6,7 @@ Scope: the B5 commands ported for roadmap:native-cli-closure — `rac new`,
 against the oracle (`.venv-oracle/bin/rac`, `0.1.dev50+g21c8be403`,
 Python 3.11.15). Source files: `src/asdecided/cli.py` (`cmd_new`/`cmd_init`/
 `cmd_quickstart`/`cmd_rename`/`cmd_migrate`, `_maybe_ask_usage_sharing`),
-`src/asdecided/core/{idgen,templates}.py`, `src/asdecided/services/{create,init,
+`src/rac/core/{idgen,templates}.py`, `src/asdecided/services/{create,init,
 profiles,quickstart,rename,migrate}.py`, `src/asdecided/output/{human,json}.py`.
 Rust: new `rac-engine/src/scaffold.rs` (idgen, embedded templates, config
 identity, init/profiles, create, quickstart, migrate) and `rename.rs`;

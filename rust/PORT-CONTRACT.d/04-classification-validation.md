@@ -1,8 +1,8 @@
 # 04 — Classification, Identity, and Validation
 
-Source modules: `src/asdecided/core/classification.py`, `src/asdecided/core/artifacts.py`,
-`src/asdecided/core/identity.py`, `src/asdecided/core/idgen.py`, `src/asdecided/core/metadata.py`,
-`src/asdecided/core/validation.py`, `src/asdecided/core/schema.py`, `src/asdecided/core/overrides.py`.
+Source modules: `src/rac/core/classification.py`, `src/rac/core/artifacts.py`,
+`src/rac/core/identity.py`, `src/rac/core/idgen.py`, `src/rac/core/metadata.py`,
+`src/rac/core/validation.py`, `src/rac/core/schema.py`, `src/rac/core/overrides.py`.
 Upstream inputs (`Product`, section map) come from the parser (`markdown.py`,
 `frontmatter.py`) — see the parser contract section; the `## section` normalization
 and requirement extraction rules that feed classification/validation are summarized

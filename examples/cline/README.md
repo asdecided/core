@@ -7,7 +7,7 @@ file alone.
 ## Prerequisites
 
 ```bash
-brew install itsthelore/tap/rac-full   # the `decided` CLI and the `decided-mcp` server
+brew install asdecided/tap/asdecided-core   # the `decided` CLI and the `decided-mcp` server
 ```
 
 A repository with a RAC corpus under `decisions/` (run `decided quickstart`, or use this

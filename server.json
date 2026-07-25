@@ -3,7 +3,7 @@
   "name": "io.github.tcballard/lore",
   "description": "Serve your repo's recorded product knowledge - requirements, decisions (ADRs), designs, roadmaps - to coding agents. Deterministic, read-only.",
   "repository": {
-    "url": "https://github.com/itsthelore/asdecided-core",
+    "url": "https://github.com/asdecided/core",
     "source": "github"
   },
   "version": "0.11.0",

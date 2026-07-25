@@ -1,5 +1,5 @@
 //! Corpus file discovery — a byte-exact port of `find_markdown_files`
-//! (`src/asdecided/core/fs.py`) and the walk seam, per PORT-CONTRACT.d/09 §1.
+//! (`src/rac/core/fs.py`) and the walk seam, per PORT-CONTRACT.d/09 §1.
 //!
 //! Landmines reproduced here:
 //! - Extension filter is the literal glob `*.md`, **case-sensitive** on Linux:
