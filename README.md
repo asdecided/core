@@ -2,13 +2,14 @@
 
 **Engineering decisions your agents can follow. Build, as decided.**
 
-AsDecided keeps requirements, decisions, designs, roadmaps, and prompts as
-typed Markdown in your repository. Its native Rust engine validates that
-knowledge, retrieves relevant decisions deterministically, and serves it
-read-only to agents over MCP.
+AsDecided is a local system of record for the product decisions behind your
+code. It keeps requirements, decisions, designs, roadmaps, and prompts as typed
+Markdown, rejects broken knowledge before it lands, and serves the current
+record read-only to coding agents over MCP.
 
-No embeddings, model call, hosted index, or Python runtime is required. The
-same repository state produces the same answer.
+The engine is native Rust. Retrieval is deterministic: no embeddings, model
+call, hosted index, or Python runtime, and the same repository state produces
+the same answer. [Read the documentation](https://asdecided.github.io/core/).
 
 ## Install
 
@@ -72,7 +73,7 @@ refuses to overwrite either destination.
 
 Rust is the product engine and the only CLI/MCP runtime in this repository.
 The authoritative language-neutral compatibility fixtures live in
-[`asdecided-spec`](https://github.com/asdecided/spec). Live-corpus validation is
+[`asdecided/spec`](https://github.com/asdecided/spec). Live-corpus validation is
 based on validity, determinism, freshness, and cache/no-cache equality.
 
 Document ingestion remains an ancillary Python connector rather than part of
