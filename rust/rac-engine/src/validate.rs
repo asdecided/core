@@ -275,7 +275,10 @@ pub fn validate(
         &artifact_type,
     ));
     match artifact_type.as_str() {
-        "decision" => issues.extend(validate_decision(artifact)),
+        "decision" => {
+            issues.extend(validate_decision(artifact));
+            issues.extend(crate::sentry::validate_artifact(artifact));
+        }
         "roadmap" => issues.extend(validate_roadmap(artifact)),
         "prompt" => issues.extend(validate_prompt(artifact)),
         "design" => issues.extend(validate_design(artifact)),

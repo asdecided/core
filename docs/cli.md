@@ -581,7 +581,8 @@ enforcement policy. The single enforcement entry point — one exit code, one SA
 document — used by the PR-gate Action.
 
 - **Input:** `decided gate <directory>` — scanned recursively for `*.md`.
-- **Options:** `--json` · `--sarif` (mutually exclusive) · `--top-level`
+- **Options:** `--json` · `--sarif` (mutually exclusive) · `--top-level` ·
+  `--code` · `--repository PATH` · `--base REF` · `--full`
 - **Exit codes:** `0` nothing blocking · `1` a blocking finding (or malformed
   `.decided/config.yaml`) · `2` not a directory
 
@@ -589,6 +590,7 @@ document — used by the PR-gate Action.
 decided gate decisions/                # human summary
 decided gate decisions/ --json         # stable JSON contract (schema_version "1")
 decided gate decisions/ --sarif        # one SARIF 2.1.0 document over all findings
+decided gate decisions/ --code --base origin/main  # include Sentry code checks
 ```
 
 Which findings block versus merely annotate is governed by an optional
@@ -599,6 +601,31 @@ lists of finding codes). With no policy, the gate's verdict is exactly
 `severity`, `enforcement`, `path`, `line`, `message`); `--sarif` emits one
 combined document for GitHub Code Scanning. See
 [Governance](governance.md) for the policy shape and fleet-readiness guidance.
+
+---
+
+## sentry
+
+Enforce the machine-checkable subset of live decisions against source code.
+Rules are declared in a decision artifact's versioned `## Code Constraints`
+YAML block. Enforcement is deterministic and offline: glob matching, regular
+expressions, and language-specific import extraction only—no model judge.
+
+- **Input:** `decided sentry <corpus-directory>`
+- **Options:** `--repository PATH` (default `.`) · `--base REF` (required for
+  diff enforcement) · `--full` (check the complete tree instead) · `--json` ·
+  `--sarif` (mutually exclusive) · `--top-level`
+- **Exit codes:** `0` no violations · `1` a malformed constraint or code
+  violation · `2` bad arguments, repository, or Git base
+
+```bash
+decided sentry decisions/ --base origin/main
+decided sentry decisions/ --full --json
+```
+
+Every report publishes `constrained_decisions / live_decisions` coverage.
+Coverage describes how much of the decision corpus has deterministic
+enforcement; it does not claim that prose-only decisions are enforced.
 
 ---
 

@@ -893,6 +893,10 @@ pub struct GateArgs {
     pub json: bool,
     pub sarif: bool,
     pub top_level: bool,
+    pub code: bool,
+    pub repository: String,
+    pub base: Option<String>,
+    pub full: bool,
 }
 
 /// One enforcement entry point: validation + relationships + review under
@@ -904,7 +908,18 @@ pub fn cmd_gate(args: &GateArgs) -> i32 {
     if !Path::new(&args.directory).is_dir() {
         return usage_error(&format!("not a directory: {}", args.directory));
     }
-    let report = match crate::gate::build_gate(&args.directory, !args.top_level) {
+    if args.code && !args.full && args.base.is_none() {
+        return usage_error("a diff base is required for --code unless --full is supplied");
+    }
+    let report = match crate::gate::build_gate_with_code(
+        &args.directory,
+        !args.top_level,
+        args.code.then_some(crate::gate::CodeGateOptions {
+            repository: &args.repository,
+            base: args.base.as_deref(),
+            full_tree: args.full,
+        }),
+    ) {
         Ok(report) => report,
         Err(exc) => {
             eprintln!("decided: {}", exc.message());
@@ -917,6 +932,48 @@ pub fn cmd_gate(args: &GateArgs) -> i32 {
         emit(output::render_gate_json(&report));
     } else {
         emit(output::render_gate_human(&report));
+    }
+    if report.ok() {
+        EXIT_OK
+    } else {
+        EXIT_VALIDATION_FAILED
+    }
+}
+
+// ---------------------------------------------------------------------------
+// cmd_sentry
+// ---------------------------------------------------------------------------
+
+pub struct SentryArgs {
+    pub directory: String,
+    pub repository: String,
+    pub base: Option<String>,
+    pub full: bool,
+    pub json: bool,
+    pub sarif: bool,
+    pub top_level: bool,
+}
+
+pub fn cmd_sentry(args: &SentryArgs) -> i32 {
+    if !Path::new(&args.directory).is_dir() {
+        return usage_error(&format!("not a directory: {}", args.directory));
+    }
+    let report = match crate::sentry::analyze(
+        &args.directory,
+        &args.repository,
+        !args.top_level,
+        args.base.as_deref(),
+        args.full,
+    ) {
+        Ok(report) => report,
+        Err(message) => return usage_error(&message),
+    };
+    if args.sarif {
+        emit(output::render_sentry_sarif(&report));
+    } else if args.json {
+        emit(output::render_sentry_json(&report));
+    } else {
+        emit(output::render_sentry_human(&report));
     }
     if report.ok() {
         EXIT_OK

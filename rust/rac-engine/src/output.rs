@@ -35,6 +35,7 @@ use crate::resolve::{
     Evidence, Recency, ResolutionResult, ResolvedArtifact, SearchResult, OUTCOME_RESOLVED,
 };
 use crate::review::{ReviewIssue, ReviewReport};
+use crate::sentry::SentryReport;
 use crate::spec::{snake as spec_snake, spec_for, specs, ArtifactSpec};
 use crate::stats::PortfolioStats;
 use crate::validate::py_title;
@@ -2413,6 +2414,12 @@ pub fn render_gate_human(report: &GateReport) -> String {
         format!("Blocking:   {}", blocking.len()),
         format!("Advisory:   {}", advisory.len()),
     ];
+    if let Some(coverage) = &report.code_coverage {
+        lines.push(format!(
+            "Code coverage: {}/{} ({:.1}%)",
+            coverage.constrained_decisions, coverage.live_decisions, coverage.percent
+        ));
+    }
 
     let mut emit_group = |group: &[&GateFinding], title: &str, icon: &str| {
         if group.is_empty() {
@@ -2467,6 +2474,16 @@ pub fn render_gate_json(report: &GateReport) -> String {
         "findings".into(),
         Value::Array(report.findings.iter().map(gate_finding_value).collect()),
     );
+    if let Some(coverage) = &report.code_coverage {
+        payload.insert(
+            "code_coverage".into(),
+            json!({
+                "live_decisions": coverage.live_decisions,
+                "constrained_decisions": coverage.constrained_decisions,
+                "percent": coverage.percent,
+            }),
+        );
+    }
     dumps_indent2(&Value::Object(payload))
 }
 
@@ -2488,6 +2505,95 @@ pub fn render_gate_sarif(report: &GateReport) -> String {
         })
         .collect();
     sarif_document(results)
+}
+
+// --- sentry ------------------------------------------------------------------
+
+pub fn render_sentry_human(report: &SentryReport) -> String {
+    let mut lines = vec![
+        bold("Code Sentry"),
+        "===========".to_string(),
+        String::new(),
+        format!("Corpus:      {}", report.corpus),
+        format!("Repository:  {}", report.repository),
+        format!(
+            "Coverage:    {}/{} ({:.1}%)",
+            report.constrained_decisions,
+            report.live_decisions,
+            report.coverage_percent()
+        ),
+        format!("Violations:  {}", report.findings.len()),
+    ];
+    for finding in &report.findings {
+        lines.push(String::new());
+        lines.push(format!("  {} {}", red("\u{2717}"), loc(&finding.path, finding.line)));
+        lines.push(format!(
+            "      [{}] {}",
+            finding.rule_id.as_deref().unwrap_or(finding.code),
+            finding.message
+        ));
+        lines.push(format!("      decision: {}", finding.decision_path));
+    }
+    lines.push(String::new());
+    if report.ok() {
+        lines.push(green("\u{2713} Sentry passed."));
+    } else {
+        lines.push(red(&format!(
+            "\u{2717} Sentry failed \u{2014} {} finding(s).",
+            report.findings.len()
+        )));
+    }
+    lines.join("\n")
+}
+
+pub fn render_sentry_json(report: &SentryReport) -> String {
+    let findings: Vec<Value> = report
+        .findings
+        .iter()
+        .map(|finding| {
+            json!({
+                "code": finding.code,
+                "decision_path": finding.decision_path,
+                "rule_id": finding.rule_id,
+                "path": finding.path,
+                "line": finding.line,
+                "message": finding.message,
+            })
+        })
+        .collect();
+    dumps_indent2(&json!({
+        "schema_version": "1",
+        "corpus": report.corpus,
+        "repository": report.repository,
+        "base": report.base,
+        "full_tree": report.full_tree,
+        "ok": report.ok(),
+        "coverage": {
+            "live_decisions": report.live_decisions,
+            "constrained_decisions": report.constrained_decisions,
+            "percent": report.coverage_percent(),
+        },
+        "findings": findings,
+    }))
+}
+
+pub fn render_sentry_sarif(report: &SentryReport) -> String {
+    sarif_document(
+        report
+            .findings
+            .iter()
+            .map(|finding| SarifResult {
+                rule_id: finding.code.to_string(),
+                level: "error",
+                message: format!(
+                    "{} (decision: {})",
+                    finding.message, finding.decision_path
+                ),
+                uri: quote_uri(&finding.path),
+                line: finding.line,
+            })
+            .collect(),
+    )
 }
 
 // --- doctor ------------------------------------------------------------------
