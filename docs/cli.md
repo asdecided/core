@@ -1490,6 +1490,24 @@ The same lookup is available to agents over MCP as an additive optional `path`
 argument on the `find_decisions` tool (the five-tool surface is unchanged);
 `find_decisions` called with a `topic` is byte-identical to before.
 
+### Herald rendering
+
+`decided herald <directory>` turns a newline-delimited changed-path file into
+Herald's deterministic pull-request comment without Python:
+
+```bash
+decided herald decisions/ \
+  --paths-file changed-paths.txt \
+  --link-base https://github.com/owner/repo/blob/HEAD \
+  --max-inline 5 \
+  --out governing-decisions.md
+```
+
+`--github-output PATH` optionally appends `has_decisions=true|false` for a
+composite action output. The renderer deduplicates decisions and paths, sorts
+them, collapses overflow into a details element, and exits successfully for an
+ungoverned diff. It performs no enforcement; Herald reports facts only.
+
 
 ---
 
