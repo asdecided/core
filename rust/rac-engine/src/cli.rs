@@ -6,11 +6,11 @@
 
 use crate::commands::{
     cmd_coverage, cmd_decisions_for, cmd_diff, cmd_doctor, cmd_eval, cmd_export, cmd_find,
-    cmd_gate, cmd_hook, cmd_improve, cmd_index, cmd_init, cmd_inspect, cmd_mcp_stats, cmd_migrate,
+    cmd_gate, cmd_herald, cmd_hook, cmd_improve, cmd_index, cmd_init, cmd_inspect, cmd_mcp_stats, cmd_migrate,
     cmd_new, cmd_portfolio, cmd_quickstart, cmd_relationships, cmd_rename, cmd_resolve,
     cmd_retrieve, cmd_review, cmd_schema, cmd_sentry, cmd_skill, cmd_stats, cmd_telemetry,
     cmd_templates, cmd_usage, cmd_validate, CoverageArgs, DecisionsForArgs, DiffArgs, DoctorArgs,
-    EvalArgs, ExportArgs, FindArgs, GateArgs, HookArgs, ImproveArgs, IndexArgs, InitArgs,
+    EvalArgs, ExportArgs, FindArgs, GateArgs, HeraldArgs, HookArgs, ImproveArgs, IndexArgs, InitArgs,
     InspectArgs, McpStatsArgs, MigrateArgs, NewArgs, PortfolioArgs, QuickstartArgs,
     RelationshipsArgs, RenameArgs, ResolveArgs, RetrieveArgs, ReviewArgs, SchemaArgs, SentryArgs,
     SkillArgs, StatsArgs, TelemetryArgs, TemplatesArgs, UsageArgs, ValidateArgs, WatchkeeperArgs,
@@ -155,7 +155,7 @@ fn run_dispatch(args: &[String]) -> u8 {
     // Native-only additions dispatch but are deliberately NOT in SUBCOMMANDS:
     // the retired Python oracle's `invalid choice` bytes remain pinned by the
     // bounded compatibility suite.
-    if !matches!(first.as_str(), "retrieve" | "sentry")
+    if !matches!(first.as_str(), "retrieve" | "sentry" | "herald")
         && !SUBCOMMANDS.contains(&first.as_str())
     {
         return argparse_error("decided", &invalid_choice_message(first));
@@ -216,6 +216,7 @@ fn run_dispatch(args: &[String]) -> u8 {
         "decisions-for" => run_decisions_for(&rest),
         "gate" => run_gate(&rest),
         "sentry" => run_sentry(&rest),
+        "herald" => run_herald(&rest),
         "doctor" => run_doctor(&rest),
         "watchkeeper" => run_watchkeeper(&rest),
         "mcp-stats" => run_mcp_stats(&rest),
@@ -878,6 +879,82 @@ fn run_sentry(rest: &[&String]) -> u8 {
         full,
         json,
         sarif,
+        top_level,
+    }) as u8
+}
+
+fn run_herald(rest: &[&String]) -> u8 {
+    let prog = "decided herald";
+    let mut directory = None;
+    let mut paths_file = None;
+    let mut link_base = String::new();
+    let mut max_inline = 5i64;
+    let mut out = None;
+    let mut github_output = None;
+    let mut top_level = false;
+    let mut extras = Vec::new();
+    let mut i = 0;
+    while i < rest.len() {
+        let arg = rest[i].as_str();
+        if arg == "-" || !arg.starts_with('-') {
+            if directory.is_none() {
+                directory = Some(arg.to_string());
+            } else {
+                extras.push(arg.to_string());
+            }
+            i += 1;
+            continue;
+        }
+        match arg {
+            "--top-level" => top_level = true,
+            "--paths-file" | "--link-base" | "--max-inline" | "--out" | "--github-output" => {
+                i += 1;
+                if i >= rest.len() {
+                    return argparse_error(prog, &format!("argument {arg}: expected one argument"));
+                }
+                let value = rest[i].to_string();
+                match arg {
+                    "--paths-file" => paths_file = Some(value),
+                    "--link-base" => link_base = value,
+                    "--max-inline" => {
+                        max_inline = match value.parse() {
+                            Ok(value) => value,
+                            Err(_) => {
+                                return argparse_error(
+                                    prog,
+                                    &format!("argument --max-inline: invalid int value: '{value}'"),
+                                )
+                            }
+                        }
+                    }
+                    "--out" => out = Some(value),
+                    "--github-output" => github_output = Some(value),
+                    _ => unreachable!(),
+                }
+            }
+            other => extras.push(other.to_string()),
+        }
+        i += 1;
+    }
+    let Some(directory) = directory else {
+        return argparse_error(prog, "the following arguments are required: directory");
+    };
+    let Some(paths_file) = paths_file else {
+        return argparse_error(prog, "the following arguments are required: --paths-file");
+    };
+    let Some(out) = out else {
+        return argparse_error(prog, "the following arguments are required: --out");
+    };
+    if !extras.is_empty() {
+        return unrecognized(&extras);
+    }
+    cmd_herald(&HeraldArgs {
+        directory,
+        paths_file,
+        link_base,
+        max_inline,
+        out,
+        github_output,
         top_level,
     }) as u8
 }

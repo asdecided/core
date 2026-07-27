@@ -70,6 +70,7 @@ mod freshness_watch;
 pub mod coverage;
 pub mod review;
 pub mod gate;
+pub mod herald;
 pub mod sentry;
 pub mod doctor;
 pub mod mdhtml;

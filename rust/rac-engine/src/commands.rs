@@ -983,6 +983,52 @@ pub fn cmd_sentry(args: &SentryArgs) -> i32 {
 }
 
 // ---------------------------------------------------------------------------
+// cmd_herald
+// ---------------------------------------------------------------------------
+
+pub struct HeraldArgs {
+    pub directory: String,
+    pub paths_file: String,
+    pub link_base: String,
+    pub max_inline: i64,
+    pub out: String,
+    pub github_output: Option<String>,
+    pub top_level: bool,
+}
+
+pub fn cmd_herald(args: &HeraldArgs) -> i32 {
+    if !Path::new(&args.directory).is_dir() {
+        return usage_error(&format!("not a directory: {}", args.directory));
+    }
+    let paths = match std::fs::read_to_string(&args.paths_file) {
+        Ok(text) => text.lines().map(str::trim).filter(|line| !line.is_empty()).map(str::to_string).collect::<Vec<_>>(),
+        Err(error) => return usage_error(&format!("could not read paths file {}: {error}", args.paths_file)),
+    };
+    let report = crate::herald::collect(&args.directory, &paths, !args.top_level);
+    let body = crate::herald::render(&report, &args.link_base, args.max_inline);
+    if let Err(error) = std::fs::write(&args.out, body) {
+        return usage_error(&format!("could not write Herald output {}: {error}", args.out));
+    }
+    let has_decisions = if report.has_decisions() { "true" } else { "false" };
+    if let Some(path) = &args.github_output {
+        use std::io::Write;
+        let result = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .and_then(|mut file| writeln!(file, "has_decisions={has_decisions}"));
+        if let Err(error) = result {
+            return usage_error(&format!("could not write command output {path}: {error}"));
+        }
+    }
+    emit(format!(
+        "{} governing decision(s); has_decisions={has_decisions}",
+        report.decisions.len()
+    ));
+    EXIT_OK
+}
+
+// ---------------------------------------------------------------------------
 // cmd_watchkeeper
 // ---------------------------------------------------------------------------
 
