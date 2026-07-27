@@ -183,6 +183,7 @@
       ],
       "optional": [
         "supersedes",
+        "code constraints",
         "related requirements",
         "related roadmaps",
         "related designs",
@@ -219,6 +220,10 @@
         [
           "supersedes",
           "The artifact this one supersedes"
+        ],
+        [
+          "code constraints",
+          "Deterministic source-code rules that enforce the machine-checkable subset of this decision"
         ],
         [
           "related requirements",

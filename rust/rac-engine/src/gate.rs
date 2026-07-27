@@ -27,6 +27,7 @@ pub const ENFORCEMENT_ADVISORY: &str = "advisory";
 pub const SOURCE_VALIDATE: &str = "validate";
 pub const SOURCE_RELATIONSHIPS: &str = "relationships";
 pub const SOURCE_REVIEW: &str = "review";
+pub const SOURCE_SENTRY: &str = "sentry";
 
 // ---------------------------------------------------------------------------
 // MalformedRepositoryConfig (decided.services.init)
@@ -287,6 +288,13 @@ pub struct GateReport {
     pub directory: String,
     pub recursive: bool,
     pub findings: Vec<GateFinding>,
+    pub code_coverage: Option<CodeCoverage>,
+}
+
+pub struct CodeCoverage {
+    pub live_decisions: usize,
+    pub constrained_decisions: usize,
+    pub percent: f64,
 }
 
 impl GateReport {
@@ -350,6 +358,20 @@ fn validate_findings(result: &DirectoryValidation) -> Vec<RawFinding> {
 /// review, then enforce the corpus policy. Findings the policy turns `off`
 /// are dropped; the rest sort by `(path, line or 0, source, code, message)`.
 pub fn build_gate(directory: &str, recursive: bool) -> Result<GateReport, MalformedConfig> {
+    build_gate_with_code(directory, recursive, None)
+}
+
+pub struct CodeGateOptions<'a> {
+    pub repository: &'a str,
+    pub base: Option<&'a str>,
+    pub full_tree: bool,
+}
+
+pub fn build_gate_with_code(
+    directory: &str,
+    recursive: bool,
+    code: Option<CodeGateOptions<'_>>,
+) -> Result<GateReport, MalformedConfig> {
     // The oracle raises from load_enforcement_policy first, then
     // load_overrides — mirror that order so a doubly-malformed config
     // reports the enforcement error.
@@ -363,6 +385,7 @@ pub fn build_gate(directory: &str, recursive: bool) -> Result<GateReport, Malfor
     let review: ReviewReport = review_from_portfolio(directory, portfolio, recursive);
 
     let mut findings: Vec<GateFinding> = Vec::new();
+    let mut code_coverage = None;
     let mut add = |source: &'static str,
                    code: String,
                    severity: String,
@@ -435,6 +458,46 @@ pub fn build_gate(directory: &str, recursive: bool) -> Result<GateReport, Malfor
         );
     }
 
+    if let Some(options) = code {
+        match crate::sentry::analyze(
+            directory,
+            options.repository,
+            recursive,
+            options.base,
+            options.full_tree,
+        ) {
+            Ok(report) => {
+                code_coverage = Some(CodeCoverage {
+                    live_decisions: report.live_decisions,
+                    constrained_decisions: report.constrained_decisions,
+                    percent: report.coverage_percent(),
+                });
+                for finding in report.findings {
+                    add(
+                        SOURCE_SENTRY,
+                        finding.code.to_string(),
+                        "error".to_string(),
+                        finding.path,
+                        finding.line,
+                        finding.message,
+                        ENFORCEMENT_BLOCKING,
+                    );
+                }
+            }
+            Err(message) => {
+                add(
+                    SOURCE_SENTRY,
+                    crate::sentry::INVALID_CONSTRAINT.to_string(),
+                    "error".to_string(),
+                    directory.to_string(),
+                    None,
+                    message,
+                    ENFORCEMENT_BLOCKING,
+                );
+            }
+        }
+    }
+
     findings.sort_by(|a, b| {
         a.path
             .cmp(&b.path)
@@ -447,5 +510,6 @@ pub fn build_gate(directory: &str, recursive: bool) -> Result<GateReport, Malfor
         directory: directory.to_string(),
         recursive,
         findings,
+        code_coverage,
     })
 }

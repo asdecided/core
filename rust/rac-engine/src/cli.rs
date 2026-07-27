@@ -8,12 +8,12 @@ use crate::commands::{
     cmd_coverage, cmd_decisions_for, cmd_diff, cmd_doctor, cmd_eval, cmd_export, cmd_find,
     cmd_gate, cmd_hook, cmd_improve, cmd_index, cmd_init, cmd_inspect, cmd_mcp_stats, cmd_migrate,
     cmd_new, cmd_portfolio, cmd_quickstart, cmd_relationships, cmd_rename, cmd_resolve,
-    cmd_retrieve, cmd_review, cmd_schema, cmd_skill, cmd_stats, cmd_telemetry, cmd_templates,
-    cmd_usage, cmd_validate, CoverageArgs, DecisionsForArgs, DiffArgs, DoctorArgs, EvalArgs,
-    ExportArgs, FindArgs, GateArgs, HookArgs, ImproveArgs, IndexArgs, InitArgs, InspectArgs,
-    McpStatsArgs, MigrateArgs, NewArgs, PortfolioArgs, QuickstartArgs, RelationshipsArgs,
-    RenameArgs, ResolveArgs, RetrieveArgs, ReviewArgs, SchemaArgs, SkillArgs, StatsArgs,
-    TelemetryArgs, TemplatesArgs, UsageArgs, ValidateArgs, WatchkeeperArgs,
+    cmd_retrieve, cmd_review, cmd_schema, cmd_sentry, cmd_skill, cmd_stats, cmd_telemetry,
+    cmd_templates, cmd_usage, cmd_validate, CoverageArgs, DecisionsForArgs, DiffArgs, DoctorArgs,
+    EvalArgs, ExportArgs, FindArgs, GateArgs, HookArgs, ImproveArgs, IndexArgs, InitArgs,
+    InspectArgs, McpStatsArgs, MigrateArgs, NewArgs, PortfolioArgs, QuickstartArgs,
+    RelationshipsArgs, RenameArgs, ResolveArgs, RetrieveArgs, ReviewArgs, SchemaArgs, SentryArgs,
+    SkillArgs, StatsArgs, TelemetryArgs, TemplatesArgs, UsageArgs, ValidateArgs, WatchkeeperArgs,
 };
 use crate::commands::cmd_watchkeeper;
 use crate::output::rac_version;
@@ -152,11 +152,12 @@ fn run_dispatch(args: &[String]) -> u8 {
     if first.starts_with('-') {
         return argparse_error("decided", &format!("unrecognized arguments: {first}"));
     }
-    // `retrieve` (ADR-113, oracle-next 0.1.dev55+gf2091befd) dispatches but is
-    // deliberately NOT in SUBCOMMANDS: the mainline oracle's `invalid choice`
-    // message does not list it, and that message's bytes are pinned by the
-    // mainline parity suite (case `err-unknown-subcommand`).
-    if first != "retrieve" && !SUBCOMMANDS.contains(&first.as_str()) {
+    // Native-only additions dispatch but are deliberately NOT in SUBCOMMANDS:
+    // the retired Python oracle's `invalid choice` bytes remain pinned by the
+    // bounded compatibility suite.
+    if !matches!(first.as_str(), "retrieve" | "sentry")
+        && !SUBCOMMANDS.contains(&first.as_str())
+    {
         return argparse_error("decided", &invalid_choice_message(first));
     }
 
@@ -214,6 +215,7 @@ fn run_dispatch(args: &[String]) -> u8 {
         "coverage" => run_coverage(&rest),
         "decisions-for" => run_decisions_for(&rest),
         "gate" => run_gate(&rest),
+        "sentry" => run_sentry(&rest),
         "doctor" => run_doctor(&rest),
         "watchkeeper" => run_watchkeeper(&rest),
         "mcp-stats" => run_mcp_stats(&rest),
@@ -734,17 +736,23 @@ fn run_gate(rest: &[&String]) -> u8 {
     let mut json = false;
     let mut sarif = false;
     let mut top_level = false;
+    let mut code = false;
+    let mut repository = ".".to_string();
+    let mut base: Option<String> = None;
+    let mut full = false;
     let mut extras: Vec<String> = Vec::new();
     let mut positional_only = false;
 
-    for arg in rest {
-        let arg = arg.as_str();
+    let mut i = 0;
+    while i < rest.len() {
+        let arg = rest[i].as_str();
         if positional_only || arg == "-" || !arg.starts_with('-') {
             if directory.is_none() {
                 directory = Some(arg.to_string());
             } else {
                 extras.push(arg.to_string());
             }
+            i += 1;
             continue;
         }
         match arg {
@@ -763,10 +771,24 @@ fn run_gate(rest: &[&String]) -> u8 {
                 sarif = true;
             }
             "--top-level" => top_level = true,
+            "--code" => code = true,
+            "--full" => full = true,
+            "--repository" | "--base" => {
+                i += 1;
+                if i >= rest.len() {
+                    return argparse_error(prog, &format!("argument {arg}: expected one argument"));
+                }
+                if arg == "--repository" {
+                    repository = rest[i].to_string();
+                } else {
+                    base = Some(rest[i].to_string());
+                }
+            }
             // NO --recursive here (gate declares --top-level inline, not
             // scope_parent) — it bubbles to the top-level parser's error.
             other => extras.push(other.to_string()),
         }
+        i += 1;
     }
 
     // `directory` is a REQUIRED positional — unlike doctor/coverage.
@@ -779,6 +801,81 @@ fn run_gate(rest: &[&String]) -> u8 {
 
     cmd_gate(&GateArgs {
         directory,
+        json,
+        sarif,
+        top_level,
+        code,
+        repository,
+        base,
+        full,
+    }) as u8
+}
+
+fn run_sentry(rest: &[&String]) -> u8 {
+    let prog = "decided sentry";
+    let mut directory: Option<String> = None;
+    let mut repository = ".".to_string();
+    let mut base: Option<String> = None;
+    let mut full = false;
+    let mut json = false;
+    let mut sarif = false;
+    let mut top_level = false;
+    let mut extras = Vec::new();
+    let mut positional_only = false;
+    let mut i = 0;
+    while i < rest.len() {
+        let arg = rest[i].as_str();
+        if positional_only || arg == "-" || !arg.starts_with('-') {
+            if directory.is_none() {
+                directory = Some(arg.to_string());
+            } else {
+                extras.push(arg.to_string());
+            }
+            i += 1;
+            continue;
+        }
+        match arg {
+            "--" => positional_only = true,
+            "--json" => {
+                if let Some(code) = mutex_check(prog, "--json", "--sarif", sarif) {
+                    return code;
+                }
+                json = true;
+            }
+            "--sarif" => {
+                if let Some(code) = mutex_check(prog, "--sarif", "--json", json) {
+                    return code;
+                }
+                sarif = true;
+            }
+            "--full" => full = true,
+            "--top-level" => top_level = true,
+            "--repository" | "--base" => {
+                i += 1;
+                if i >= rest.len() {
+                    return argparse_error(prog, &format!("argument {arg}: expected one argument"));
+                }
+                if arg == "--repository" {
+                    repository = rest[i].to_string();
+                } else {
+                    base = Some(rest[i].to_string());
+                }
+            }
+            other => extras.push(other.to_string()),
+        }
+        i += 1;
+    }
+    let Some(directory) = directory else {
+        return argparse_error(prog, "the following arguments are required: directory");
+    };
+    if !extras.is_empty() {
+        return unrecognized(&extras);
+    }
+    cmd_sentry(&SentryArgs {
+        directory,
+        repository,
+        base,
+        full,
         json,
         sarif,
         top_level,
