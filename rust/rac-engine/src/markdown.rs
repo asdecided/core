@@ -1354,7 +1354,7 @@ fn parse_link_title(
     state
 }
 
-const ENTITIES_JSON: &str = include_str!("../../spec/markdown-entities.json");
+const ENTITIES_JSON: &str = include_str!("../assets/spec/markdown-entities.json");
 
 fn entities() -> &'static HashMap<String, String> {
     static MAP: OnceLock<HashMap<String, String>> = OnceLock::new();

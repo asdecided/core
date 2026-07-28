@@ -27,6 +27,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f8ebf5827e4ac4fd5946560e6a99776ea73b596d80898f357007317a7141e47"
 
 [[package]]
+name = "asdecided-core"
+version = "0.24.1"
+dependencies = [
+ "globset",
+ "inotify",
+ "markdown-it",
+ "memmap2",
+ "rayon",
+ "regex",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+]
+
+[[package]]
 name = "bitflags"
 version = "2.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -112,16 +127,16 @@ checksum = "61803da095bee82a81bb1a452ecc25d3b2f1416d1897eb86430c6159ef717c17"
 
 [[package]]
 name = "decided"
-version = "0.0.1"
+version = "0.24.1"
 dependencies = [
- "rac-engine",
+ "asdecided-core",
 ]
 
 [[package]]
 name = "decided-mcp"
-version = "0.0.1"
+version = "0.24.1"
 dependencies = [
- "rac-engine",
+ "asdecided-core",
  "serde",
  "serde_json",
 ]
@@ -366,21 +381,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dfbc457d0c7a0759a614551b11a6409e5951f6c7537be1f1b7682b9ae9230368"
 dependencies = [
  "proc-macro2",
-]
-
-[[package]]
-name = "rac-engine"
-version = "0.0.1"
-dependencies = [
- "globset",
- "inotify",
- "markdown-it",
- "memmap2",
- "rayon",
- "regex",
- "serde",
- "serde_json",
- "serde_yaml",
 ]
 
 [[package]]
