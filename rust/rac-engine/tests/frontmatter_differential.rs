@@ -2,7 +2,7 @@
 //! support). Ignored by default; the fuzz harness runs it with:
 //!
 //!   DECIDED_FM_DIFF_IN=<inputs.json> DECIDED_FM_DIFF_OUT=<out.json> \
-//!       cargo test -p rac-engine --test frontmatter_differential -- --ignored
+//!       cargo test -p asdecided-core --test frontmatter_differential -- --ignored
 //!
 //! `inputs.json` is a JSON array of raw frontmatter strings; the output is a
 //! JSON array of {data, load_issues, metadata, issues} objects in the same
