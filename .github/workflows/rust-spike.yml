@@ -61,7 +61,7 @@ jobs:
       # before the broader workspace suite.
       - name: Freshness tracker (Linux inotify + stat fallback)
         working-directory: rust
-        run: cargo test -p rac-engine --test freshness_tracker --release
+        run: cargo test -p asdecided-core --test freshness_tracker --release
 
       - name: Rust workspace unit and bounded regression suites
         working-directory: rust

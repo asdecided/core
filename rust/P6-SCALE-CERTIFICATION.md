@@ -61,7 +61,7 @@ Build and run:
 
 ```sh
 cd rust
-cargo build --release -p rac-engine --example p6_scale
+cargo build --release -p asdecided-core --example p6_scale
 target/release/examples/p6_scale snapshot CORPUS CACHE_DIR 7
 target/release/examples/p6_scale delta CORPUS CACHE_DIR 7
 ```
