@@ -1,9 +1,18 @@
 [package]
-name = "rac-engine"
+name = "asdecided-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-publish.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Deterministic, offline engine for validating and enforcing engineering decisions"
+readme = "README.md"
+keywords = ["decisions", "architecture", "agents", "validation", "cli"]
+categories = ["development-tools", "command-line-utilities"]
+publish = ["crates-io"]
+
+[lib]
+name = "rac_engine"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

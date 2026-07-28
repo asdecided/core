@@ -52,7 +52,13 @@ payload = {
     "re_digit": ranges(lambda cp: bool(d_re.match(chr(cp)))),
     "re_word": ranges(lambda cp: bool(w_re.match(chr(cp)))),
 }
-target = Path(__file__).resolve().parent / "pycompat-tables.json"
+target = (
+    Path(__file__).resolve().parents[1]
+    / "rac-engine"
+    / "assets"
+    / "spec"
+    / "pycompat-tables.json"
+)
 target.write_text(json.dumps(payload, ensure_ascii=True, sort_keys=True) + "\n")
 print(f"wrote {target}: {len(casefold)} casefold entries, "
       f"{len(payload['str_whitespace'])} ws ranges, "

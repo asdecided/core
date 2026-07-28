@@ -41,17 +41,17 @@ use crate::stats::PortfolioStats;
 use crate::validate::py_title;
 
 /// The injectable version string (PORT-CONTRACT decision 6): `DECIDED_RS_VERSION`
-/// when set, else the spike default.
+/// when set, otherwise the Cargo package version.
 pub fn rac_version() -> String {
     // Precedence: a runtime `DECIDED_RS_VERSION` (the parity harness pins the
     // oracle's exact string here) > the version compiled in at build time
     // (`DECIDED_RS_VERSION` set when the release wheel builds, so a distributed
     // binary reports the right version with no runtime pin, native-engine
-    // cutover) > the dev fallback.
+    // cutover) > the package version used by ordinary Cargo builds.
     std::env::var("DECIDED_RS_VERSION")
         .ok()
         .or_else(|| option_env!("DECIDED_RS_VERSION").map(str::to_string))
-        .unwrap_or_else(|| "0.0.0-rs".to_string())
+        .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string())
 }
 
 // --- Minimal color (auto-disabled when not writing to a TTY) ----------------

@@ -6,6 +6,10 @@ details, release history over commit history.
 
 ## Unreleased
 
+- Added crates.io packaging for the native CLI, making
+  `cargo install decided` a supported installation path. The internal engine
+  publishes first as `asdecided-core`; subsequent releases use short-lived
+  crates.io trusted-publishing credentials rather than a stored registry token.
 - Renamed the native engine repository to `asdecided/core`, the
   language-neutral contract repository to `asdecided/spec`, and the
   CI delivery repository to `asdecided/ci`. Active documentation,

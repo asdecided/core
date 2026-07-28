@@ -3,7 +3,13 @@ name = "decided"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-publish.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Engineering decisions your agents can follow"
+readme = "README.md"
+keywords = ["decisions", "architecture", "agents", "cli", "offline"]
+categories = ["command-line-utilities", "development-tools"]
+publish = ["crates-io"]
 
 [dependencies]
-rac-engine = { path = "../rac-engine" }
+rac-engine = { package = "asdecided-core", version = "=0.24.1", path = "../rac-engine" }

@@ -18,6 +18,12 @@ Install the native engine and MCP server through Homebrew:
 brew install asdecided/tap/asdecided-core
 ```
 
+Rust users can install the `decided` CLI directly from crates.io:
+
+```sh
+cargo install decided
+```
+
 Native `decided` and `decided-mcp` archives are also published on
 [GitHub Releases](https://github.com/asdecided/core/releases).
 

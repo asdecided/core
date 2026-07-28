@@ -4,7 +4,7 @@
 //!
 //! Module map (keep cross-module surface minimal):
 //! - `pycompat`: CPython string/float/round/repr semantics, table-driven
-//!   from `rust/spec/pycompat-tables.json`.
+//!   from the packaged `assets/spec/pycompat-tables.json`.
 //! - `pyjson`: the Python `json.dumps`-shaped writer (indent=2 and JSONL).
 //! - `frontmatter`: bounded PyYAML-1.1 SafeLoader subset.
 //! - `markdown`: CommonMark block-boundary tokenizer (headings + inline raw).
