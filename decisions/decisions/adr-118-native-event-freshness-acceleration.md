@@ -98,3 +98,27 @@ the stat/content differ remains truth.
 - ADR-105
 - ADR-114
 - ADR-116
+
+## Code Constraints
+
+```yaml
+version: 1
+eligibility: eligible
+reason: "Linux watcher scope, overflow degradation, and platform fallback are explicit native implementation boundaries."
+rules:
+  - id: watcher-remains-linux-targeted
+    kind: require_pattern
+    path_glob: "rust/rac-engine/src/freshness_watch.rs"
+    pattern: '#\[cfg\(target_os = "linux"\)\]'
+    message: "The native event accelerator must remain explicitly Linux-targeted."
+  - id: watcher-overflow-never-asserts-clean
+    kind: require_pattern
+    path_glob: "rust/rac-engine/src/freshness_watch.rs"
+    pattern: 'EventMask::Q_OVERFLOW'
+    message: "Queue overflow must remain a dirty signal that falls back to authoritative scanning."
+  - id: tracker-keeps-mode-and-fallback-regression
+    kind: require_pattern
+    path_glob: "rust/rac-engine/tests/freshness_tracker.rs"
+    pattern: 'watcher_setup_and_runtime_failure_degrade_to_stat'
+    message: "Watcher setup and runtime failures must continue to degrade to the stat rung."
+```

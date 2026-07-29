@@ -57,6 +57,30 @@ The boundary is firm. RAC will **not**:
 Generation lives in `rac` (Core); the extension orchestrates, registers MCP,
 watches for drift, and presents — it computes nothing (ADR-063).
 
+## Code Constraints
+
+```yaml
+version: 1
+eligibility: eligible
+reason: "Context projection and post-edit enforcement have deterministic engine and CI anchors."
+rules:
+  - id: core-keeps-agent-rules-generator
+    kind: require_pattern
+    path_glob: "rust/rac-engine/src/agent_rules.rs"
+    pattern: 'pub fn generate_agent_rules'
+    message: "Core must retain the engine-owned agent-context projection."
+  - id: agent-rules-has-no-model-client
+    kind: forbid_import
+    path_glob: "rust/rac-engine/src/agent_rules.rs"
+    pattern: '^(reqwest|hyper|ureq|openai|anthropic)(::|$)'
+    message: "Agent-context generation must remain deterministic and local."
+  - id: core-keeps-post-edit-sentry
+    kind: require_pattern
+    path_glob: ".github/workflows/pr-checks.yml"
+    pattern: 'decided sentry decisions'
+    message: "Core pull requests must retain deterministic post-edit code enforcement."
+```
+
 ## Consequences
 
 The engine stays deterministic, offline, no-telemetry, and authoritative — its

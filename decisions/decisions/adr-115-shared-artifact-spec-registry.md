@@ -129,3 +129,17 @@ Architecture
 
 - rust/rac-engine/assets/spec/artifact-specs.json
 - rust/rac-engine/src/spec.rs
+
+## Code Constraints
+
+```yaml
+version: 1
+eligibility: eligible
+reason: "The native engine must embed the vendored language-neutral registry rather than recreate it in Rust."
+rules:
+  - id: rust-embeds-shared-artifact-registry
+    kind: require_pattern
+    path_glob: "rust/rac-engine/src/spec.rs"
+    pattern: 'include_str!\("../assets/spec/artifact-specs\.json"\)'
+    message: "The native engine must continue to consume the shared artifact registry bytes."
+```

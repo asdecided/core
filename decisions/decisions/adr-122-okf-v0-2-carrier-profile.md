@@ -103,6 +103,30 @@ different claims. Conflating them would overstate trust.
 Rejected. New exports would knowingly use superseded conventions and miss the
 versioned interoperability surface.
 
+## Code Constraints
+
+```yaml
+version: 1
+eligibility: eligible
+reason: "The carrier version, relationship projection, and no-invented-trust boundary are fixture-checkable."
+rules:
+  - id: okf-export-keeps-v02-version
+    kind: require_pattern
+    path_glob: "rust/rac-engine/src/okf.rs"
+    pattern: 'okf_version: \\"0\.2\\"'
+    message: "New OKF exports must continue to target v0.2."
+  - id: okf-export-keeps-related-concepts
+    kind: require_pattern
+    path_glob: "rust/rac-engine/src/okf.rs"
+    pattern: '# Related concepts'
+    message: "Structural relationships must remain ordinary related-concept links."
+  - id: okf-tests-guard-invented-trust
+    kind: require_pattern
+    path_glob: "rust/rac-engine/tests/okf_v02.rs"
+    pattern: '(?s)"sources:".*"verified:".*"stale_after:".*"attester:"'
+    message: "The OKF v0.2 fixture must continue to reject invented provenance and trust fields."
+```
+
 ## Related Decisions
 
 - adr-007

@@ -147,3 +147,22 @@ Architecture
   live-decision scope semantics; only its data-supply path is unified.
 - ADR-002: content addressing and lossless serialisation keep the two added
   structures deterministic and byte-identical across runs and platforms.
+
+## Code Constraints
+
+```yaml
+version: 1
+eligibility: eligible
+reason: "The unified serving model and its persisted projections have concrete native source and parity-test anchors."
+rules:
+  - id: derived-index-keeps-summary-and-scope
+    kind: require_pattern
+    path_glob: "rust/rac-engine/src/derived.rs"
+    pattern: '(?s)pub struct DerivedIndex.*pub portfolio_summary: Value.*pub scope_rows: Vec<ScopeRow>'
+    message: "The canonical derived read model must retain portfolio and decision-scope projections."
+  - id: mapped-store-keeps-summary-and-scope-parity
+    kind: require_pattern
+    path_glob: "rust/rac-engine/tests/index_store_vectors.rs"
+    pattern: '(?s)reader\.scope_rows\(\).*reader\.portfolio_summary\(\)'
+    message: "The mapped-store parity suite must continue to cover both unified projections."
+```

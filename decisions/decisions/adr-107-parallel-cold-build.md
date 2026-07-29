@@ -168,3 +168,22 @@ module-level worker is the portable, state-clean choice the constraint demands.
 - ADR-104
 - ADR-105
 - ADR-106
+
+## Code Constraints
+
+```yaml
+version: 1
+eligibility: eligible
+reason: "Parallel construction and its serial fault floor are named native paths with byte-parity tests."
+rules:
+  - id: native-build-keeps-bounded-rayon-pool
+    kind: require_pattern
+    path_glob: "rust/rac-engine/src/parallel_build.rs"
+    pattern: '(?s)rayon::ThreadPoolBuilder::new\(\).*num_threads\(n_workers\)'
+    message: "The native cold build must retain its explicitly bounded worker pool."
+  - id: parallel-fault-keeps-serial-floor
+    kind: require_pattern
+    path_glob: "rust/rac-engine/tests/parallel_build.rs"
+    pattern: 'a fault must land on the serial floor'
+    message: "A parallel worker failure must remain covered by the serial fallback test."
+```
