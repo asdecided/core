@@ -185,3 +185,22 @@ one-shot path serves.
 - warm-by-default
 - candidate-discovery
 - single-node-scale-residuals
+
+## Code Constraints
+
+```yaml
+version: 1
+eligibility: eligible
+reason: "The default cache posture and explicit rollback flags are deterministic CLI properties."
+rules:
+  - id: find-and-validate-default-cache-on
+    kind: require_pattern
+    path_glob: "rust/rac-engine/src/cli.rs"
+    pattern: '(?s)let mut cache = true;.*let mut cache = true;'
+    message: "The native validate and find paths must continue to default to the engineered cache."
+  - id: cli-keeps-no-cache-escape-hatch
+    kind: require_pattern
+    path_glob: "rust/rac-engine/src/cli.rs"
+    pattern: '"--no-cache" => cache = false'
+    message: "The CLI must retain the explicit no-cache rollback path."
+```

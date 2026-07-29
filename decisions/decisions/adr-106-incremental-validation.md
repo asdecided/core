@@ -227,3 +227,22 @@ ADR-032 and ADR-105 reject it: mtime alone is an unreliable invalidation signal
 that selects which files to content-confirm; content hashing remains the truth, and
 the one case the prefilter alone can miss (S5) is named, pinned, and caught by
 `--verify`.
+
+## Code Constraints
+
+```yaml
+version: 1
+eligibility: eligible
+reason: "Incremental validation and the explicit content-confirmation floor have stable command and regression-test anchors."
+rules:
+  - id: engine-keeps-incremental-directory-validation
+    kind: require_pattern
+    path_glob: "rust/rac-engine/src/commands.rs"
+    pattern: 'pub fn validate_directory_incremental'
+    message: "The native engine must retain its incremental directory-validation path."
+  - id: verify-keeps-stat-preserving-rewrite-coverage
+    kind: require_pattern
+    path_glob: "rust/rac-engine/tests/incremental_validate.rs"
+    pattern: 's5_stat_preserving_rewrite_is_the_accepted_miss_and_verify_catches_it'
+    message: "The verify floor must remain pinned against stat-preserving rewrites."
+```

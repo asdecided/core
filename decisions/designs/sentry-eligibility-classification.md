@@ -64,6 +64,20 @@ ADR-121, and ADR-122. These decisions govern the trust boundary, deterministic
 evaluation, agent integration, merge gating, shared specs, Rust CI authority,
 MCP compatibility, and truthful OKF export.
 
+### Tranche-two scope
+
+The second tranche covers ADR-103, ADR-104, ADR-105, ADR-106, ADR-107, ADR-108,
+ADR-109, ADR-112, ADR-114, ADR-118, and ADR-119. These decisions form the
+native performance and freshness spine: one derived read model, mapped
+persistence, bounded freshness detection, incremental validation, deterministic
+parallel construction, indexed tags, cache defaults, constrained dependencies,
+Linux event acceleration, and atomic base-plus-delta generations.
+
+The tranche raises explicit corpus adoption to 20 of 121 live decisions
+(16.53%). All 20 explicitly eligible decisions carry active rules, for 100%
+eligible coverage and 46 deterministic rules. The remaining 101 decisions stay
+visibly unclassified pending later review.
+
 ## Constraints
 
 - Classification is explicit; absent sections remain unclassified.

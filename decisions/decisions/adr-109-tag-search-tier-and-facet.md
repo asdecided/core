@@ -123,3 +123,22 @@ tier is lexical only.
 ## Related Roadmaps
 
 - candidate-discovery
+
+## Code Constraints
+
+```yaml
+version: 1
+eligibility: eligible
+reason: "The indexed tag field, scoring tier, and store-format gate are explicit native constants."
+rules:
+  - id: index-store-keeps-tags-field
+    kind: require_pattern
+    path_glob: "rust/rac-engine/src/index_store.rs"
+    pattern: 'pub const FIELDS: \[&str; 6\] = \["id", "title", "path", "heading", "body", "tags"\];'
+    message: "Tags must remain a persisted and searchable index field."
+  - id: tag-tier-keeps-format-version-gate
+    kind: require_pattern
+    path_glob: "rust/rac-engine/src/index_format.rs"
+    pattern: 'pub const SEGMENT_FORMAT_VERSION: u16 = 4;'
+    message: "The tag-aware store format must remain explicitly version-gated unless the decision is amended."
+```

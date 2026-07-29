@@ -97,3 +97,22 @@ Technical
 - ADR-107
 - ADR-108
 - ADR-112
+
+## Code Constraints
+
+```yaml
+version: 1
+eligibility: eligible
+reason: "The audited mapped-store dependency and target-specific watcher dependency are exact manifest boundaries."
+rules:
+  - id: engine-keeps-reviewed-memmap-dependency
+    kind: require_pattern
+    path_glob: "rust/rac-engine/Cargo.toml"
+    pattern: '(?m)^memmap2 = "0\.9"$'
+    message: "The mapped store must retain the reviewed memmap2 dependency line."
+  - id: inotify-remains-linux-only-and-minimal
+    kind: require_pattern
+    path_glob: "rust/rac-engine/Cargo.toml"
+    pattern: '(?s)\[target\.\x27cfg\(target_os = "linux"\)\x27\.dependencies\].*inotify = \{ version = "0\.11", default-features = false \}'
+    message: "The event accelerator must remain Linux-only with default async features disabled."
+```

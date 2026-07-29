@@ -139,3 +139,22 @@ parse fan-out already is.
 ## Related Roadmaps
 
 - rebuild-scale
+
+## Code Constraints
+
+```yaml
+version: 1
+eligibility: eligible
+reason: "Indexed parallel collection and worker-count-invariant store bytes expose the deterministic merge boundary."
+rules:
+  - id: parallel-fragments-preserve-input-order
+    kind: require_pattern
+    path_glob: "rust/rac-engine/src/parallel_build.rs"
+    pattern: '(?s)paths\s*\.par_iter\(\).*collect::<Vec<DocFragment>>\(\)'
+    message: "Parallel document fragments must continue to collect in canonical input order."
+  - id: merge-output-remains-worker-invariant
+    kind: require_pattern
+    path_glob: "rust/rac-engine/tests/parallel_build.rs"
+    pattern: 'store bytes must be worker-count-invariant'
+    message: "The persisted merge result must remain byte-identical across worker counts."
+```
