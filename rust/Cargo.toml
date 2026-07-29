@@ -3,7 +3,7 @@ resolver = "2"
 members = ["rac-engine", "decided", "decided-mcp"]
 
 [workspace.package]
-version = "0.25.1"
+version = "0.26.0"
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/asdecided/core"
