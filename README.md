@@ -37,6 +37,7 @@ client SDK rather than a second engine implementation.
 decided quickstart
 decided validate decisions/
 decided gate decisions/
+decided gate decisions/ --code --base origin/main
 ```
 
 New repositories use:

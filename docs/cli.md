@@ -627,6 +627,12 @@ Every report publishes `constrained_decisions / live_decisions` coverage.
 Coverage describes how much of the decision corpus has deterministic
 enforcement; it does not claim that prose-only decisions are enforced.
 
+In diff mode, `forbid_pattern` and `forbid_import` report only matches that
+intersect changed lines. `require_pattern` checks each matching file changed by
+the diff; if no matching file changed, that rule is outside the diff's scope.
+In `--full` mode every matching file is checked, and a `require_pattern` glob
+that selects no file is a blocking `code-constraint-empty-match` finding.
+
 ---
 
 ## watchkeeper

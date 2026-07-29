@@ -431,14 +431,21 @@ pub fn analyze(
                 })
                 .collect();
             if matches!(rule.kind, RuleKind::RequirePattern) && selected.is_empty() {
-                findings.push(rule_finding(
-                    item,
-                    rule,
-                    CODE_EMPTY_MATCH,
-                    &item.path,
-                    None,
-                    format!("rule '{}' selected no files", rule.id),
-                ));
+                // A diff-scoped gate only evaluates files changed by the pull
+                // request. An unrelated change is outside this rule's scope,
+                // not evidence that the required repository contract vanished.
+                // Full-tree certification remains fail-closed when the glob
+                // itself selects nothing.
+                if full_tree {
+                    findings.push(rule_finding(
+                        item,
+                        rule,
+                        CODE_EMPTY_MATCH,
+                        &item.path,
+                        None,
+                        format!("rule '{}' selected no files", rule.id),
+                    ));
+                }
                 continue;
             }
             let pattern = Regex::new(&rule.pattern).unwrap();
@@ -694,6 +701,59 @@ mod tests {
         .unwrap();
         assert_eq!(report.findings.len(), 1);
         assert_eq!(report.findings[0].line, Some(2));
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn diff_mode_skips_require_rule_when_no_matching_file_changed() {
+        let root =
+            std::env::temp_dir().join(format!("decided-sentry-require-{}", std::process::id()));
+        let corpus = root.join("decisions");
+        let source = root.join("src");
+        let docs = root.join("docs");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&corpus).unwrap();
+        fs::create_dir_all(&source).unwrap();
+        fs::create_dir_all(&docs).unwrap();
+        fs::write(
+            corpus.join("adr-001.md"),
+            "# ADR-001: Audit entry point\n\n## Status\n\nAccepted\n\n## Context\n\nThe audit entry point is required.\n\n## Decision\n\nKeep it public.\n\n## Consequences\n\nCallers have one stable entry point.\n\n## Code Constraints\n\n```yaml\nversion: 1\nrules:\n  - id: audit-entry-point\n    kind: require_pattern\n    path_glob: \"src/audit.rs\"\n    pattern: \"pub fn audit\"\n```\n",
+        )
+        .unwrap();
+        fs::write(source.join("audit.rs"), "pub fn audit() {}\n").unwrap();
+        fs::write(docs.join("guide.md"), "Initial guide.\n").unwrap();
+        let git = |args: &[&str]| {
+            let status = Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(args)
+                .status()
+                .unwrap();
+            assert!(status.success(), "git {args:?}");
+        };
+        git(&["init", "-q"]);
+        git(&["add", "."]);
+        git(&[
+            "-c",
+            "user.name=As Decided",
+            "-c",
+            "user.email=tests@asdecided.com",
+            "commit",
+            "-qm",
+            "base",
+        ]);
+        fs::write(docs.join("guide.md"), "Updated guide.\n").unwrap();
+
+        let report = analyze(
+            corpus.to_str().unwrap(),
+            root.to_str().unwrap(),
+            true,
+            Some("HEAD"),
+            false,
+        )
+        .unwrap();
+        assert!(report.findings.is_empty(), "{:#?}", report.findings);
 
         fs::remove_dir_all(root).unwrap();
     }
