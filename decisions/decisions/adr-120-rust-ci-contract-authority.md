@@ -83,6 +83,25 @@ would still freeze an intentionally evolving corpus.
 Rejected for this step. One bounded `rac-spec` certification remains until the
 recorded Rust cutover gates pass, then is removed explicitly.
 
+## Code Constraints
+
+```yaml
+version: 1
+eligibility: eligible
+reason: "The Rust CI authority is represented by named contract and live-corpus invariant steps."
+rules:
+  - id: rust-ci-keeps-contract-and-live-invariants
+    kind: require_pattern
+    path_glob: ".github/workflows/rust-spike.yml"
+    pattern: '(?s)sync_spec\.py.*conformance_certify\.py.*live_corpus_invariants\.py'
+    message: "Rust CI must retain contract synchronization, conformance certification, and live-corpus invariants."
+  - id: rust-ci-keeps-freshness-regression
+    kind: require_pattern
+    path_glob: ".github/workflows/rust-spike.yml"
+    pattern: 'freshness_tracker'
+    message: "Rust CI must retain the native freshness regression suite."
+```
+
 ## Related Decisions
 
 - ADR-063

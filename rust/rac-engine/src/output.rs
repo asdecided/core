@@ -2416,8 +2416,18 @@ pub fn render_gate_human(report: &GateReport) -> String {
     ];
     if let Some(coverage) = &report.code_coverage {
         lines.push(format!(
-            "Code coverage: {}/{} ({:.1}%)",
-            coverage.constrained_decisions, coverage.live_decisions, coverage.percent
+            "Code adoption: {}/{} ({:.1}%)",
+            coverage.constrained_decisions,
+            coverage.live_decisions,
+            coverage.corpus_adoption_percent
+        ));
+        lines.push(format!(
+            "Eligible coverage: {}/{} ({:.1}%; {} rules, {} unclassified)",
+            coverage.constrained_decisions,
+            coverage.eligible_decisions,
+            coverage.eligible_coverage_percent,
+            coverage.active_rules,
+            coverage.unclassified_decisions
         ));
     }
 
@@ -2479,8 +2489,15 @@ pub fn render_gate_json(report: &GateReport) -> String {
             "code_coverage".into(),
             json!({
                 "live_decisions": coverage.live_decisions,
+                "classified_decisions": coverage.classified_decisions,
+                "unclassified_decisions": coverage.unclassified_decisions,
+                "eligible_decisions": coverage.eligible_decisions,
                 "constrained_decisions": coverage.constrained_decisions,
-                "percent": coverage.percent,
+                "active_rules": coverage.active_rules,
+                "percent": coverage.corpus_adoption_percent,
+                "metric": "corpus_adoption",
+                "corpus_adoption_percent": coverage.corpus_adoption_percent,
+                "eligible_coverage_percent": coverage.eligible_coverage_percent,
             }),
         );
     }
@@ -2517,11 +2534,24 @@ pub fn render_sentry_human(report: &SentryReport) -> String {
         format!("Corpus:      {}", report.corpus),
         format!("Repository:  {}", report.repository),
         format!(
-            "Coverage:    {}/{} ({:.1}%)",
+            "Corpus adoption: {}/{} ({:.1}%)",
             report.constrained_decisions,
             report.live_decisions,
-            report.coverage_percent()
+            report.corpus_adoption_percent()
         ),
+        format!(
+            "Eligibility:     {} eligible, {} constrained, {} unclassified",
+            report.eligible_decisions,
+            report.constrained_decisions,
+            report.unclassified_decisions()
+        ),
+        format!(
+            "Eligible coverage: {}/{} ({:.1}%)",
+            report.constrained_decisions,
+            report.eligible_decisions,
+            report.eligible_coverage_percent()
+        ),
+        format!("Active rules:    {}", report.active_rules),
         format!("Violations:  {}", report.findings.len()),
     ];
     for finding in &report.findings {
@@ -2570,8 +2600,15 @@ pub fn render_sentry_json(report: &SentryReport) -> String {
         "ok": report.ok(),
         "coverage": {
             "live_decisions": report.live_decisions,
+            "classified_decisions": report.classified_decisions,
+            "unclassified_decisions": report.unclassified_decisions(),
+            "eligible_decisions": report.eligible_decisions,
             "constrained_decisions": report.constrained_decisions,
-            "percent": report.coverage_percent(),
+            "active_rules": report.active_rules,
+            "percent": report.corpus_adoption_percent(),
+            "metric": "corpus_adoption",
+            "corpus_adoption_percent": report.corpus_adoption_percent(),
+            "eligible_coverage_percent": report.eligible_coverage_percent(),
         },
         "findings": findings,
     }))

@@ -623,9 +623,22 @@ decided sentry decisions/ --base origin/main
 decided sentry decisions/ --full --json
 ```
 
-Every report publishes `constrained_decisions / live_decisions` coverage.
-Coverage describes how much of the decision corpus has deterministic
-enforcement; it does not claim that prose-only decisions are enforced.
+Every report separates two measurements:
+
+- **Corpus adoption:** constrained live Decisions divided by all live Decisions.
+- **Eligible coverage:** constrained Decisions divided by Decisions explicitly
+  classified as deterministically eligible.
+
+It also publishes classified, unclassified, eligible, constrained, and active
+rule counts. A Decision may declare `eligibility: ineligible` with a required
+reason and no rules. Decisions without a classification remain visibly
+unclassified; Sentry never infers eligibility from prose.
+
+In diff mode, `forbid_pattern` and `forbid_import` report only matches that
+intersect changed lines. `require_pattern` checks each matching file changed by
+the diff; if no matching file changed, that rule is outside the diff's scope.
+In `--full` mode every matching file is checked, and a `require_pattern` glob
+that selects no file is a blocking `code-constraint-empty-match` finding.
 
 ---
 

@@ -236,3 +236,22 @@ sufficient for its prefix-range mechanism and its byte-parity reconstruction.
   disposable, never authoritative; deleting it costs only latency.
 - ADR-002: content addressing and lossless, deterministic serialisation keep the
   store byte-identical across runs and platforms.
+
+## Code Constraints
+
+```yaml
+version: 1
+eligibility: eligible
+reason: "The read-only mapped-store dependency and fail-closed corruption battery are deterministic repository properties."
+rules:
+  - id: index-store-remains-memory-mapped
+    kind: require_pattern
+    path_glob: "rust/rac-engine/src/index_store.rs"
+    pattern: 'use memmap2::Mmap;'
+    message: "The persistent native index must retain its memory-mapped read path."
+  - id: index-store-keeps-fail-closed-open-tests
+    kind: require_pattern
+    path_glob: "rust/rac-engine/tests/index_store_vectors.rs"
+    pattern: '(?s)open_store\(cache_dir, "0"\.repeat\(64\).*open_store\(cache_dir, corpus_hash, SCHEMA_VERSION\)\.is_some\(\)'
+    message: "The store suite must continue to reject invalid stores before accepting a valid one."
+```

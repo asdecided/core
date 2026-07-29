@@ -230,3 +230,22 @@ while giving the same completed-writes-are-visible guarantee.
   the tracker can change only latency, never an answer.
 - ADR-002: content confirmation on every flagged path keeps the freshness key a
   pure function of the corpus bytes, byte-identical across runs and platforms.
+
+## Code Constraints
+
+```yaml
+version: 1
+eligibility: eligible
+reason: "The request-boundary detection ladder and its authoritative fallback are directly testable."
+rules:
+  - id: tracker-keeps-bounded-stable-scan-barrier
+    kind: require_pattern
+    path_glob: "rust/rac-engine/src/freshness.rs"
+    pattern: '(?s)for _ in 0\.\.3.*prepare_scan\(\).*acknowledge_if_stable'
+    message: "Freshness detection must retain its bounded scan-and-event barrier."
+  - id: tracker-keeps-stat-and-verify-floor
+    kind: require_pattern
+    path_glob: "rust/rac-engine/tests/freshness_tracker.rs"
+    pattern: 'stat_fallback_and_verify_never_trust_clean_events'
+    message: "The freshness suite must retain the authoritative stat and verify fallback contract."
+```

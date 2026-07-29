@@ -30,7 +30,24 @@ pub const DUPLICATE_RULE_ID: &str = "duplicate-code-constraint-id";
 #[serde(deny_unknown_fields)]
 struct ConstraintDocument {
     version: u64,
+    #[serde(default = "default_eligibility")]
+    eligibility: Eligibility,
+    #[serde(default)]
     rules: Vec<ConstraintRule>,
+    reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum Eligibility {
+    Eligible,
+    Ineligible,
+}
+
+fn default_eligibility() -> Eligibility {
+    // Compatibility with the v1 shape shipped in 0.25.1: a document that
+    // already carries rules was necessarily declaring itself eligible.
+    Eligibility::Eligible
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -68,7 +85,10 @@ pub struct SentryReport {
     pub base: Option<String>,
     pub full_tree: bool,
     pub live_decisions: usize,
+    pub classified_decisions: usize,
+    pub eligible_decisions: usize,
     pub constrained_decisions: usize,
+    pub active_rules: usize,
     pub findings: Vec<SentryFinding>,
 }
 
@@ -77,12 +97,25 @@ impl SentryReport {
         self.findings.is_empty()
     }
 
-    pub fn coverage_percent(&self) -> f64 {
+    pub fn corpus_adoption_percent(&self) -> f64 {
         if self.live_decisions == 0 {
             0.0
         } else {
             self.constrained_decisions as f64 * 100.0 / self.live_decisions as f64
         }
+    }
+
+    pub fn eligible_coverage_percent(&self) -> f64 {
+        if self.eligible_decisions == 0 {
+            0.0
+        } else {
+            self.constrained_decisions as f64 * 100.0 / self.eligible_decisions as f64
+        }
+    }
+
+    pub fn unclassified_decisions(&self) -> usize {
+        self.live_decisions
+            .saturating_sub(self.classified_decisions)
     }
 }
 
@@ -204,8 +237,32 @@ fn parse_document(item: &CorpusItem) -> Result<Option<ConstraintDocument>, Box<S
             ),
         }));
     }
-    if document.rules.is_empty() {
-        return Err(invalid(item, None, "rules must not be empty"));
+    if document.eligibility == Eligibility::Ineligible {
+        if !document.rules.is_empty() {
+            return Err(invalid(
+                item,
+                None,
+                "ineligible decisions must not declare rules",
+            ));
+        }
+        if document
+            .reason
+            .as_deref()
+            .is_none_or(|reason| reason.trim().is_empty())
+        {
+            return Err(invalid(
+                item,
+                None,
+                "ineligible decisions must state a non-empty reason",
+            ));
+        }
+    }
+    if document
+        .reason
+        .as_deref()
+        .is_some_and(|reason| reason.trim().is_empty())
+    {
+        return Err(invalid(item, None, "reason must not be empty"));
     }
     let mut ids = BTreeSet::new();
     for rule in &document.rules {
@@ -431,14 +488,21 @@ pub fn analyze(
                 })
                 .collect();
             if matches!(rule.kind, RuleKind::RequirePattern) && selected.is_empty() {
-                findings.push(rule_finding(
-                    item,
-                    rule,
-                    CODE_EMPTY_MATCH,
-                    &item.path,
-                    None,
-                    format!("rule '{}' selected no files", rule.id),
-                ));
+                // A diff-scoped gate only evaluates files changed by the pull
+                // request. An unrelated change is outside this rule's scope,
+                // not evidence that the required repository contract vanished.
+                // Full-tree certification remains fail-closed when the glob
+                // itself selects nothing.
+                if full_tree {
+                    findings.push(rule_finding(
+                        item,
+                        rule,
+                        CODE_EMPTY_MATCH,
+                        &item.path,
+                        None,
+                        format!("rule '{}' selected no files", rule.id),
+                    ));
+                }
                 continue;
             }
             let pattern = Regex::new(&rule.pattern).unwrap();
@@ -563,7 +627,22 @@ pub fn analyze(
         base: base.map(str::to_string),
         full_tree,
         live_decisions: live.len(),
-        constrained_decisions: documents.len(),
+        classified_decisions: documents.len(),
+        eligible_decisions: documents
+            .iter()
+            .filter(|(_, document)| document.eligibility == Eligibility::Eligible)
+            .count(),
+        constrained_decisions: documents
+            .iter()
+            .filter(|(_, document)| {
+                document.eligibility == Eligibility::Eligible && !document.rules.is_empty()
+            })
+            .count(),
+        active_rules: documents
+            .iter()
+            .filter(|(_, document)| document.eligibility == Eligibility::Eligible)
+            .map(|(_, document)| document.rules.len())
+            .sum(),
         findings,
     })
 }
@@ -626,6 +705,16 @@ mod tests {
             "# ADR-001: Retain users\n\n## Status\n\nAccepted\n\n## Context\n\nDeletion loses audit history.\n\n## Decision\n\nUse soft deletion.\n\n## Consequences\n\nRows remain recoverable.\n\n## Code Constraints\n\n```yaml\nversion: 1\nrules:\n  - id: no-hard-delete\n    kind: forbid_pattern\n    path_glob: \"src/**/*.sql\"\n    pattern: \"DELETE\\\\s+FROM\\\\s+users\"\n```\n",
         )
         .unwrap();
+        fs::write(
+            corpus.join("adr-002.md"),
+            "# ADR-002: Product language\n\n## Status\n\nAccepted\n\n## Context\n\nThe product needs a stable voice.\n\n## Decision\n\nUse direct language.\n\n## Consequences\n\nCopy remains subject to human review.\n\n## Code Constraints\n\n```yaml\nversion: 1\neligibility: ineligible\nreason: \"Product voice requires human review, not a source-code rule.\"\n```\n",
+        )
+        .unwrap();
+        fs::write(
+            corpus.join("adr-003.md"),
+            "# ADR-003: Unclassified\n\n## Status\n\nAccepted\n\n## Context\n\nThis historical decision has not been classified.\n\n## Decision\n\nKeep its status explicit.\n\n## Consequences\n\nSentry reports it as unclassified.\n",
+        )
+        .unwrap();
         fs::write(source.join("users.sql"), "DELETE FROM users;\n").unwrap();
 
         let report = analyze(
@@ -636,8 +725,14 @@ mod tests {
             true,
         )
         .unwrap();
-        assert_eq!(report.live_decisions, 1);
+        assert_eq!(report.live_decisions, 3);
+        assert_eq!(report.classified_decisions, 2);
+        assert_eq!(report.eligible_decisions, 1);
         assert_eq!(report.constrained_decisions, 1, "{:#?}", report.findings);
+        assert_eq!(report.active_rules, 1);
+        assert_eq!(report.unclassified_decisions(), 1);
+        assert!((report.corpus_adoption_percent() - 100.0 / 3.0).abs() < f64::EPSILON);
+        assert_eq!(report.eligible_coverage_percent(), 100.0);
         assert_eq!(report.findings.len(), 1);
         assert_eq!(report.findings[0].code, CODE_VIOLATION);
 
@@ -694,6 +789,59 @@ mod tests {
         .unwrap();
         assert_eq!(report.findings.len(), 1);
         assert_eq!(report.findings[0].line, Some(2));
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn diff_mode_skips_require_rule_when_no_matching_file_changed() {
+        let root =
+            std::env::temp_dir().join(format!("decided-sentry-require-{}", std::process::id()));
+        let corpus = root.join("decisions");
+        let source = root.join("src");
+        let docs = root.join("docs");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&corpus).unwrap();
+        fs::create_dir_all(&source).unwrap();
+        fs::create_dir_all(&docs).unwrap();
+        fs::write(
+            corpus.join("adr-001.md"),
+            "# ADR-001: Audit entry point\n\n## Status\n\nAccepted\n\n## Context\n\nThe audit entry point is required.\n\n## Decision\n\nKeep it public.\n\n## Consequences\n\nCallers have one stable entry point.\n\n## Code Constraints\n\n```yaml\nversion: 1\nrules:\n  - id: audit-entry-point\n    kind: require_pattern\n    path_glob: \"src/audit.rs\"\n    pattern: \"pub fn audit\"\n```\n",
+        )
+        .unwrap();
+        fs::write(source.join("audit.rs"), "pub fn audit() {}\n").unwrap();
+        fs::write(docs.join("guide.md"), "Initial guide.\n").unwrap();
+        let git = |args: &[&str]| {
+            let status = Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(args)
+                .status()
+                .unwrap();
+            assert!(status.success(), "git {args:?}");
+        };
+        git(&["init", "-q"]);
+        git(&["add", "."]);
+        git(&[
+            "-c",
+            "user.name=As Decided",
+            "-c",
+            "user.email=tests@asdecided.com",
+            "commit",
+            "-qm",
+            "base",
+        ]);
+        fs::write(docs.join("guide.md"), "Updated guide.\n").unwrap();
+
+        let report = analyze(
+            corpus.to_str().unwrap(),
+            root.to_str().unwrap(),
+            true,
+            Some("HEAD"),
+            false,
+        )
+        .unwrap();
+        assert!(report.findings.is_empty(), "{:#?}", report.findings);
 
         fs::remove_dir_all(root).unwrap();
     }

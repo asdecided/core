@@ -71,3 +71,53 @@ jobs:
         with:
           path: decisions
           upload-sarif: ${{ !github.event.pull_request.head.repo.fork }}
+
+  # Sentry dogfood: accepted decisions can carry deterministic source-code
+  # constraints. Evaluate only the pull request diff against its base branch,
+  # upload the native engine's SARIF, and block on any violation. No model,
+  # embeddings, network judge, or second policy implementation is involved.
+  sentry:
+    name: sentry (dogfood, native)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Build native AsDecided
+        run: cargo build --release --locked -p decided
+        working-directory: rust
+
+      - name: Run Sentry (SARIF)
+        id: sentry
+        env:
+          BASE_REF: origin/${{ github.base_ref }}
+        run: |
+          set +e
+          mkdir -p decided-sarif
+          rust/target/release/decided sentry decisions \
+            --base "$BASE_REF" \
+            --sarif > decided-sarif/sentry.sarif
+          code=$?
+          echo "sentry exited $code"
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+
+      - name: Upload Sentry SARIF
+        if: ${{ always() && !github.event.pull_request.head.repo.fork }}
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: decided-sarif/sentry.sarif
+          category: decided-sentry
+
+      - name: Report result
+        env:
+          EXIT_CODE: ${{ steps.sentry.outputs.exit_code }}
+        run: |
+          if [ "$EXIT_CODE" != "0" ]; then
+            echo "::error::AsDecided Sentry failed (exit $EXIT_CODE) — see the Code Scanning annotations."
+            exit "$EXIT_CODE"
+          fi
+          echo "AsDecided Sentry passed."

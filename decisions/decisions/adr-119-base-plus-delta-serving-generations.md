@@ -189,3 +189,22 @@ total corpus size, contradicting the change-bound target.
 - ADR-107
 - ADR-116
 - ADR-118
+
+## Code Constraints
+
+```yaml
+version: 1
+eligibility: eligible
+reason: "The production constructor, immutable generation type, and lifecycle parity test make the publication boundary enforceable."
+rules:
+  - id: production-tracker-defaults-to-delta
+    kind: require_pattern
+    path_glob: "rust/rac-engine/src/freshness.rs"
+    pattern: '(?s)pub fn new\(.*Self::new_delta\(cache_dir, root, threshold, true\)'
+    message: "The production tracker must continue to select base-plus-delta serving."
+  - id: delta-lifecycle-keeps-parity-coverage
+    kind: require_pattern
+    path_glob: "rust/rac-engine/tests/freshness_tracker.rs"
+    pattern: 'default_delta_stages_mutations_compacts_and_keeps_parsed_base'
+    message: "The delta lifecycle must remain covered across mutation, compaction, and retained-base behavior."
+```

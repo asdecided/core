@@ -22,11 +22,22 @@ decided gate decisions/              # human summary; exit 0 if nothing blocking
 decided gate decisions/ --json       # stable JSON contract (ADR-007)
 decided gate decisions/ --sarif      # one SARIF 2.1.0 document over all findings
 decided gate decisions/ --top-level  # do not recurse into subdirectories
+decided gate decisions/ --code --base origin/main  # include changed-code constraints
 ```
 
 The exit code is the only enforcement signal: `0` when nothing is blocking, `1`
 when at least one finding is blocking. Advisory findings are reported (and
 annotated in SARIF) but never fail the gate.
+
+`--code` adds Sentry's deterministic decision-to-code checks to the same gate.
+Accepted Decisions declare bounded rules in a versioned `## Code Constraints`
+YAML block; the engine supports forbidden patterns, required patterns, and
+forbidden imports. The checks are repository- and diff-based—no embeddings,
+model call, network service, or LLM judge. Use `--full` instead of `--base` for
+whole-tree certification. Every report labels constrained/all-live as corpus
+adoption and separately publishes constrained/explicitly-eligible coverage,
+active rules, and the unclassified count so the machine-enforced boundary
+remains explicit.
 
 ## The `enforcement:` policy
 
@@ -144,8 +155,9 @@ policy change lands in one edit and is enforced everywhere the corpus is checked
 
 AI coding agents are the place a settled decision is most likely to be quietly
 re-litigated, because the agent never sees the corpus. RAC integrates with agents
-through two deterministic, engine-owned channels and enforces with structural
-validation — **not** a semantic verdict and **not** a cross-platform interceptor
+through deterministic, engine-owned channels and enforces both corpus structure
+and the explicitly declared machine-checkable subset of code constraints —
+**not** a general semantic verdict and **not** a cross-platform interceptor
 ([ADR-067](https://github.com/asdecided/core/blob/main/decisions/decisions/adr-067-agent-integration-boundary.md)):
 
 - **Context supply.** `decided export --agent-rules` generates committed,
@@ -153,8 +165,10 @@ validation — **not** a semantic verdict and **not** a cross-platform intercept
   `.github/copilot-instructions.md`) plus the `lore` MCP read tools. This reaches
   *every* agent — including Copilot — with zero per-developer setup.
 - **Post-edit enforcement.** The same structural diagnostics fire on
-  agent-written files exactly as on human edits: the editor's save-time
-  diagnostics, `decided validate`, and the `decided gate` PR check.
+  agent-written artifacts exactly as on human edits. `decided sentry` and
+  `decided gate --code` additionally block source changes that violate a
+  Decision's declared deterministic rules. Decisions without such rules remain
+  subject to human review, and the coverage report makes that boundary visible.
 
 No platform exposes a hook to inspect-and-veto a proposed agent edit before it
 lands — with **one** exception.

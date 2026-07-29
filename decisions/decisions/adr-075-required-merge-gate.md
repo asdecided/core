@@ -173,6 +173,25 @@ output. Requiring them before merge keeps RAC's public contracts green on
 Review before v1.0.0, or sooner if `pr-checks.yml`'s job set changes materially
 or RAC accepts outside contributors who need a different gate.
 
+## Code Constraints
+
+```yaml
+version: 1
+eligibility: eligible
+reason: "The checked-in pull-request workflow is enforceable; GitHub branch-protection settings remain externally verified."
+rules:
+  - id: premerge-workflow-runs-on-prs
+    kind: require_pattern
+    path_glob: ".github/workflows/pr-checks.yml"
+    pattern: '(?m)^\s*pull_request:\s*$'
+    message: "The pre-merge tier must continue to run on pull requests."
+  - id: premerge-workflow-keeps-code-gate
+    kind: require_pattern
+    path_glob: ".github/workflows/pr-checks.yml"
+    pattern: '(?m)^\s*sentry:\s*$'
+    message: "The pre-merge tier must retain the blocking Sentry job."
+```
+
 ## Related Decisions
 
 - adr-027
