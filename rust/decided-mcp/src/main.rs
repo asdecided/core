@@ -11,6 +11,7 @@ mod args;
 mod audit;
 mod graph;
 mod http;
+mod protocol;
 mod provenance;
 mod sidecar;
 mod tools;
@@ -19,17 +20,6 @@ use args::{Arg, Kind, Param};
 use rac_engine::budget;
 use serde_json::{json, Map, Value};
 use std::io::{BufRead, Write};
-
-/// Pinned `serverInfo.version` (contract landmine, §3): the oracle emits the
-/// bundled **Python `mcp` SDK package version** (`mcp==1.28.1`), not the decided
-/// product version. Byte parity requires the same literal.
-const SDK_VERSION: &str = "1.28.1";
-const SERVER_NAME: &str = "lore";
-
-/// Protocol versions the pinned SDK negotiates; anything else falls back to
-/// the latest. The harness pins its requests to 2025-06-18.
-const SUPPORTED_PROTOCOL_VERSIONS: [&str; 3] = ["2024-11-05", "2025-03-26", "2025-06-18"];
-const LATEST_PROTOCOL_VERSION: &str = "2025-06-18";
 
 /// The pinned `tools/list` result — the captured ORACLE-NEXT bytes, embedded
 /// verbatim (schemas, descriptions, pydantic-shaped titles incl. the
@@ -178,7 +168,23 @@ fn serve(
         let id_json = serde_json::to_string(id).unwrap_or_else(|_| "null".to_string());
         // stdio has no per-request principal; attribution stays the recorder's
         // locally resolved identity (ADR-098).
-        let frame = process_request(root, state, method, &id_json, &message, recorder.as_mut(), None);
+        let era = match protocol::era_for_stdio(method, &message) {
+            Ok(era) => era,
+            Err(frame) => {
+                writeln!(out, "{frame}").ok();
+                out.flush().ok();
+                continue;
+            }
+        };
+        if era == protocol::Era::Current {
+            if let Err(frame) = protocol::validate_current_metadata(&message, &id_json) {
+                writeln!(out, "{frame}").ok();
+                out.flush().ok();
+                continue;
+            }
+        }
+        let frame =
+            process_request(root, state, era, &id_json, &message, recorder.as_mut(), None);
         writeln!(out, "{frame}").ok();
         out.flush().ok();
     }
@@ -191,55 +197,65 @@ fn serve(
 pub(crate) fn process_request(
     root: &str,
     state: &mut ServerState,
-    method: &str,
+    era: protocol::Era,
     id_json: &str,
     message: &Value,
     recorder: Option<&mut audit::Recorder>,
     principal: Option<&str>,
 ) -> String {
-    match method {
-        "initialize" => initialize_frame(id_json, message),
-        "ping" => format!("{{\"jsonrpc\":\"2.0\",\"id\":{id_json},\"result\":{{}}}}"),
-        "tools/list" => {
+    let method = message
+        .get("method")
+        .and_then(Value::as_str)
+        .expect("transport validates method before dispatch");
+    match (era, method) {
+        (protocol::Era::Legacy, "initialize") => {
+            protocol::legacy_initialize_frame(id_json, message)
+        }
+        (protocol::Era::Current, "server/discover") => protocol::discover_frame(id_json),
+        (protocol::Era::Current, "initialize") => {
+            protocol::method_not_found_frame(id_json, method)
+        }
+        (protocol::Era::Legacy, "ping") => {
+            format!("{{\"jsonrpc\":\"2.0\",\"id\":{id_json},\"result\":{{}}}}")
+        }
+        (protocol::Era::Current, "tools/list") => {
+            protocol::current_tools_list_frame(id_json, TOOLS_LIST_RESULT)
+        }
+        (protocol::Era::Legacy, "tools/list") => {
             format!("{{\"jsonrpc\":\"2.0\",\"id\":{id_json},\"result\":{TOOLS_LIST_RESULT}}}")
         }
-        "prompts/list" => {
+        (protocol::Era::Current, "prompts/list") => {
+            protocol::current_empty_list_frame(id_json, "prompts", true)
+        }
+        (protocol::Era::Legacy, "prompts/list") => {
             format!("{{\"jsonrpc\":\"2.0\",\"id\":{id_json},\"result\":{{\"prompts\":[]}}}}")
         }
-        "resources/list" => {
+        (protocol::Era::Current, "resources/list") => {
+            protocol::current_empty_list_frame(id_json, "resources", false)
+        }
+        (protocol::Era::Legacy, "resources/list") => {
             format!("{{\"jsonrpc\":\"2.0\",\"id\":{id_json},\"result\":{{\"resources\":[]}}}}")
         }
-        "tools/call" => tools_call_frame(root, state, id_json, message, recorder, principal),
-        _ => format!(
+        (_, "tools/call") => {
+            tools_call_frame(root, state, era, id_json, message, recorder, principal)
+        }
+        (protocol::Era::Current, _) => protocol::method_not_found_frame(id_json, method),
+        (protocol::Era::Legacy, _) => format!(
             "{{\"jsonrpc\":\"2.0\",\"id\":{id_json},\"error\":{{\"code\":-32602,\"message\":\"Invalid request parameters\",\"data\":\"\"}}}}"
         ),
     }
-}
-
-fn initialize_frame(id_json: &str, message: &Value) -> String {
-    let requested = message
-        .pointer("/params/protocolVersion")
-        .and_then(Value::as_str)
-        .unwrap_or(LATEST_PROTOCOL_VERSION);
-    let version = if SUPPORTED_PROTOCOL_VERSIONS.contains(&requested) {
-        requested
-    } else {
-        LATEST_PROTOCOL_VERSION
-    };
-    format!(
-        "{{\"jsonrpc\":\"2.0\",\"id\":{id_json},\"result\":{{\"protocolVersion\":\"{version}\",\
-\"capabilities\":{{\"experimental\":{{}},\"prompts\":{{\"listChanged\":false}},\
-\"resources\":{{\"subscribe\":false,\"listChanged\":false}},\
-\"tools\":{{\"listChanged\":false}}}},\
-\"serverInfo\":{{\"name\":\"{SERVER_NAME}\",\"version\":\"{SDK_VERSION}\"}}}}}}"
-    )
 }
 
 /// Serialize the tools/call result envelope (§5). Success duplicates the
 /// payload under `structuredContent.result` (the handlers return `str` and an
 /// outputSchema exists — landmine 1); SDK-text errors ride `isError:true`
 /// with no `structuredContent`.
-fn call_result_frame(id_json: &str, text: &str, is_error: bool) -> String {
+fn call_result_frame(
+    era: protocol::Era,
+    id_json: &str,
+    text: &str,
+    is_error: bool,
+) -> String {
     let mut content_item = Map::new();
     content_item.insert("type".to_string(), json!("text"));
     content_item.insert("text".to_string(), json!(text));
@@ -254,6 +270,9 @@ fn call_result_frame(id_json: &str, text: &str, is_error: bool) -> String {
         result.insert("structuredContent".to_string(), Value::Object(structured));
     }
     result.insert("isError".to_string(), json!(is_error));
+    if era == protocol::Era::Current {
+        result.insert("resultType".to_string(), json!("complete"));
+    }
     let result_json = serde_json::to_string(&Value::Object(result)).expect("serializable");
     format!("{{\"jsonrpc\":\"2.0\",\"id\":{id_json},\"result\":{result_json}}}")
 }
@@ -261,6 +280,7 @@ fn call_result_frame(id_json: &str, text: &str, is_error: bool) -> String {
 fn tools_call_frame(
     root: &str,
     state: &mut ServerState,
+    era: protocol::Era,
     id_json: &str,
     message: &Value,
     recorder: Option<&mut audit::Recorder>,
@@ -281,8 +301,8 @@ fn tools_call_frame(
     );
     let serialize_started = rac_engine::timing::start();
     let frame = match dispatched {
-        Ok(payload) => call_result_frame(id_json, &payload, false),
-        Err(text) => call_result_frame(id_json, &text, true),
+        Ok(payload) => call_result_frame(era, id_json, &payload, false),
+        Err(text) => call_result_frame(era, id_json, &text, true),
     };
     rac_engine::timing::emit_since(
         "mcp.response_serialize",
