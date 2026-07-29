@@ -248,7 +248,7 @@ fn parse_document(item: &CorpusItem) -> Result<Option<ConstraintDocument>, Box<S
         if document
             .reason
             .as_deref()
-            .map_or(true, |reason| reason.trim().is_empty())
+            .is_none_or(|reason| reason.trim().is_empty())
         {
             return Err(invalid(
                 item,
