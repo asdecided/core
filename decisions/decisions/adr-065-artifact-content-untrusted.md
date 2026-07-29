@@ -125,6 +125,25 @@ Treat the read-only guarantee as sufficient.
 Naming artifact content as untrusted, with PR review as the boundary and a
 `doctor` flag as the aid, is selected.
 
+## Code Constraints
+
+```yaml
+version: 1
+eligibility: eligible
+reason: "The deterministic diagnostic and documented human-review boundary have concrete source anchors."
+rules:
+  - id: doctor-keeps-injection-diagnostic
+    kind: require_pattern
+    path_glob: "rust/rac-engine/src/doctor.rs"
+    pattern: 'CODE_INJECTION_CONTENT'
+    message: "The deterministic injection-style diagnostic must remain available."
+  - id: security-doc-keeps-review-boundary
+    kind: require_pattern
+    path_glob: "SECURITY.md"
+    pattern: '(?i)human review'
+    message: "Security documentation must retain human review as the trust boundary."
+```
+
 ## Related Decisions
 
 - adr-030

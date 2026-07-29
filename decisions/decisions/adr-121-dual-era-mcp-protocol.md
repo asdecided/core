@@ -113,6 +113,30 @@ dependency-free wire layer during a breaking protocol transition would combine
 two risks and threaten the deterministic legacy contract. The protocol seam
 remains small enough to implement and test directly.
 
+## Code Constraints
+
+```yaml
+version: 1
+eligibility: eligible
+reason: "Both protocol eras and current discovery have stable implementation and test anchors."
+rules:
+  - id: current-protocol-keeps-discovery
+    kind: require_pattern
+    path_glob: "rust/decided-mcp/src/protocol.rs"
+    pattern: '"server/discover"'
+    message: "The current MCP era must retain server discovery."
+  - id: current-protocol-keeps-contract-tests
+    kind: require_pattern
+    path_glob: "rust/decided-mcp/tests/protocol_2026.rs"
+    pattern: 'current_client_discovers_native_server_without_initialize'
+    message: "The MCP 2026 discovery contract must remain pinned."
+  - id: legacy-protocol-keeps-byte-tests
+    kind: require_pattern
+    path_glob: "rust/decided-mcp/tests/protocol_legacy.rs"
+    pattern: 'legacy_2025_06_initialize_bytes_stay_pinned'
+    message: "The legacy MCP byte-compatibility fixture must remain pinned."
+```
+
 ## Related Decisions
 
 - adr-007

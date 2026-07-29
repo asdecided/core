@@ -121,6 +121,30 @@ Trust existing tests to catch retrieval regressions.
 
 Deterministic set-membership scoring over real tool output is selected.
 
+## Code Constraints
+
+```yaml
+version: 1
+eligibility: eligible
+reason: "The scored path has explicit dependency and hard-negative boundaries."
+rules:
+  - id: eval-has-no-network-client
+    kind: forbid_import
+    path_glob: "rust/rac-engine/src/eval.rs"
+    pattern: '^(reqwest|hyper|ureq)(::|$)'
+    message: "Grounding evaluation must remain local and network-free."
+  - id: eval-has-no-model-judge
+    kind: forbid_pattern
+    path_glob: "rust/rac-engine/src/eval.rs"
+    pattern: '(?i)llm[_ -]?judge|openai|anthropic|embedding'
+    message: "Grounding evaluation must not introduce a model or embedding judge."
+  - id: eval-keeps-hard-negatives
+    kind: require_pattern
+    path_glob: "rust/rac-engine/src/eval.rs"
+    pattern: 'must_not_return'
+    message: "The deterministic hard-negative contract must remain in the scored path."
+```
+
 ## Related Decisions
 
 - adr-002
