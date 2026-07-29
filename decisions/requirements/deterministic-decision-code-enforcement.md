@@ -26,9 +26,10 @@ deterministically without overstating coverage.
 - [REQ-006] Full-tree enforcement MUST evaluate every matching repository file and MUST fail when a required-pattern glob selects no file.
 - [REQ-007] `decided sentry` and `decided gate --code` MUST use the same enforcement engine and MUST return a blocking non-zero exit for violations or invalid constraints.
 - [REQ-008] Reports MUST be deterministic in human, JSON, and SARIF forms and MUST identify the governing Decision, rule ID, source path, line where available, and message.
-- [REQ-009] Reports MUST publish constrained-live-Decision coverage against all live Decisions and MUST NOT describe unconstrained decisions as enforced.
-- [REQ-010] Enforcement MUST remain local and MUST NOT use embeddings, model calls, an LLM judge, or a network service.
-- [REQ-011] Core pull requests MUST dogfood Sentry as a blocking check against the pull request base branch.
+- [REQ-009] Reports MUST label constrained/all-live as corpus adoption, MUST separately publish constrained/explicitly-eligible enforcement coverage, and MUST expose classified, unclassified, eligible, constrained, and active-rule counts.
+- [REQ-010] A Decision MUST be classifiable as `eligible` or `ineligible`; an ineligible Decision MUST state a reason and MUST NOT declare rules. A missing classification MUST remain visibly unclassified rather than being inferred.
+- [REQ-011] Enforcement MUST remain local and MUST NOT use embeddings, model calls, an LLM judge, or a network service.
+- [REQ-012] Core pull requests MUST dogfood Sentry as a blocking check against the pull request base branch.
 
 ## Success Metrics
 

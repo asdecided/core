@@ -293,8 +293,13 @@ pub struct GateReport {
 
 pub struct CodeCoverage {
     pub live_decisions: usize,
+    pub classified_decisions: usize,
+    pub unclassified_decisions: usize,
+    pub eligible_decisions: usize,
     pub constrained_decisions: usize,
-    pub percent: f64,
+    pub active_rules: usize,
+    pub corpus_adoption_percent: f64,
+    pub eligible_coverage_percent: f64,
 }
 
 impl GateReport {
@@ -469,8 +474,13 @@ pub fn build_gate_with_code(
             Ok(report) => {
                 code_coverage = Some(CodeCoverage {
                     live_decisions: report.live_decisions,
+                    classified_decisions: report.classified_decisions,
+                    unclassified_decisions: report.unclassified_decisions(),
+                    eligible_decisions: report.eligible_decisions,
                     constrained_decisions: report.constrained_decisions,
-                    percent: report.coverage_percent(),
+                    active_rules: report.active_rules,
+                    corpus_adoption_percent: report.corpus_adoption_percent(),
+                    eligible_coverage_percent: report.eligible_coverage_percent(),
                 });
                 for finding in report.findings {
                     add(

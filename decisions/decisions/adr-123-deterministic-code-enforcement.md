@@ -51,8 +51,11 @@ Sentry evaluates its rules against repository bytes.
    import languages are blocking findings.
 6. Human, JSON, and SARIF reports are deterministic and include the governing
    Decision, rule, source path, line where available, and aggregate coverage.
-7. Coverage is honest: the report states constrained live Decisions divided by
-   all live Decisions. It never implies that unconstrained intent was checked.
+7. Reporting separates corpus adoption from eligible enforcement coverage.
+   Every live Decision is either explicitly `eligible`, explicitly
+   `ineligible` with a reason, or unclassified. The report publishes both
+   constrained/all-live adoption and constrained/eligible coverage, plus the
+   unclassified count and active rule count.
 8. The engine performs no model call, embedding lookup, network request, or
    semantic judgement. Nuanced decisions remain subject to human review.
 
@@ -60,6 +63,7 @@ Sentry evaluates its rules against repository bytes.
 
 ```yaml
 version: 1
+eligibility: eligible
 rules:
   - id: sentry-has-no-network-client
     kind: forbid_import

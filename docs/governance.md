@@ -34,8 +34,10 @@ Accepted Decisions declare bounded rules in a versioned `## Code Constraints`
 YAML block; the engine supports forbidden patterns, required patterns, and
 forbidden imports. The checks are repository- and diff-based—no embeddings,
 model call, network service, or LLM judge. Use `--full` instead of `--base` for
-whole-tree certification. Every report publishes the constrained-live-Decision
-coverage percentage so the machine-enforced boundary remains explicit.
+whole-tree certification. Every report labels constrained/all-live as corpus
+adoption and separately publishes constrained/explicitly-eligible coverage,
+active rules, and the unclassified count so the machine-enforced boundary
+remains explicit.
 
 ## The `enforcement:` policy
 

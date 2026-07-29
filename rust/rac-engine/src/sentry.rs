@@ -30,7 +30,24 @@ pub const DUPLICATE_RULE_ID: &str = "duplicate-code-constraint-id";
 #[serde(deny_unknown_fields)]
 struct ConstraintDocument {
     version: u64,
+    #[serde(default = "default_eligibility")]
+    eligibility: Eligibility,
+    #[serde(default)]
     rules: Vec<ConstraintRule>,
+    reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum Eligibility {
+    Eligible,
+    Ineligible,
+}
+
+fn default_eligibility() -> Eligibility {
+    // Compatibility with the v1 shape shipped in 0.25.1: a document that
+    // already carries rules was necessarily declaring itself eligible.
+    Eligibility::Eligible
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -68,7 +85,10 @@ pub struct SentryReport {
     pub base: Option<String>,
     pub full_tree: bool,
     pub live_decisions: usize,
+    pub classified_decisions: usize,
+    pub eligible_decisions: usize,
     pub constrained_decisions: usize,
+    pub active_rules: usize,
     pub findings: Vec<SentryFinding>,
 }
 
@@ -77,12 +97,25 @@ impl SentryReport {
         self.findings.is_empty()
     }
 
-    pub fn coverage_percent(&self) -> f64 {
+    pub fn corpus_adoption_percent(&self) -> f64 {
         if self.live_decisions == 0 {
             0.0
         } else {
             self.constrained_decisions as f64 * 100.0 / self.live_decisions as f64
         }
+    }
+
+    pub fn eligible_coverage_percent(&self) -> f64 {
+        if self.eligible_decisions == 0 {
+            0.0
+        } else {
+            self.constrained_decisions as f64 * 100.0 / self.eligible_decisions as f64
+        }
+    }
+
+    pub fn unclassified_decisions(&self) -> usize {
+        self.live_decisions
+            .saturating_sub(self.classified_decisions)
     }
 }
 
@@ -204,8 +237,32 @@ fn parse_document(item: &CorpusItem) -> Result<Option<ConstraintDocument>, Box<S
             ),
         }));
     }
-    if document.rules.is_empty() {
-        return Err(invalid(item, None, "rules must not be empty"));
+    if document.eligibility == Eligibility::Ineligible {
+        if !document.rules.is_empty() {
+            return Err(invalid(
+                item,
+                None,
+                "ineligible decisions must not declare rules",
+            ));
+        }
+        if document
+            .reason
+            .as_deref()
+            .map_or(true, |reason| reason.trim().is_empty())
+        {
+            return Err(invalid(
+                item,
+                None,
+                "ineligible decisions must state a non-empty reason",
+            ));
+        }
+    }
+    if document
+        .reason
+        .as_deref()
+        .is_some_and(|reason| reason.trim().is_empty())
+    {
+        return Err(invalid(item, None, "reason must not be empty"));
     }
     let mut ids = BTreeSet::new();
     for rule in &document.rules {
@@ -570,7 +627,22 @@ pub fn analyze(
         base: base.map(str::to_string),
         full_tree,
         live_decisions: live.len(),
-        constrained_decisions: documents.len(),
+        classified_decisions: documents.len(),
+        eligible_decisions: documents
+            .iter()
+            .filter(|(_, document)| document.eligibility == Eligibility::Eligible)
+            .count(),
+        constrained_decisions: documents
+            .iter()
+            .filter(|(_, document)| {
+                document.eligibility == Eligibility::Eligible && !document.rules.is_empty()
+            })
+            .count(),
+        active_rules: documents
+            .iter()
+            .filter(|(_, document)| document.eligibility == Eligibility::Eligible)
+            .map(|(_, document)| document.rules.len())
+            .sum(),
         findings,
     })
 }
@@ -633,6 +705,16 @@ mod tests {
             "# ADR-001: Retain users\n\n## Status\n\nAccepted\n\n## Context\n\nDeletion loses audit history.\n\n## Decision\n\nUse soft deletion.\n\n## Consequences\n\nRows remain recoverable.\n\n## Code Constraints\n\n```yaml\nversion: 1\nrules:\n  - id: no-hard-delete\n    kind: forbid_pattern\n    path_glob: \"src/**/*.sql\"\n    pattern: \"DELETE\\\\s+FROM\\\\s+users\"\n```\n",
         )
         .unwrap();
+        fs::write(
+            corpus.join("adr-002.md"),
+            "# ADR-002: Product language\n\n## Status\n\nAccepted\n\n## Context\n\nThe product needs a stable voice.\n\n## Decision\n\nUse direct language.\n\n## Consequences\n\nCopy remains subject to human review.\n\n## Code Constraints\n\n```yaml\nversion: 1\neligibility: ineligible\nreason: \"Product voice requires human review, not a source-code rule.\"\n```\n",
+        )
+        .unwrap();
+        fs::write(
+            corpus.join("adr-003.md"),
+            "# ADR-003: Unclassified\n\n## Status\n\nAccepted\n\n## Context\n\nThis historical decision has not been classified.\n\n## Decision\n\nKeep its status explicit.\n\n## Consequences\n\nSentry reports it as unclassified.\n",
+        )
+        .unwrap();
         fs::write(source.join("users.sql"), "DELETE FROM users;\n").unwrap();
 
         let report = analyze(
@@ -643,8 +725,14 @@ mod tests {
             true,
         )
         .unwrap();
-        assert_eq!(report.live_decisions, 1);
+        assert_eq!(report.live_decisions, 3);
+        assert_eq!(report.classified_decisions, 2);
+        assert_eq!(report.eligible_decisions, 1);
         assert_eq!(report.constrained_decisions, 1, "{:#?}", report.findings);
+        assert_eq!(report.active_rules, 1);
+        assert_eq!(report.unclassified_decisions(), 1);
+        assert!((report.corpus_adoption_percent() - 100.0 / 3.0).abs() < f64::EPSILON);
+        assert_eq!(report.eligible_coverage_percent(), 100.0);
         assert_eq!(report.findings.len(), 1);
         assert_eq!(report.findings[0].code, CODE_VIOLATION);
 

@@ -26,6 +26,7 @@ section with one fenced YAML document:
 
 ```yaml
 version: 1
+eligibility: eligible
 rules:
   - id: no-hard-delete
     kind: forbid_pattern
@@ -34,9 +35,14 @@ rules:
     message: "ADR-014 requires recoverable account closure."
 ```
 
-Unknown document fields, unknown rule kinds, unsafe paths, invalid regexes,
-duplicate IDs, and empty rule sets are validation errors. Rule IDs use stable
-lowercase kebab-case.
+`eligibility` is `eligible` or `ineligible`. Existing v1 documents that predate
+the field remain `eligible` for compatibility. An eligible Decision may carry
+an empty rule list while its deterministic boundary is still being authored.
+An ineligible Decision carries no rules and must state a non-empty `reason`.
+No classification is inferred for Decisions without the section.
+
+Unknown document fields, unknown rule kinds, unsafe paths, invalid regexes, and
+duplicate IDs are validation errors. Rule IDs use stable lowercase kebab-case.
 
 ### Evaluation modes
 
@@ -65,8 +71,12 @@ SARIF renderers consume the same sorted findings.
 The report includes:
 
 - live Decision count;
+- classified and unclassified Decision counts;
+- explicitly eligible Decision count;
 - constrained live Decision count;
-- the resulting percentage;
+- active rule count;
+- constrained/all-live corpus adoption;
+- constrained/eligible enforcement coverage;
 - diff base or full-tree mode;
 - deterministic findings ordered by path, line, Decision, and rule.
 
