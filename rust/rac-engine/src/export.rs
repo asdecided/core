@@ -131,7 +131,11 @@ impl CorpusExport {
     }
 }
 
-pub fn build_corpus_export(directory: &str, rac_version: String) -> CorpusExport {
+fn build_corpus_export_inner(
+    directory: &str,
+    rac_version: String,
+    include_body_html: bool,
+) -> CorpusExport {
     let items = corpus_items(directory, true);
     let canonical = canonical_by_path(&items);
 
@@ -150,7 +154,11 @@ pub fn build_corpus_export(directory: &str, rac_version: String) -> CorpusExport
             status: status(&it.artifact, spec),
             title,
             path: it.path.clone(),
-            body_html: crate::mdhtml::render(&body_markdown(&it.path)),
+            body_html: if include_body_html {
+                crate::mdhtml::render(&body_markdown(&it.path))
+            } else {
+                String::new()
+            },
             tags: tags_of(&it.artifact),
         });
     }
@@ -177,6 +185,16 @@ pub fn build_corpus_export(directory: &str, rac_version: String) -> CorpusExport
         artifacts,
         relationships: edges,
     }
+}
+
+pub fn build_corpus_export(directory: &str, rac_version: String) -> CorpusExport {
+    build_corpus_export_inner(directory, rac_version, true)
+}
+
+/// OKF consumes the source Markdown body directly. Avoid an irrelevant HTML
+/// render over the whole corpus on this path.
+pub fn build_okf_export(directory: &str, rac_version: String) -> CorpusExport {
+    build_corpus_export_inner(directory, rac_version, false)
 }
 
 // --- documents JSONL ---------------------------------------------------------

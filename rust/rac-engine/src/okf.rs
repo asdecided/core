@@ -3,9 +3,9 @@
 //!
 //! A derived tree of Markdown files: one per typed artifact at its path
 //! relative to the exported corpus root, plus generated `index.md` and
-//! `log.md`. `created`/`updated` derive from git commit times with the
-//! committer's stored offset preserved (`%cI`, ADR-045); when git cannot
-//! answer, the fields are omitted and `log.md` degrades to a placeholder.
+//! `log.md`. OKF v0.2 `generated.at` derives from the last git commit time
+//! with the committer's stored offset preserved (`%cI`, ADR-045); when git
+//! cannot answer, `generated` is omitted and `log.md` degrades to a placeholder.
 
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -95,35 +95,54 @@ fn body(path: &str) -> String {
     py_strip(&split_frontmatter(&text).body).to_string()
 }
 
-/// `_artifact_file(art, citations, created, updated)`.
+fn yaml_string(value: &str) -> String {
+    serde_json::to_string(value).expect("serializing a Rust string cannot fail")
+}
+
+fn okf_status(status: &str) -> Option<&'static str> {
+    match status.trim().to_ascii_lowercase().as_str() {
+        "" | "unknown" => None,
+        "proposed" | "draft" => Some("draft"),
+        "retired" | "superseded" | "deprecated" | "obsolete" => Some("deprecated"),
+        _ => Some("stable"),
+    }
+}
+
+/// One v0.2 concept file. Structural relationships are navigation links, not
+/// provenance, so they deliberately do not populate `sources`.
 fn artifact_file(
     art: &ExportArtifact,
-    citations: &[(String, String)],
-    created: Option<&str>,
+    related: &[(String, String)],
     updated: Option<&str>,
 ) -> String {
     let mut lines = vec![
         "---".to_string(),
         format!("type: {}", okf_type(&art.artifact_type)),
-        format!("id: {}", art.id),
+        format!("id: {}", yaml_string(&art.id)),
+        format!("title: {}", yaml_string(&art.title)),
     ];
-    if let Some(created) = created {
-        lines.push(format!("created: {created}"));
+    if let Some(status) = okf_status(&art.status) {
+        lines.push(format!("status: {status}"));
     }
     if let Some(updated) = updated {
-        lines.push(format!("updated: {updated}"));
+        lines.push("generated:".to_string());
+        lines.push(format!("  by: asdecided/{}", env!("CARGO_PKG_VERSION")));
+        lines.push(format!("  at: {updated}"));
     }
     if !art.tags.is_empty() {
-        lines.push(format!("tags: [{}]", art.tags.join(", ")));
+        lines.push(format!(
+            "tags: {}",
+            serde_json::to_string(&art.tags).expect("serializing tags cannot fail")
+        ));
     }
     lines.push("---".to_string());
     lines.push(String::new());
     lines.push(body(&art.path));
-    if !citations.is_empty() {
+    if !related.is_empty() {
         lines.push(String::new());
-        lines.push("# Citations".to_string());
+        lines.push("# Related concepts".to_string());
         lines.push(String::new());
-        for (title, path) in citations {
+        for (title, path) in related {
             lines.push(format!("- [{title}]({path})"));
         }
     }
@@ -132,9 +151,9 @@ fn artifact_file(
     out
 }
 
-/// `_citations(art, export, by_id, rel)` — resolved outgoing relationships
+/// Resolved outgoing relationships
 /// as `(title, bundle path)` pairs, in relationship order.
-fn citations(
+fn related_concepts(
     art: &ExportArtifact,
     export: &CorpusExport,
     by_id: &HashMap<&str, &ExportArtifact>,
@@ -158,6 +177,10 @@ fn index(export: &CorpusExport, rel: &HashMap<&str, String>) -> String {
     let count = export.artifact_count();
     let noun = if count == 1 { "artifact" } else { "artifacts" };
     let mut lines = vec![
+        "---".to_string(),
+        "okf_version: \"0.2\"".to_string(),
+        "---".to_string(),
+        String::new(),
         format!("# {} \u{2014} Knowledge Index", export.corpus_name),
         String::new(),
         format!(
@@ -261,11 +284,10 @@ pub fn render_okf_bundle(
             ));
         }
         let record = recency_by_path.get(art.path.as_str());
-        let created = record.and_then(|r| r.first_committed.as_deref());
         let updated = record.and_then(|r| r.last_committed.as_deref());
         files.insert(
             key,
-            artifact_file(art, &citations(art, export, &by_id, &rel), created, updated),
+            artifact_file(art, &related_concepts(art, export, &by_id, &rel), updated),
         );
     }
     files.insert(INDEX_PATH.to_string(), index(export, &rel));

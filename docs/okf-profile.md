@@ -1,164 +1,145 @@
 # OKF Profile
 
-RAC stores product knowledge the same way [Google Cloud's Open Knowledge Format
-(OKF)](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md)
-does — a Git tree of Markdown files with YAML front matter. This page is RAC's
-**informative profile** of OKF **v0.1 Draft**: it defines how a RAC repository
-presents itself as a conformant OKF bundle. It is a derived, interoperability
-view; RAC Core and `decided validate` remain the source of truth, and adopting this
-profile loosens none of RAC's guarantees. The decision behind it is
-[ADR-048](https://github.com/asdecided/core/blob/main/decisions/decisions/adr-048-okf-carrier-profile.md),
-scoped by the `rac-okf-carrier-profile` requirement.
+AsDecided can project an authoritative decision corpus into [Google Cloud's
+Open Knowledge Format (OKF)
+v0.2](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md):
+a portable Git tree of Markdown files with YAML frontmatter.
 
-> The key words MUST, SHOULD, and MAY in this document are to be interpreted as
-> described in BCP 14 (RFC 2119, RFC 8174) when, and only when, they appear in
-> all capitals.
+This is an **informative carrier profile**. AsDecided remains the source of
+truth and keeps its stricter write-time validation, typed relationships, and
+lifecycle rules. The export never feeds back into the corpus and requires no
+Google code, package, service, or network call. The governing decisions are
+[ADR-048](https://github.com/asdecided/core/blob/main/decisions/decisions/adr-048-okf-carrier-profile.md)
+and
+[ADR-122](https://github.com/asdecided/core/blob/main/decisions/decisions/adr-122-okf-v0-2-carrier-profile.md).
 
 ## Producing a bundle
-
-`decided export <dir> --okf` writes the bundle described here:
 
 ```bash
 decided export decisions/ --okf --out okf-bundle/
 ```
 
-It emits one Markdown file per typed artifact (front matter projecting the OKF
-`type`), plus a generated `index.md` and `log.md`, mirroring the corpus layout.
-The bundle is a derived build artifact, parallel to `decided export --json` and
-`--html`; it never feeds back into RAC.
+The command emits one concept file per typed artifact, preserving the corpus
+layout, plus generated root `index.md` and `log.md` files. New exports target
+OKF v0.2 only.
 
-Each bundle artifact also carries OKF's descriptive fields where RAC has them
-(ADR-050): `tags` projected from the source frontmatter (a RAC artifact MAY
-declare `tags: [...]`), and `created`/`updated` derived from git history — first
-and last commit. Timestamps are never stored in the source frontmatter; recency
-is git-derived (ADR-045), so the source stays date-free while the bundle is fully
-timestamped. RAC does not project a frontmatter `title` (it derives from the H1)
-or a `description`.
-
-## Type mapping (normative)
-
-Every RAC artifact carries a `type` in its front matter. In the OKF bundle view
-each artifact MUST present a non-empty OKF `type`, mapped from its RAC `type`:
-
-| RAC `type`    | OKF `type`    |
-| ------------- | ------------- |
-| `requirement` | `Requirement` |
-| `decision`    | `ADR`         |
-| `roadmap`     | `Roadmap`     |
-| `prompt`      | `Prompt`      |
-| `design`      | `Design`      |
-
-The RAC `type` is authoritative; the OKF `type` is derived from it. A RAC
-artifact MUST NOT present an empty or unmapped OKF `type`.
-
-### Worked example
-
-A RAC decision artifact:
+The root index declares the profile explicitly:
 
 ```yaml
 ---
-schema_version: 1
-id: RAC-KV2KWK55FC49
-type: decision
+okf_version: "0.2"
 ---
-# ADR-048: OKF as an Informative Carrier Profile
 ```
 
-presents, in the OKF bundle view, as `type: ADR` — the same file, the same body,
-a derived front-matter projection.
+## Concept projection
 
-## Checking conformance (write-time gate)
+Each concept preserves the stable AsDecided ID and body while projecting the
+carrier fields:
 
-Conformance is enforced, not just produced on export. Running `decided validate` over
-a corpus checks OKF v0.1 conformance as part of the run (ADR-048, ADR-049):
+```yaml
+---
+type: ADR
+id: "RAC-KV2KWK55FC49"
+title: "ADR-048: OKF as an Informative Carrier Profile"
+status: stable
+generated:
+  by: asdecided/0.25.0
+  at: 2026-07-29T11:00:00+01:00
+tags: ["interoperability"]
+---
+```
+
+- `title` and `tags` are safely encoded YAML strings.
+- `generated.at` is the last meaningful Git commit time, when available.
+- `generated.by` identifies the versioned deterministic exporter. It does not
+  claim that AsDecided authored the underlying knowledge.
+- `generated` is omitted when Git cannot supply a valid timestamp.
+- `description` remains absent because AsDecided has no equivalent canonical
+  field.
+
+### Type mapping
+
+| AsDecided `type` | OKF `type` |
+| --- | --- |
+| `requirement` | `Requirement` |
+| `decision` | `ADR` |
+| `roadmap` | `Roadmap` |
+| `prompt` | `Prompt` |
+| `design` | `Design` |
+
+Unknown documents remain outside the derived export. OKF consumers must tolerate
+unknown types, but that permissive read rule does not expand AsDecided's
+authoritative artifact registry.
+
+### Lifecycle mapping
+
+OKF v0.2 has a deliberately small lifecycle vocabulary. The projection is:
+
+| AsDecided status | OKF `status` |
+| --- | --- |
+| `Proposed`, `Draft` | `draft` |
+| `Retired`, `Superseded`, `Deprecated`, `Obsolete` | `deprecated` |
+| other valid non-empty live states | `stable` |
+| absent or unknown | omitted |
+
+The source artifact retains the full type-specific lifecycle meaning.
+
+## Relationships are not provenance
+
+Resolved AsDecided relationships are emitted as deterministic Markdown links
+under `# Related concepts`. They are not emitted as OKF `sources`: a governance
+or navigation edge does not necessarily mean the target was a source for the
+concept.
+
+For the same reason, this profile does not infer:
+
+- `verified` or a trust tier from an accepted status;
+- verification actors from AsDecided `Verified By` test and trace paths;
+- `stale_after` from Git recency;
+- source credibility from relationship proximity; or
+- executor or attester fields without an authoritative Attested Computation.
+
+Those optional v0.2 fields can be added only when the AsDecided corpus carries
+equivalent semantics. Their absence is valid OKF and is more truthful than
+invented provenance.
+
+## Generated navigation
+
+- `index.md` declares `okf_version: "0.2"` and provides progressive disclosure
+  by artifact type.
+- `log.md` groups concepts by their last Git commit date, newest first.
+- Both are derived output and must not be hand-maintained as authoritative
+  corpus state.
+
+## Checking conformance
+
+`decided validate` keeps a stricter AsDecided profile gate:
 
 ```bash
 decided validate decisions/
-# … PASS  decisions/ — N artifact(s) checked: N valid, 0 invalid. OKF v0.1: conformant.
+# … PASS decisions/ — N artifact(s) checked: N valid, 0 invalid. OKF v0.2: conformant.
 ```
 
-The check is deterministic and per-artifact. It reports, with a file-named,
-fixable diagnostic, and fails the `validate` exit code:
+It fails on mapped artifacts that cannot be represented or collide with the
+reserved generated `index.md` and `log.md` paths. Relationship integrity remains
+the responsibility of `decided relationships --validate`. General OKF v0.2
+consumers are more permissive: optional fields, unknown types, broken links, and
+a missing index are not rejection conditions.
 
-| Code | Meaning |
-| --- | --- |
-| `okf-unmapped-type` | a typed artifact whose `type` has no OKF mapping (it would be silently dropped from the bundle) |
-| `okf-reserved-filename-collision` | a typed artifact named `index.md` or `log.md`, which OKF reserves for generated entry points |
+## Migrating from the v0.1 profile
 
-Untyped documents are excluded (ADR-010): they are legitimately skipped and the
-bundle already omits them, so an `index.md`/`log.md` that is an untyped entry
-point is recognized, never flagged. Referential integrity ("links resolve") stays
-with `decided relationships --validate`. The directory `validate` JSON carries an
-additive `okf` section (ADR-007). Per ADR-052, `rac-core` — the OKF-superset
-frontmatter envelope (`schema_version`, `id`, `type`, `relationships`, `tags`) —
-is defined in code and enforced this way; RAC ships no JSON Schema `rac-core` file
-and takes no schema-validation dependency.
+New exports make two intentional changes:
 
-## Conventions (recommended)
+- `created` and `updated` are replaced by v0.2 `generated`; and
+- generated `# Citations` are replaced by `# Related concepts`.
 
-Where RAC has gaps, a RAC repository SHOULD adopt the following OKF conventions.
-Each is a derived output generated from the corpus, never a hand-maintained
-source file.
-
-### `index.md` — progressive disclosure
-
-An OKF bundle SHOULD ship an `index.md` entry point that discloses the corpus in
-layers: an overview, then the artifact types, then individual artifacts. It is
-the front door for a human or agent that has never seen the bundle.
-
-```markdown
-# Knowledge Index
-
-## Decisions
-- [ADR-048: OKF as an Informative Carrier Profile](decisions/decisions/adr-048-okf-carrier-profile.md)
-  — RAC adopts OKF as an informative carrier profile and derived export target.
-
-## Requirements
-- [REQ-OKF-Carrier-Profile](decisions/requirements/rac-okf-carrier-profile.md)
-  — conformance, derived bundle export, and the no-loosening invariant.
-```
-
-### `log.md` — date-grouped history
-
-An OKF bundle SHOULD ship a `log.md` recording how the corpus evolved, grouped
-by date, newest-first. RAC derives this from Git history of the `decisions/` tree
-(consistent with ADR-045: recency is derived from Git, not stored in front
-matter), so it never drifts from reality.
-
-```markdown
-# Log
-
-## 2026-06-14
-- Added ADR-048 (OKF as an informative carrier profile).
-- Added REQ-OKF-Carrier-Profile (conformance, profile, and bundle export).
-```
-
-### `# Citations` — body references
-
-Where a RAC artifact wants a human-facing list of what it draws on, it SHOULD use
-a `# Citations` body section. This complements — and never replaces — RAC's typed
-`## Related <Type>` structural references, which remain the machine-resolved,
-validated edges (see [relationships](relationships.md) and ADR-016). In the
-derived OKF view, each resolved structural relationship also appears as a body
-link, so the relationship survives for permissive OKF consumers.
-
-```markdown
-# Citations
-
-- [ADR-016: Relationships as Explicit Structural References](decisions/decisions/adr-016-relationships-as-structural-references.md)
-- [ADR-007: JSON Contract Stability](decisions/decisions/adr-007-json-contract-stability.md)
-```
-
-## Status of this profile
-
-The dependency on OKF is **informative and pinned to OKF v0.1**. RAC takes no
-code, package, or network dependency on OKF or Google tooling. OKF is a pre-1.0,
-single-vendor draft; if it diverges materially at 1.0, RAC can re-pin or drop the
-profile without touching Core. Promoting the OKF bundle to a frozen RAC contract
-(alongside the JSON/Portal export) would extend RAC's stability obligations and
-is therefore a future, separately recorded ADR — not a change to this page.
+An existing consumer can temporarily fall back from `generated.at` to legacy
+`updated`, and can continue parsing legacy `# Citations`, while it adopts v0.2.
+AsDecided does not maintain a dual-output flag; the small v0.1 retirement
+fixture exists only to keep that migration explicit and bounded.
 
 ## See also
 
-- [relationships.md](relationships.md) — how RAC's typed structural references work.
-- [artifacts.md](artifacts.md) — artifact types and identity.
+- [Relationships](relationships.md)
+- [Artifacts](artifacts.md)
+- [Validation](validation.md)

@@ -72,19 +72,19 @@ Comparison sources, verified 2026-06-12:
 
 Google's Open Knowledge Format (OKF) standardises the *carrier* — a Git tree of Markdown with YAML front matter — and is deliberately permissive: consumers must not reject a bundle for missing fields, unknown types, or broken links. OKF says *"if you can `cat` it, you can read it."* RAC says *"and CI guarantees the file is well-formed, the decision is consistent, and nothing points at a superseded artifact."* OKF is read-time interchange; RAC is **write-time enforcement** — deterministic, cross-artifact validation (referential integrity, status-consistency, illegal-edge detection) that fails your build before bad knowledge lands. A RAC repo *is* a conformant OKF bundle (`decided export --okf`), so you get the interchange for free and keep the enforcement OKF leaves out (ADR-048, ADR-049).
 
-| Dimension | AsDecided / RAC | OKF (v0.1 Draft) |
+| Dimension | AsDecided / RAC | OKF v0.2 |
 | --- | --- | --- |
 | Validation time | Write-time: `decided validate` and `decided relationships --validate` fail CI before the knowledge lands | Read-time: consumers "MUST NOT reject a bundle" for missing optional fields or unknown `type`, and "MUST tolerate broken links" |
 | Links | Typed `## Related` structural references, resolved and validated — broken, ambiguous, superseded-target, and unsupported edges are errors | Untyped: the relationship kind "is conveyed by the surrounding prose, not by the link itself" |
 | `type` field | Five enumerated types that drive classification and validation | A free string — "Type values are not registered centrally" |
 | Cross-artifact checks | Referential integrity, status-consistency, edge-legality — enforced deterministically in CI | None defined; consumption is permissive by design |
-| Maturity | Governed corpus; CLI and MCP output is a stability-tested contract | "Version 0.1 — Draft"; a single-vendor (Google Cloud) initiative |
+| Maturity | Governed corpus; CLI and MCP output is a stability-tested contract | Pre-1.0, openly specified Google Cloud initiative with optional provenance, trust, freshness, lifecycle, and deterministic attestation conventions |
 | Interoperability | `decided export --okf` emits a conformant OKF bundle | The shared carrier RAC writes |
 
 <!--
-OKF comparison source, verified 2026-06-14:
+OKF comparison source, verified 2026-07-29:
 - OKF — https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md
-  (SPEC.md, "Version 0.1 — Draft"): consumers "MUST NOT reject a bundle because
+  (SPEC.md, "Version 0.2"): consumers "MUST NOT reject a bundle because
   of: Missing optional frontmatter fields / Unknown `type` values / Unknown
   additional frontmatter keys" and "MUST tolerate broken links"; the relationship
   kind "is conveyed by the surrounding prose, not by the link itself"; "Type

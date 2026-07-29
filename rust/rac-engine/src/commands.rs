@@ -1218,11 +1218,10 @@ pub fn cmd_export(args: &ExportArgs) -> i32 {
         )));
         return EXIT_OK;
     }
-    let export = crate::export::build_corpus_export(&args.directory, output::rac_version());
-
-    // OKF bundle (ADR-048): a derived tree written under out, sorted-path
-    // order; recency feeds created/updated and log.md (ADR-045).
+    // OKF consumes source Markdown directly, so its projection skips the
+    // unrelated HTML rendering used by the viewer export.
     if args.okf {
+        let export = crate::export::build_okf_export(&args.directory, output::rac_version());
         let recency = crate::okf::artifact_recency(&args.directory, &export);
         let bundle = match crate::okf::render_okf_bundle(&export, &recency, &args.directory) {
             Ok(bundle) => bundle,
@@ -1254,6 +1253,7 @@ pub fn cmd_export(args: &ExportArgs) -> i32 {
         ));
         return EXIT_OK;
     }
+    let export = crate::export::build_corpus_export(&args.directory, output::rac_version());
 
     // JSON is the default mode: the payload is the product (--json a no-op).
     if !args.html {

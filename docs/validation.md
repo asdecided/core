@@ -2,7 +2,7 @@
 
 `decided validate` is RAC's write-time gate: it fails when any artifact carries an
 error-severity finding, and (over a directory) when the corpus is not a
-conformant OKF v0.1 bundle. Two features make that gate adoptable in CI on a
+conformant OKF v0.2 bundle. Two features make that gate adoptable in CI on a
 real, pre-existing repository.
 
 ## Per-type standards checks
