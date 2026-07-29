@@ -374,10 +374,10 @@ pub fn render_validate_dir_human(result: &DirectoryValidation) -> String {
     );
     if let Some(okf) = &result.okf {
         if okf.ok() {
-            summary.push_str(" OKF v0.1: conformant.");
+            summary.push_str(" OKF v0.2: conformant.");
         } else {
             summary.push_str(&format!(
-                " OKF v0.1: {} conformance issue(s).",
+                " OKF v0.2: {} conformance issue(s).",
                 okf.findings.len()
             ));
         }

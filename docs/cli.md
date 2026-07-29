@@ -827,7 +827,7 @@ modes; the default writes the viewer JSON payload to stdout. Exports are build
 artifacts — existing output is overwritten.
 
 - **Input:** `decided export [directory]` — scanned recursively for `*.md` (default: current directory).
-- **Modes:** *(default)* viewer JSON to stdout · `--html` (self-contained Portal file) · `--okf` (OKF v0.1 Markdown bundle) · `--documents` (JSONL for memory/RAG backends) · `--graph` (typed node+edge JSON for graph backends) · `--agent-rules` (per-client agent-context files; see its own behaviour)
+- **Modes:** *(default)* viewer JSON to stdout · `--html` (self-contained Portal file) · `--okf` (OKF v0.2 Markdown bundle) · `--documents` (JSONL for memory/RAG backends) · `--graph` (typed node+edge JSON for graph backends) · `--agent-rules` (per-client agent-context files; see its own behaviour)
 - **Options:** `--out <path>` (only `--html`/`--okf`/`--agent-rules`; the stdout modes are pipeable) · `--json` (no-op for the default mode)
 - **Exit codes:** `0` success · `2` not a directory, or `--out` given to a stdout mode
 
