@@ -12,6 +12,26 @@ brew install asdecided/tap/asdecided-core
 
 No Python runtime or extra is needed.
 
+## Protocol compatibility
+
+`decided-mcp` supports both MCP lifecycle eras:
+
+- existing clients can continue using the initialize-based revisions through
+  `2025-11-25`;
+- current clients can use the stateless `2026-07-28` revision through
+  `server/discover` and per-request metadata.
+
+No configuration change is required for stdio clients: a current host discovers
+the current revision, while an older host follows the established initialize
+flow. The six read-only tools and their grounding results are the same in both
+eras.
+
+For shared HTTP deployments, current clients send
+`MCP-Protocol-Version`, `Mcp-Method`, and the applicable `Mcp-Name` headers.
+AsDecided validates these before dispatch and never creates an MCP session.
+Authentication remains the responsibility of the fronting deployment proxy;
+the engine's mandatory HTTP audit posture is unchanged.
+
 ## 2. Configure your client
 
 Replace `/path/to/your/repo` with the absolute path to the directory that

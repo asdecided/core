@@ -23,7 +23,7 @@ use std::net::{TcpListener, TcpStream};
 
 use serde_json::Value;
 
-use crate::{audit, process_request, ServerState};
+use crate::{audit, process_request, protocol, ServerState};
 
 /// Prove a working audit sink for HTTP serving (ADR-084 fail-loud). Audit must
 /// be enabled in `.decided/config.yaml` and its resolved path writable, or the
@@ -238,17 +238,115 @@ fn route_post(
                 .to_string(),
         );
     };
+    let id_json = message
+        .get("id")
+        .and_then(|id| serde_json::to_string(id).ok())
+        .unwrap_or_else(|| "null".to_string());
+    let era = match http_era(req, &message, &id_json) {
+        Ok(era) => era,
+        Err(response) => return response,
+    };
+    if era == protocol::Era::Current {
+        if let Err(response) = validate_current_headers(req, &message, method, &id_json) {
+            return response;
+        }
+        if let Err(frame) = protocol::validate_current_metadata(&message, &id_json) {
+            return json_response("400 Bad Request", frame);
+        }
+    }
     // A notification (no id) is acknowledged with 202 and no body (ADR-032:
     // nothing to return; the read-only server holds no session to advance).
-    let Some(id) = message.get("id") else {
+    if message.get("id").is_none() {
         return Response { status: "202 Accepted", body: None };
-    };
+    }
     // Attribution rides X-AsDecided-Principal (ADR-098): recorded by audit, never an
     // access-control input — the response is identical whatever it says.
     let principal = req.header("x-asdecided-principal");
-    let id_json = serde_json::to_string(id).unwrap_or_else(|_| "null".to_string());
-    let frame = process_request(root, state, method, &id_json, &message, recorder.as_mut(), principal);
-    json_response("200 OK", frame)
+    let frame = process_request(
+        root,
+        state,
+        era,
+        &id_json,
+        &message,
+        recorder.as_mut(),
+        principal,
+    );
+    let status = if era == protocol::Era::Current
+        && !protocol::current_method_supported(method)
+    {
+        "404 Not Found"
+    } else {
+        "200 OK"
+    };
+    json_response(status, frame)
+}
+
+fn http_era(req: &Request, message: &Value, id_json: &str) -> Result<protocol::Era, Response> {
+    let header_version = req.header("mcp-protocol-version");
+    let metadata_version = protocol::requested_version(message);
+    match header_version {
+        Some(protocol::CURRENT_PROTOCOL_VERSION) => Ok(protocol::Era::Current),
+        Some(version) if protocol::LEGACY_PROTOCOL_VERSIONS.contains(&version) => {
+            Ok(protocol::Era::Legacy)
+        }
+        Some(version) => Err(json_response(
+            "400 Bad Request",
+            protocol::unsupported_protocol_frame(message.get("id"), Some(version)),
+        )),
+        None if metadata_version == Some(protocol::CURRENT_PROTOCOL_VERSION) => Err(json_response(
+            "400 Bad Request",
+            protocol::header_mismatch_frame(
+                id_json,
+                "MCP-Protocol-Version",
+                Some(protocol::CURRENT_PROTOCOL_VERSION),
+                None,
+            ),
+        )),
+        None => Ok(protocol::Era::Legacy),
+    }
+}
+
+fn validate_current_headers(
+    req: &Request,
+    message: &Value,
+    method: &str,
+    id_json: &str,
+) -> Result<(), Response> {
+    let metadata_version = protocol::requested_version(message);
+    if metadata_version != Some(protocol::CURRENT_PROTOCOL_VERSION) {
+        return Err(json_response(
+            "400 Bad Request",
+            protocol::header_mismatch_frame(
+                id_json,
+                "MCP-Protocol-Version",
+                Some(protocol::CURRENT_PROTOCOL_VERSION),
+                metadata_version,
+            ),
+        ));
+    }
+    let method_header = req.header("mcp-method");
+    if method_header != Some(method) {
+        return Err(json_response(
+            "400 Bad Request",
+            protocol::header_mismatch_frame(id_json, "Mcp-Method", Some(method), method_header),
+        ));
+    }
+    if method == "tools/call" {
+        let expected_name = message.pointer("/params/name").and_then(Value::as_str);
+        let actual_name = req.header("mcp-name");
+        if expected_name.is_none() || actual_name != expected_name {
+            return Err(json_response(
+                "400 Bad Request",
+                protocol::header_mismatch_frame(
+                    id_json,
+                    "Mcp-Name",
+                    expected_name,
+                    actual_name,
+                ),
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn respond(writer: &mut TcpStream, resp: &Response) {
