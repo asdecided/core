@@ -139,6 +139,11 @@ jobs:
           test "$(jq -r '.version' server.json)" = "$WORKSPACE_VERSION"
           test "$(jq -r '.packages[0].version' server.json)" = "$WORKSPACE_VERSION"
           grep -Fx "mcp-name: io.github.asdecided/core" rust/decided-mcp/README.md
-      - name: Package MCP crate
+      # A release PR can point at an exact engine version that does not exist on
+      # crates.io until the staged publish workflow runs. Listing the package
+      # still validates its include/exclude boundary without falsely requiring
+      # the unreleased dependency; crates-publish performs the full dry-run
+      # after publishing and indexing asdecided-core.
+      - name: Verify MCP crate package contents
         working-directory: rust
-        run: cargo publish --dry-run --locked -p decided-mcp
+        run: cargo package --list --locked -p decided-mcp

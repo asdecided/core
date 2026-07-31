@@ -16,6 +16,17 @@ details, release history over commit history.
   release metadata, CI checkouts, and OCI publication now use the canonical
   AsDecided repository names. Stable `RAC-*` artifact IDs remain unchanged.
 
+## v0.26.1 — 2026-07-31
+
+- Published the native `decided-mcp` server as its own crates.io package and
+  added the canonical `io.github.asdecided/core` metadata and secretless GitHub
+  OIDC workflow for the official MCP Registry.
+- Added native Linux arm64 and macOS amd64 archives alongside Linux amd64,
+  macOS arm64, and Windows amd64, completing the four-platform asset set needed
+  for a signed local Pilot App Store submission.
+- Documented direct Cargo installation for both native executables and the
+  official Scoop installation path for Windows.
+
 ## v0.23.1 — 2026-07-24
 
 - Fixed native Windows compilation by using portable filesystem metadata,

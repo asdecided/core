@@ -22,6 +22,14 @@ Rust users can install the `decided` CLI directly from crates.io:
 
 ```sh
 cargo install decided
+cargo install decided-mcp
+```
+
+Windows users can install both native executables through Scoop:
+
+```powershell
+scoop bucket add asdecided https://github.com/asdecided/scoop-bucket
+scoop install asdecided
 ```
 
 Native `decided` and `decided-mcp` archives are also published on
@@ -63,6 +71,8 @@ The migration moves `.rac/` to `.decided/` and `rac/` to `decisions/`. It
 refuses to overwrite either destination.
 
 ## MCP
+
+The official MCP Registry identity is `io.github.asdecided/core`.
 
 ```json
 {
