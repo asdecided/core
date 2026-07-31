@@ -1,0 +1,59 @@
+name: Publish to MCP Registry
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Exact released version to register
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: mcp-registry
+    steps:
+      - uses: actions/checkout@v5
+      - name: Verify requested and packaged versions
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          WORKSPACE_VERSION="$(cargo metadata --manifest-path rust/Cargo.toml --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "decided-mcp") | .version')"
+          SERVER_VERSION="$(jq -r '.version' server.json)"
+          PACKAGE_VERSION="$(jq -r '.packages[] | select(.identifier == "decided-mcp") | .version' server.json)"
+          test "$REQUESTED_VERSION" = "$WORKSPACE_VERSION"
+          test "$REQUESTED_VERSION" = "$SERVER_VERSION"
+          test "$REQUESTED_VERSION" = "$PACKAGE_VERSION"
+      - name: Verify MCP crate is available
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          for attempt in {1..30}; do
+            if cargo info "decided-mcp@$REQUESTED_VERSION" --registry crates-io >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::decided-mcp $REQUESTED_VERSION did not reach the crates.io index"
+          exit 1
+      - name: Install checksum-pinned MCP publisher
+        env:
+          PUBLISHER_VERSION: 1.8.0
+          PUBLISHER_SHA256: 1370446bbe74d562608e8005a6ccce02d146a661fbd78674e11cc70b9618d6cf
+        run: |
+          ARCHIVE="mcp-publisher_linux_amd64.tar.gz"
+          curl --fail --location --silent --show-error \
+            --output "$ARCHIVE" \
+            "https://github.com/modelcontextprotocol/registry/releases/download/v${PUBLISHER_VERSION}/${ARCHIVE}"
+          echo "${PUBLISHER_SHA256}  ${ARCHIVE}" | sha256sum --check
+          tar -xzf "$ARCHIVE" mcp-publisher
+      - name: Validate Registry metadata
+        run: ./mcp-publisher validate
+      - name: Authenticate with GitHub OIDC
+        run: ./mcp-publisher login github-oidc
+      - name: Publish Registry metadata
+        run: ./mcp-publisher publish

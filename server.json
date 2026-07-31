@@ -1,17 +1,20 @@
 {
-  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
-  "name": "io.github.tcballard/lore",
-  "description": "Serve your repo's recorded product knowledge - requirements, decisions (ADRs), designs, roadmaps - to coding agents. Deterministic, read-only.",
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.asdecided/core",
+  "description": "Read-only access to deterministic engineering decisions stored in a local repository.",
+  "title": "AsDecided",
   "repository": {
     "url": "https://github.com/asdecided/core",
     "source": "github"
   },
-  "version": "0.11.0",
+  "version": "0.26.0",
+  "websiteUrl": "https://asdecided.com",
   "packages": [
     {
-      "registryType": "pypi",
-      "identifier": "asdecided-core",
-      "version": "0.11.0",
+      "registryType": "cargo",
+      "registryBaseUrl": "https://crates.io",
+      "identifier": "decided-mcp",
+      "version": "0.26.0",
       "transport": {
         "type": "stdio"
       }

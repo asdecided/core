@@ -121,3 +121,24 @@ jobs:
             exit "$EXIT_CODE"
           fi
           echo "AsDecided Sentry passed."
+
+  mcp-distribution:
+    name: mcp distribution metadata
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Verify Registry and Cargo metadata agree
+        run: |
+          WORKSPACE_VERSION="$(cargo metadata --manifest-path rust/Cargo.toml --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "decided-mcp") | .version')"
+          test "$(jq -r '.name' server.json)" = "io.github.asdecided/core"
+          test "$(jq -r '.packages | length' server.json)" = "1"
+          test "$(jq -r '.packages[0].registryType' server.json)" = "cargo"
+          test "$(jq -r '.packages[0].registryBaseUrl' server.json)" = "https://crates.io"
+          test "$(jq -r '.packages[0].identifier' server.json)" = "decided-mcp"
+          test "$(jq -r '.packages[0].transport.type' server.json)" = "stdio"
+          test "$(jq -r '.version' server.json)" = "$WORKSPACE_VERSION"
+          test "$(jq -r '.packages[0].version' server.json)" = "$WORKSPACE_VERSION"
+          grep -Fx "mcp-name: io.github.asdecided/core" rust/decided-mcp/README.md
+      - name: Package MCP crate
+        working-directory: rust
+        run: cargo publish --dry-run --locked -p decided-mcp
