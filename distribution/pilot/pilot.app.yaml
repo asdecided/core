@@ -1,0 +1,150 @@
+id: io.pilot.asdecided
+app_version: 0.26.1
+manifest_version: 1
+description: "Read and validate engineering decisions from a repository on this machine."
+
+publisher:
+  key_file: asdecided-publisher.key
+
+backend:
+  type: cli
+  command: ["decided"]
+
+methods:
+  - name: asdecided.retrieve
+    summary: "Retrieve the decisions and related context governing a task from a local repository."
+    kind: utility
+    duration: med
+    params:
+      task: "string (required) — the engineering question or task to ground"
+      repository: "string (required) — absolute path to the local repository or decision corpus"
+    cli:
+      args: ["retrieve", "${task}", "${repository}", "--json", "--top-k", "5", "--budget", "10000"]
+
+  - name: asdecided.validate
+    summary: "Validate decision artifacts in a local repository without writing a cache."
+    kind: utility
+    duration: med
+    params:
+      repository: "string (required) — absolute path to the local repository or decision corpus"
+    cli:
+      args: ["validate", "${repository}", "--json", "--no-cache"]
+
+  - name: asdecided.relationships
+    summary: "Inspect and validate relationships between decision artifacts in a local repository."
+    kind: utility
+    duration: med
+    params:
+      repository: "string (required) — absolute path to the local repository or decision corpus"
+    cli:
+      args: ["relationships", "${repository}", "--json", "--validate"]
+
+grants:
+  extra:
+    # Pilot grants are static while repository paths are selected per call.
+    # The installer sees and consents to this home-directory read authority.
+    - {cap: fs.read, target: "$HOME"}
+
+listing:
+  display_name: As Decided
+  tagline: "Engineering decisions on this machine"
+  app_description: |
+    As Decided retrieves, validates, and checks relationships between engineering
+    decisions already stored in a local repository. It runs the native Rust
+    engine on the Pilot node: neither Pilot nor As Decided receives, hosts, or
+    indexes the repository.
+
+    The Pilot surface is deliberately read-only and deterministic. Every call
+    names the repository it reads, and there is no arbitrary command passthrough.
+  homepage: https://asdecided.com
+  source_url: https://github.com/asdecided/core
+  license: Apache-2.0
+  categories: [developer-tools, knowledge]
+  keywords: [decisions, architecture, agents, validation, local-first]
+  vendor:
+    name: As Decided
+    url: https://asdecided.com
+    contact: https://github.com/asdecided/core/issues
+  changelog:
+    - version: 0.26.1
+      date: "2026-07-31"
+      notes:
+        - "Initial Pilot App Store candidate using the native As Decided v0.26.1 engine."
+
+product_demo:
+  skill: io.pilot.asdecided
+  title: "Ground work in the decisions already on this machine"
+  whentouse: "When an agent needs to retrieve or check the engineering decisions governing work in a local repository."
+  metered: false
+  quickstart:
+    goal: "Retrieve the decisions governing a task"
+    command: "pilotctl appstore call io.pilot.asdecided asdecided.retrieve '{\"task\":\"Can I hard-delete a closed user account?\",\"repository\":\"/Users/me/project\"}'"
+    expect: "A deterministic JSON grounding bundle containing the governing decisions and source paths."
+  examples:
+    - title: "Validate the decision corpus"
+      command: "pilotctl appstore call io.pilot.asdecided asdecided.validate '{\"repository\":\"/Users/me/project\"}'"
+      expect: "JSON validation results; valid and invalid artifact counts are explicit."
+    - title: "Check relationship integrity"
+      command: "pilotctl appstore call io.pilot.asdecided asdecided.relationships '{\"repository\":\"/Users/me/project\"}'"
+      expect: "JSON relationship validation results with any broken references identified."
+  gotchas:
+    - "Replace /Users/me/project with an absolute repository path under the Pilot user's home directory; the path is never uploaded."
+    - "The Pilot app is read-only: mutation, migration, scaffolding, sharing, and arbitrary CLI execution are not exposed."
+  next:
+    - "io.pilot.asdecided asdecided.help '{}' — list every method, parameter, and latency class"
+
+next_steps:
+  schema: 1
+  app: io.pilot.asdecided
+  edges:
+    - from: asdecided.retrieve
+      on: ok
+      why: "the governing context is available; check that the underlying decision corpus is structurally valid"
+      then:
+        - cmd: "pilotctl appstore call io.pilot.asdecided asdecided.validate '{\"repository\":\"/Users/me/project\"}'"
+          why: "validate the same repository, replacing /Users/me/project with its absolute path under your home directory"
+          kind: flow
+    - from: asdecided.validate
+      on: ok
+      why: "the corpus is valid; retrieve the decisions that govern the work before changing code"
+      then:
+        - cmd: "pilotctl appstore call io.pilot.asdecided asdecided.retrieve '{\"task\":\"Can I hard-delete a closed user account?\",\"repository\":\"/Users/me/project\"}'"
+          why: "replace /Users/me/project with the validated repository and replace the task with the work you are about to perform"
+          kind: flow
+    - from: asdecided.relationships
+      on: ok
+      why: "the relationship graph has been checked; retrieve the decision context for the concrete task"
+      then:
+        - cmd: "pilotctl appstore call io.pilot.asdecided asdecided.retrieve '{\"task\":\"Can I hard-delete a closed user account?\",\"repository\":\"/Users/me/project\"}'"
+          why: "replace /Users/me/project with the checked repository and replace the task with the work you are about to perform"
+          kind: flow
+
+assets:
+  - os: darwin
+    arch: arm64
+    url: https://github.com/asdecided/core/releases/download/v0.26.1/asdecided-aarch64-apple-darwin.tar.gz
+    sha256: d90eb14a53f961860f4fe5b76b89a2978356bc9d854d41b08912581c8605733d
+    unpack: tar.gz
+    exec_path: decided
+    order: 1
+  - os: darwin
+    arch: amd64
+    url: https://github.com/asdecided/core/releases/download/v0.26.1/asdecided-x86_64-apple-darwin.tar.gz
+    sha256: 33490680526ee09de7d5a9c0c137eaca49ab8603c3fe5044b009aefa8f6c4728
+    unpack: tar.gz
+    exec_path: decided
+    order: 1
+  - os: linux
+    arch: arm64
+    url: https://github.com/asdecided/core/releases/download/v0.26.1/asdecided-aarch64-unknown-linux-gnu.tar.gz
+    sha256: ebbf82115bf642da071d37bc2dfe7bbfa630c9e120185815953db489a728f134
+    unpack: tar.gz
+    exec_path: decided
+    order: 1
+  - os: linux
+    arch: amd64
+    url: https://github.com/asdecided/core/releases/download/v0.26.1/asdecided-x86_64-unknown-linux-gnu.tar.gz
+    sha256: b1250260b3b5983cadd113090cf3a57b790c2aa5c2d4673707e1f29aa24ed6ab
+    unpack: tar.gz
+    exec_path: decided
+    order: 1
