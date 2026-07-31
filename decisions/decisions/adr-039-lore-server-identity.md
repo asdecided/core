@@ -5,6 +5,10 @@ type: decision
 ---
 # ADR-039: Lore Server Identity
 
+> The public Registry identity in this historical decision is superseded by
+> ADR-124. Its `lore` handshake identity remains frozen only for the legacy MCP
+> compatibility path specified by ADR-121.
+
 ## Status
 
 Accepted
