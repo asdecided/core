@@ -7,14 +7,14 @@
     "url": "https://github.com/asdecided/core",
     "source": "github"
   },
-  "version": "0.26.0",
+  "version": "0.26.1",
   "websiteUrl": "https://asdecided.com",
   "packages": [
     {
       "registryType": "cargo",
       "registryBaseUrl": "https://crates.io",
       "identifier": "decided-mcp",
-      "version": "0.26.0",
+      "version": "0.26.1",
       "transport": {
         "type": "stdio"
       }
