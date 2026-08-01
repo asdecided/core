@@ -6,6 +6,9 @@ details, release history over commit history.
 
 ## Unreleased
 
+- Added a dedicated native `decided-mcp` Docker build target for Docker's MCP
+  Catalog while preserving the existing CLI image as the default target. The
+  MCP image runs locally over a user-mounted repository with no network access.
 - Added crates.io packaging for the native CLI, making
   `cargo install decided` a supported installation path. The internal engine
   publishes first as `asdecided-core`; subsequent releases use short-lived

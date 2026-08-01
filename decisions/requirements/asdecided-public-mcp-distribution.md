@@ -30,6 +30,9 @@ line as every other distribution channel.
 - [REQ-005] Registry publication MUST wait until the exact crate version is retrievable from crates.io, then run the checksum-pinned official publisher's validation before publishing.
 - [REQ-006] Registry publication MUST be independently retryable without republishing or overwriting an immutable crate version.
 - [REQ-007] The public metadata MUST describe AsDecided as a local, read-only MCP server and MUST NOT imply a hosted corpus, remote index, model call, or write authority.
+- [REQ-008] The root Dockerfile MUST expose a dedicated `asdecided-mcp` build target that launches the native `decided-mcp` binary while preserving the existing CLI as the default target.
+- [REQ-009] A Docker MCP Catalog entry MUST select that named build target, pin an immutable Core commit, mount only a user-selected repository, pass its container path through `--root`, and disable network access.
+- [REQ-010] Secondary catalog metadata MUST retain `io.github.asdecided/core` as the canonical MCP identity and MUST remain downstream of the Cargo package and official MCP Registry record rather than becoming a second release authority.
 
 ## Acceptance Criteria
 
@@ -44,6 +47,10 @@ line as every other distribution channel.
   without attempting to publish any crate again.
 - Installing the listed crate exposes `decided-mcp`, which serves a local corpus
   over stdio with the same current protocol identity tested by ADR-121.
+- Building the Dockerfile's `asdecided-mcp` target and sending MCP `initialize`
+  and `tools/list` requests over stdio succeeds against a mounted fixture corpus.
+- Docker's registry validation and image build pass for metadata that pins a Core
+  commit containing the dedicated target.
 
 ## Success Metrics
 
@@ -70,6 +77,7 @@ line as every other distribution channel.
 ## Related Decisions
 
 - adr-124
+- adr-126
 - adr-121
 - adr-039
 
