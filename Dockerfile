@@ -4,7 +4,7 @@
 #   docker build -t asdecided .
 #   docker run --rm -v "$PWD:/work" asdecided validate decisions/
 #
-# MCP server (used by the Docker MCP Catalog):
+# MCP server (used by the official MCP Registry and Docker MCP Catalog):
 #   docker build --target asdecided-mcp -t asdecided-mcp .
 #   docker run --rm -i -v "$PWD:/work" asdecided-mcp --root /work
 FROM rust:1.94-bookworm AS builder

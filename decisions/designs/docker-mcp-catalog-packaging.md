@@ -62,9 +62,10 @@ sources and one runtime layer.
   `decided-mcp`.
 - **Make MCP the default image:** rejected as an avoidable CLI compatibility
   break.
-- **Publish a pre-built AsDecided image:** deferred. Docker's own build path
-  provides signing, provenance, SBOMs, and automatic catalog updates without a
-  second image publication workflow in Core.
+- **Point Docker's catalog at Core's pre-built MCP image:** rejected for this
+  surface. Core publishes that image for the official Registry, while Docker's
+  catalog source-build path supplies its own signing, provenance, SBOMs, and
+  update process from an immutable Core commit.
 
 ## Accessibility
 

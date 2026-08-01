@@ -7,11 +7,11 @@ type: decision
 
 ## Context
 
-ADR-124 publishes `decided-mcp` through Cargo and the official MCP Registry.
-That record is already the canonical public identity and package authority, but
+ADR-124 publishes the native MCP target through Core's versioned GHCR image and
+the official MCP Registry. That record is the canonical public identity, but
 Docker's curated MCP Catalog is a separate downstream surface. Local entries in
-that catalog are built from a Dockerfile and must start an MCP server when the
-catalog probes the selected image.
+that catalog are built from source and must start an MCP server when the catalog
+probes the selected image.
 
 Core already has one Dockerfile, but its default image starts the `decided` CLI.
 Changing that default would silently break existing container users. Publishing
@@ -33,8 +33,9 @@ root Dockerfile and submit that target to Docker's official MCP Catalog.
 - A user grants one repository directory as a volume. The catalog passes that
   container path through `--root`; network access is disabled.
 - Docker may build, sign, scan, and publish the catalog image in its `mcp`
-  namespace. Cargo and the official MCP Registry remain the release and identity
-  authorities; the Docker listing is a downstream packaging surface.
+  namespace. Core's versioned release image and the official MCP Registry remain
+  the release and identity authorities; the Docker listing is a downstream
+  packaging surface.
 - GitHub's MCP Registry requires no second manifest: its published guidance says
   downstream GitHub discovery consumes the official Registry record. A curated
   GitHub feature request is outreach, not another source-controlled package.

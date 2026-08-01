@@ -73,6 +73,16 @@ refuses to overwrite either destination.
 ## MCP
 
 The official MCP Registry identity is `io.github.asdecided/core`.
+Its Registry package is the versioned local MCP image under
+`ghcr.io/asdecided/core`; Homebrew and Cargo remain direct native installation
+paths for the same Rust server.
+
+The OCI server still needs an explicit repository grant:
+
+```sh
+docker run --rm -i -v "$PWD:/work:ro" \
+  ghcr.io/asdecided/core:mcp-latest --root /work
+```
 
 ```json
 {

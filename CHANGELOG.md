@@ -1,10 +1,20 @@
 # Changelog
 
-User-visible changes to RAC, by release. Follows the spirit of
+User-visible changes to AsDecided, by release. Follows the spirit of
 [Keep a Changelog](https://keepachangelog.com/): user impact over implementation
 details, release history over commit history.
 
 ## Unreleased
+
+## v0.26.2 — 2026-08-01
+
+- Corrected official MCP Registry publishing to use its supported OCI package
+  type rather than the unsupported Cargo package type. The canonical record now
+  points at the native, versioned `ghcr.io/asdecided/core:mcp-v0.26.2` image.
+- Added immutable MCP image tags to native releases while keeping the existing
+  CLI image and `latest` behavior unchanged. Registry retries now check out the
+  exact release tag and verify the public image's ownership label and native
+  entrypoint before publication.
 
 - Added a dedicated native `decided-mcp` Docker build target for Docker's MCP
   Catalog while preserving the existing CLI image as the default target. The

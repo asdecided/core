@@ -12,4 +12,4 @@ categories = ["command-line-utilities", "development-tools"]
 publish = ["crates-io"]
 
 [dependencies]
-rac-engine = { package = "asdecided-core", version = "=0.26.1", path = "../rac-engine" }
+rac-engine = { package = "asdecided-core", version = "=0.26.2", path = "../rac-engine" }

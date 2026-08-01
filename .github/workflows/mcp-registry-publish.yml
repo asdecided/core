@@ -18,28 +18,36 @@ jobs:
     environment: mcp-registry
     steps:
       - uses: actions/checkout@v5
-      - name: Verify requested and packaged versions
+        with:
+          ref: v${{ inputs.version }}
+      - name: Verify requested version and OCI metadata
         env:
           REQUESTED_VERSION: ${{ inputs.version }}
         run: |
           WORKSPACE_VERSION="$(cargo metadata --manifest-path rust/Cargo.toml --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "decided-mcp") | .version')"
           SERVER_VERSION="$(jq -r '.version' server.json)"
-          PACKAGE_VERSION="$(jq -r '.packages[] | select(.identifier == "decided-mcp") | .version' server.json)"
+          PACKAGE_IDENTIFIER="$(jq -r '.packages[] | select(.registryType == "oci") | .identifier' server.json)"
           test "$REQUESTED_VERSION" = "$WORKSPACE_VERSION"
           test "$REQUESTED_VERSION" = "$SERVER_VERSION"
-          test "$REQUESTED_VERSION" = "$PACKAGE_VERSION"
-      - name: Verify MCP crate is available
+          test "$PACKAGE_IDENTIFIER" = "ghcr.io/asdecided/core:mcp-v$REQUESTED_VERSION"
+      - name: Verify MCP image is available and canonical
         env:
           REQUESTED_VERSION: ${{ inputs.version }}
         run: |
+          IMAGE="ghcr.io/asdecided/core:mcp-v$REQUESTED_VERSION"
           for attempt in {1..30}; do
-            if cargo info "decided-mcp@$REQUESTED_VERSION" --registry crates-io >/dev/null 2>&1; then
-              exit 0
+            if docker manifest inspect "$IMAGE" >/dev/null 2>&1; then
+              break
             fi
             sleep 10
           done
-          echo "::error::decided-mcp $REQUESTED_VERSION did not reach the crates.io index"
-          exit 1
+          if ! docker manifest inspect "$IMAGE" >/dev/null 2>&1; then
+            echo "::error::$IMAGE did not reach GHCR"
+            exit 1
+          fi
+          docker pull "$IMAGE"
+          test "$(docker image inspect --format '{{ index .Config.Labels "io.modelcontextprotocol.server.name" }}' "$IMAGE")" = "io.github.asdecided/core"
+          test "$(docker image inspect --format '{{ json .Config.Entrypoint }}' "$IMAGE")" = '["decided-mcp"]'
       - name: Install checksum-pinned MCP publisher
         env:
           PUBLISHER_VERSION: 1.8.0
