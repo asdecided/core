@@ -74,12 +74,21 @@ jobs:
       TAG: ${{ github.event.release.tag_name }}
     steps:
       - uses: actions/checkout@v5
-      - name: Build and smoke-test image
+      - name: Build and smoke-test CLI image
         run: |
-          docker build --build-arg DECIDED_VERSION="$TAG" -t "$IMAGE:$TAG" -t "$IMAGE:latest" .
+          docker build --target asdecided-cli --build-arg DECIDED_VERSION="$TAG" -t "$IMAGE:$TAG" -t "$IMAGE:latest" .
           docker run --rm "$IMAGE:$TAG" --version
-      - name: Publish image
+      - name: Build and smoke-test MCP image
+        run: |
+          MCP_IMAGE="$IMAGE:mcp-$TAG"
+          docker build --target asdecided-mcp --build-arg DECIDED_VERSION="$TAG" -t "$MCP_IMAGE" -t "$IMAGE:mcp-latest" .
+          RESPONSE="$(printf '%s\n' '{"jsonrpc":"2.0","id":"discover","method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientInfo":{"name":"release-smoke","version":"1.0.0"},"io.modelcontextprotocol/clientCapabilities":{}}}}' | docker run --rm -i -v "$PWD:/work:ro" "$MCP_IMAGE" --root /work)"
+          test "$(printf '%s' "$RESPONSE" | jq -r '.result.serverInfo.name')" = "decided-mcp"
+          test "$(printf '%s' "$RESPONSE" | jq -r '.result.serverInfo.version')" = "${TAG#v}"
+      - name: Publish CLI and MCP images
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
           docker push "$IMAGE:$TAG"
           docker push "$IMAGE:latest"
+          docker push "$IMAGE:mcp-$TAG"
+          docker push "$IMAGE:mcp-latest"

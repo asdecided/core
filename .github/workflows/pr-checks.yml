@@ -127,18 +127,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - name: Verify Registry and Cargo metadata agree
+      - name: Verify Registry and OCI metadata agree
         run: |
           WORKSPACE_VERSION="$(cargo metadata --manifest-path rust/Cargo.toml --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "decided-mcp") | .version')"
           test "$(jq -r '.name' server.json)" = "io.github.asdecided/core"
           test "$(jq -r '.packages | length' server.json)" = "1"
-          test "$(jq -r '.packages[0].registryType' server.json)" = "cargo"
-          test "$(jq -r '.packages[0].registryBaseUrl' server.json)" = "https://crates.io"
-          test "$(jq -r '.packages[0].identifier' server.json)" = "decided-mcp"
+          test "$(jq -r '.packages[0].registryType' server.json)" = "oci"
+          test "$(jq -r '.packages[0].identifier' server.json)" = "ghcr.io/asdecided/core:mcp-v$WORKSPACE_VERSION"
           test "$(jq -r '.packages[0].transport.type' server.json)" = "stdio"
           test "$(jq -r '.version' server.json)" = "$WORKSPACE_VERSION"
-          test "$(jq -r '.packages[0].version' server.json)" = "$WORKSPACE_VERSION"
-          grep -Fx "mcp-name: io.github.asdecided/core" rust/decided-mcp/README.md
+          test "$(jq -r '.packages[0] | has("version")' server.json)" = "false"
+          grep -F 'io.modelcontextprotocol.server.name="io.github.asdecided/core"' Dockerfile
+          grep -F 'FROM runtime AS asdecided-mcp' Dockerfile
       # A release PR can point at an exact engine version that does not exist on
       # crates.io until the staged publish workflow runs. Listing the package
       # still validates its include/exclude boundary without falsely requiring
@@ -147,3 +147,10 @@ jobs:
       - name: Verify MCP crate package contents
         working-directory: rust
         run: cargo package --list --locked -p decided-mcp
+      - name: Build and smoke-test Registry MCP image
+        run: |
+          WORKSPACE_VERSION="$(cargo metadata --manifest-path rust/Cargo.toml --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "decided-mcp") | .version')"
+          docker build --target asdecided-mcp --build-arg DECIDED_VERSION="$WORKSPACE_VERSION" -t asdecided-mcp:pr .
+          RESPONSE="$(printf '%s\n' '{"jsonrpc":"2.0","id":"discover","method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientInfo":{"name":"pr-smoke","version":"1.0.0"},"io.modelcontextprotocol/clientCapabilities":{}}}}' | docker run --rm -i -v "$PWD:/work:ro" asdecided-mcp:pr --root /work)"
+          test "$(printf '%s' "$RESPONSE" | jq -r '.result.serverInfo.name')" = "decided-mcp"
+          test "$(printf '%s' "$RESPONSE" | jq -r '.result.serverInfo.version')" = "$WORKSPACE_VERSION"
