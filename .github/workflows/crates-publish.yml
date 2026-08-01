@@ -38,7 +38,13 @@ jobs:
         working-directory: rust
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.cargo-auth.outputs.token }}
-        run: cargo publish -p asdecided-core
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          if cargo info "asdecided-core@$REQUESTED_VERSION" --registry crates-io >/dev/null 2>&1; then
+            echo "asdecided-core $REQUESTED_VERSION is already published; skipping"
+          else
+            cargo publish -p asdecided-core
+          fi
       - name: Wait for engine crate to reach the index
         working-directory: rust
         env:
@@ -62,9 +68,21 @@ jobs:
         working-directory: rust
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.cargo-auth.outputs.token }}
-        run: cargo publish -p decided
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          if cargo info "decided@$REQUESTED_VERSION" --registry crates-io >/dev/null 2>&1; then
+            echo "decided $REQUESTED_VERSION is already published; skipping"
+          else
+            cargo publish -p decided
+          fi
       - name: Publish MCP crate
         working-directory: rust
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.cargo-auth.outputs.token }}
-        run: cargo publish -p decided-mcp
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          if cargo info "decided-mcp@$REQUESTED_VERSION" --registry crates-io >/dev/null 2>&1; then
+            echo "decided-mcp $REQUESTED_VERSION is already published; skipping"
+          else
+            cargo publish -p decided-mcp
+          fi
