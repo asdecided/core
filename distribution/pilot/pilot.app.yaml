@@ -1,5 +1,5 @@
 id: io.pilot.asdecided
-app_version: 0.26.1
+app_version: 0.26.2
 manifest_version: 1
 description: "Read and validate engineering decisions from a repository on this machine."
 
@@ -66,10 +66,10 @@ listing:
     url: https://asdecided.com
     contact: https://github.com/asdecided/core/issues
   changelog:
-    - version: 0.26.1
-      date: "2026-07-31"
+    - version: 0.26.2
+      date: "2026-08-01"
       notes:
-        - "Initial Pilot App Store candidate using the native As Decided v0.26.1 engine."
+        - "Initial Pilot App Store candidate using the native As Decided v0.26.2 engine."
 
 product_demo:
   skill: io.pilot.asdecided
@@ -122,29 +122,29 @@ next_steps:
 assets:
   - os: darwin
     arch: arm64
-    url: https://github.com/asdecided/core/releases/download/v0.26.1/asdecided-aarch64-apple-darwin.tar.gz
-    sha256: d90eb14a53f961860f4fe5b76b89a2978356bc9d854d41b08912581c8605733d
+    url: https://github.com/asdecided/core/releases/download/v0.26.2/asdecided-aarch64-apple-darwin.tar.gz
+    sha256: 45f6af38274969bda8b773ddc7e380485bb728156d1a826a1cd32b7d98f66a7a
     unpack: tar.gz
     exec_path: decided
     order: 1
   - os: darwin
     arch: amd64
-    url: https://github.com/asdecided/core/releases/download/v0.26.1/asdecided-x86_64-apple-darwin.tar.gz
-    sha256: 33490680526ee09de7d5a9c0c137eaca49ab8603c3fe5044b009aefa8f6c4728
+    url: https://github.com/asdecided/core/releases/download/v0.26.2/asdecided-x86_64-apple-darwin.tar.gz
+    sha256: 6c02a8645ad033dfcaab6cc7c048b7347968db4ce02b972a3c70b3f622de6c0e
     unpack: tar.gz
     exec_path: decided
     order: 1
   - os: linux
     arch: arm64
-    url: https://github.com/asdecided/core/releases/download/v0.26.1/asdecided-aarch64-unknown-linux-gnu.tar.gz
-    sha256: ebbf82115bf642da071d37bc2dfe7bbfa630c9e120185815953db489a728f134
+    url: https://github.com/asdecided/core/releases/download/v0.26.2/asdecided-aarch64-unknown-linux-gnu.tar.gz
+    sha256: 10f7ab61e3485467e30eb033df93d57f294549f30282ffe240b3cfcd7c1eebc6
     unpack: tar.gz
     exec_path: decided
     order: 1
   - os: linux
     arch: amd64
-    url: https://github.com/asdecided/core/releases/download/v0.26.1/asdecided-x86_64-unknown-linux-gnu.tar.gz
-    sha256: b1250260b3b5983cadd113090cf3a57b790c2aa5c2d4673707e1f29aa24ed6ab
+    url: https://github.com/asdecided/core/releases/download/v0.26.2/asdecided-x86_64-unknown-linux-gnu.tar.gz
+    sha256: 301fefbc56ca56454843d5a109d2e5ae535eeed9fae356985ef4d3a323aa3995
     unpack: tar.gz
     exec_path: decided
     order: 1
