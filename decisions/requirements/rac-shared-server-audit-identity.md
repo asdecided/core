@@ -10,15 +10,18 @@ type: requirement
 Accepted
 
 Classification: `[internal]` — every caller on a shared endpoint is
-attributable. Initiative 3 of the `lore-at-team-scale` roadmap:
+attributable. Initiative 3 of the team-scale roadmap:
 per-request principal resolution in the audit recorder, with mandatory
 audit-on as the shared-deployment entry condition. Delivered
 (asdecided/core#265): the audit recorder resolves a per-request
-principal from the `X-Lore-Principal` header (the carrier ADR-098 fixes),
+principal from the `X-AsDecided-Principal` header (the carrier ADR-098 fixes),
 with precedence assertion > env override > git (skipped on the shared
 transport) > unattributed; records grow additive `transport` and
 `attribution` fields; HTTP forces `on_write_error: block`; and the
 principal never enters a tool body — attribution, never authorization.
+ADR-127 closes the implementation drift: `X-AsDecided-Principal` is the only
+accepted carrier, ambiguous values fail closed, and returned audit records
+carry identity, resolution state, and a corpus-path reference.
 
 ## Problem
 
@@ -40,6 +43,8 @@ concrete.
 - [REQ-004] stdio behaviour MUST be unchanged: construction-time resolution remains the local default, and existing audit record shapes grow only additively (ADR-007).
 - [REQ-005] The engine MUST NOT gain SSO, RBAC, tool-level authorization, or a user store (ADR-085): the principal is an attribution string in the record, never an access-control input — tool responses are identical regardless of principal.
 - [REQ-006] Shared-server records MUST be distinguishable from local ones via an additive transport field, so an auditor can tell asserted-over-HTTP attribution from locally resolved identity.
+- [REQ-007] `X-AsDecided-Principal` MUST be the only accepted HTTP carrier; empty values are absent, malformed or duplicate carriers are rejected, and invalid values fail before dispatch.
+- [REQ-008] Every artifact-bearing MCP result collection MUST be reflected in `returned` records with `id`, `resolved`, and a body-free provenance path reference, deduplicated in first-seen order. Errors MUST record no returned identities.
 
 ## Acceptance Criteria
 
@@ -53,6 +58,10 @@ concrete.
   the ADR-084 `on_write_error: block` contract.
 - A test asserts identical tool output across principals — attribution
   never becomes authorization.
+- HTTP integration tests inspect JSONL records for primary, search, grounding,
+  path-decision, relationship, and empty-summary result shapes.
+- Enabled audit writes a stderr activation diagnostic naming the resolved sink,
+  recorded scope, transport, and effective write-failure mode.
 
 ## Success Metrics
 

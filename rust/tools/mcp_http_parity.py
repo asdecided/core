@@ -102,7 +102,7 @@ class HttpServer:
         if accept is not None:
             headers["Accept"] = accept
         if principal is not None:
-            headers["X-Lore-Principal"] = principal
+            headers["X-AsDecided-Principal"] = principal
         req = urllib.request.Request(self.url, data=body.encode("utf-8"),
                                      headers=headers, method=method)
         try:
@@ -227,7 +227,7 @@ def main() -> int:
         if not ok:
             failures.append(f"status[malformed]: A={sa} B={sb}")
 
-        # 3. Attribution: an X-Lore-Principal call is recorded as that principal,
+        # 3. Attribution: an X-AsDecided-Principal call is recorded as that principal,
         #    flagged attribution="asserted" (ADR-098), on both engines.
         pcall = rpc(50, "tools/call", {"name": "get_summary", "arguments": {}})
         a.post(pcall, principal="alice@example.com")
@@ -243,7 +243,7 @@ def main() -> int:
             print(f"  MATCH  audit ({len(ra)} records)")
             last = ra[-1]
             if last.get("principal") == "alice@example.com" and last.get("attribution") == "asserted":
-                print("  MATCH  audit[X-Lore-Principal asserted]")
+                print("  MATCH  audit[X-AsDecided-Principal asserted]")
             else:
                 failures.append(f"audit[principal]: {last.get('principal')}/{last.get('attribution')}")
         else:

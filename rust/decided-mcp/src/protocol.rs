@@ -190,6 +190,18 @@ pub fn header_mismatch_frame(
     )
 }
 
+pub fn principal_header_frame(id_json: &str, reason: &str) -> String {
+    error_frame(
+        id_json,
+        -32023,
+        "Invalid principal header",
+        json!({
+            "reason": reason,
+            "canonical": "X-AsDecided-Principal",
+        }),
+    )
+}
+
 pub fn unsupported_protocol_frame(id: Option<&Value>, requested: Option<&str>) -> String {
     let id_json = id
         .and_then(|id| serde_json::to_string(id).ok())

@@ -35,14 +35,14 @@ stops scaling with repository count.
                                  │
         ┌────────────────────────┼────────────────────────┐
    agent in repo A          agent in repo B          agent in repo C
-   (lore-org only)          (lore-org only)          (lore + lore-org)
+   (asdecided-org only)     (asdecided-org only)     (asdecided + asdecided-org)
 ```
 
 Agents **co-mount, they do not merge**: the org endpoint appears as a second
-MCP server (`lore-org`) beside any local `lore` server. Each corpus stays its
-own canonical truth; an answer from `lore-org` *is* the org's knowledge, and
+MCP server (`asdecided-org`) beside any local `asdecided` server. Each corpus stays its
+own canonical truth; an answer from `asdecided-org` *is* the org's knowledge, and
 the endpoint identity carries that provenance. In a repository with no corpus
-of its own, `lore-org` is simply the only mount.
+of its own, `asdecided-org` is simply the only mount.
 
 ## 3. The org corpus
 
@@ -78,7 +78,7 @@ Three paths, cheapest first:
   ```json
   {
     "mcpServers": {
-      "lore-org": { "type": "http", "url": "https://lore.example.com/mcp" }
+      "asdecided-org": { "type": "http", "url": "https://asdecided.example.com/mcp" }
     }
   }
   ```
@@ -86,14 +86,14 @@ Three paths, cheapest first:
 - **One command per existing repository:**
 
   ```bash
-  decided init --org-endpoint https://lore.example.com/mcp
+  decided init --org-endpoint https://asdecided.example.com/mcp
   ```
 
-  This ensures the `lore-org` entry in `.mcp.json` and `.cursor/mcp.json` on
+  This ensures the `asdecided-org` entry in `.mcp.json` and `.cursor/mcp.json` on
   fresh **and** already-initialized repositories. It merges into an existing
-  file, touches only the `lore-org` key, never removes what you wrote, and a
+  file, touches only the `asdecided-org` key, never removes what you wrote, and a
   second run with the same URL writes nothing. It composes with `--profile`,
-  so a repository with its own corpus gets the local `lore` server and the
+  so a repository with its own corpus gets the local `asdecided` server and the
   org endpoint side by side.
 
 - **Managed rules blocks for non-MCP clients.** Generate agent-rules blocks
@@ -113,7 +113,7 @@ things: the answer cites an org artifact id, and the org endpoint's audit log
 attributes the read to the caller the proxy authenticated:
 
 ```bash
-tail -1 /var/log/lore/audit.jsonl
+tail -1 /var/log/asdecided/audit.jsonl
 # … "principal": "jane@example.com", "tool": "search_artifacts", "returned": [ … ] …
 ```
 
@@ -134,7 +134,7 @@ working: grounding at the agent, accountability at the endpoint.
   per-artifact access control from the engine (ADR-085).
 - **Two mounted surfaces until federation.** A repository with its own corpus
   carries both tool surfaces in the agent's context. Both are budgeted and
-  lean; in repositories without a local corpus, mount only `lore-org`.
+  lean; in repositories without a local corpus, mount only `asdecided-org`.
 
 ## 8. The federation handoff
 

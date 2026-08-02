@@ -203,7 +203,7 @@ as candidate relationships.
   any byte change rebuilds it, byte-identical to the uncached path, and deleting
   it costs only latency (ADR-099). Off by default.
 - **Per-caller attribution on the shared server.** When serving over HTTP, each
-  caller asserts who it is with an `X-Lore-Principal` header, and the read-access
+  caller asserts who it is with an `X-AsDecided-Principal` header, and the read-access
   audit log records that per-request principal instead of the host identity — so
   an auditor can answer "who read what, when" per caller. Records gain additive
   `transport` and `attribution` fields marking asserted-over-HTTP versus locally

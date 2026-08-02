@@ -1,4 +1,4 @@
-# RAC Guide — MCP Server
+# AsDecided Guide — MCP Server
 
 AsDecided MCP serves your repository's requirements,
 decisions, designs, and roadmaps to coding agents as callable tools. It ships
@@ -35,11 +35,11 @@ the engine's mandatory HTTP audit posture is unchanged.
 ## 2. Configure your client
 
 Replace `/path/to/your/repo` with the absolute path to the directory that
-contains your RAC artifacts (or the `decisions/` subdirectory within it). Use the
+contains your AsDecided artifacts (or the `decisions/` subdirectory within it). Use the
 path you would pass to `decided validate`.
 
 > Adding a client that is not listed here? Every harness connects on the same two
-> surfaces (the generated agent-instructions file and the `lore` MCP server), so a
+> surfaces (the generated agent-instructions file and the `asdecided` MCP server), so a
 > new integration is a documented recipe, not engine work — follow the
 > [integration recipes authoring guide](integration-recipes.md).
 
@@ -48,7 +48,7 @@ path you would pass to `decided validate`.
 **Command form** (adds the server to your Claude Code session):
 
 ```bash
-claude mcp add lore -- decided-mcp --root /path/to/your/repo
+claude mcp add asdecided -- decided-mcp --root /path/to/your/repo
 ```
 
 **`.mcp.json` form** — create or edit `.mcp.json` in your project root:
@@ -105,12 +105,12 @@ Create or edit `.cursor/mcp.json` in your project root:
 ### Omnigent
 
 [Omnigent](https://omnigent.ai) is a meta-harness: its custom agents are defined
-in a `config.yaml`, and an MCP server is a first-class tool type. Add a `lore`
+in a `config.yaml`, and an MCP server is a first-class tool type. Add an `asdecided`
 entry under the agent's `tools:` section:
 
 ```yaml
 tools:
-  lore:
+  asdecided:
     type: mcp
     command: decided-mcp
     args: ["--root", "/path/to/your/repo"]
@@ -305,7 +305,7 @@ entire transmission — adding a field requires a new recorded decision
 ```json
 {
   "api_key": "<public project write key>",
-  "event": "lore-daily-ping",
+  "event": "asdecided-daily-ping",
   "timestamp": "<ISO 8601 UTC>",
   "properties": {
     "distinct_id": "<random install id>",
@@ -337,7 +337,7 @@ nothing at all — `decided telemetry status` will say so.
 ## 8. Read-access audit log (enterprise, opt-in)
 
 For regulated installs that must record *who consulted which decision, when, and
-which artifact IDs came back* — the audit trail telemetry deliberately does not
+which artifact references came back* — the audit trail telemetry deliberately does not
 keep — the server can append one JSON line per read-tool call to a local file
 ([ADR-084](https://github.com/asdecided/core/blob/main/decisions/decisions/adr-084-read-access-audit-recorder.md)).
 
@@ -345,7 +345,9 @@ It is **content-bearing by design and off by default**: with no `audit:` stanza
 nothing is written and responses are byte-identical to a server with no recorder.
 It is **local-only** — the engine never transmits it; shipping the log to a sink
 (Loki, S3, Elastic) is a separate collector's job. The log records the query and
-the returned artifact IDs, **never artifact bodies**.
+the returned artifact references, **never artifact bodies**. Each reference
+contains `id`, `resolved`, and a body-free `provenance.path` back into the
+served corpus (ADR-127).
 
 Enable it in `.decided/config.yaml` (committed and team-wide, so an auditor has one
 git-diffable artifact to point at):
@@ -353,7 +355,7 @@ git-diffable artifact to point at):
 ```yaml
 audit:
   enabled: true
-  # path: /var/log/lore/audit.jsonl   # optional; default: $XDG_STATE_HOME/decisions/audit.jsonl
+  # path: /var/log/asdecided/audit.jsonl   # optional; default: $XDG_STATE_HOME/decisions/audit.jsonl
   # on_write_error: warn              # warn (default) | block
 ```
 
@@ -366,7 +368,7 @@ audit:
 
 Each line records `ts`, a per-process `session`, the `principal`, the `transport`
 (`stdio` or `http`), the `attribution` (`asserted` or `local`), the `tool`, the
-`query`, the `returned` artifact IDs, `outcome`, and `duration_ms`. The
+`query`, the `returned` artifact references, `outcome`, and `duration_ms`. The
 **principal is attributable, not authenticated** (ADR-084): it defaults to the git
 `user.name`/`user.email` in the served repository and can be overridden with the
 `DECIDED_AUDIT_PRINCIPAL` environment variable. The enforced access boundary stays the
@@ -378,8 +380,8 @@ startup; it is never silent.
 
 On a shared HTTP endpoint (`--transport http`) one process serves the whole team,
 so a single construction-time principal would record every caller as the host.
-Each request instead asserts who it is with the **`X-AsDecided-Principal`** header, and
-the audit line records that per-request principal with `transport: http` and
+Each request instead asserts who it is with the canonical **`X-AsDecided-Principal`**
+header, and the audit line records that per-request principal with `transport: http` and
 `attribution: asserted`
 ([ADR-098](https://github.com/asdecided/core/blob/main/decisions/decisions/adr-098-shared-http-mcp-serving.md)):
 
@@ -390,12 +392,15 @@ X-AsDecided-Principal: Alice Ng <alice@example.com>
 This stays **attribution, not authentication**: the engine records what the caller
 claimed and never verifies it, and the principal is never an access-control input —
 tool responses are identical whatever the header says. If you need the assertion to
-be trustworthy, your fronting proxy authenticates the caller and sets the header it
-trusts (ADR-085). A request that asserts nothing is recorded with `attribution:
-local`, and the shared server's fallback **skips the host's git identity** (it
-resolves `DECIDED_AUDIT_PRINCIPAL`, else `unattributed`) so a caller's read is never
-mislabelled as the host. Shared HTTP serving is also mandatory audit-on: it refuses
-to start without a working sink, and a sink write failure blocks the call.
+be trustworthy, your fronting proxy authenticates the caller and overwrites the
+header it trusts (ADR-085). Empty values are absent and duplicate carriers are
+rejected with HTTP 400 (`-32023`). A request that asserts nothing is recorded with
+`attribution: local`, and the shared server's fallback
+**skips the host's git identity** (it resolves `DECIDED_AUDIT_PRINCIPAL`, else
+`unattributed`) so a caller's read is never mislabelled as the host. Shared HTTP
+serving is also mandatory audit-on: it refuses to start without a working sink,
+and a sink write failure blocks the call. When enabled, startup announces the
+resolved path, recorded scope, transport, and write-failure mode on stderr.
 
 ## 9. Shared HTTP endpoint (team scale)
 

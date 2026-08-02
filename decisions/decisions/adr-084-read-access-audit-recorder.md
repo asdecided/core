@@ -51,10 +51,11 @@ content-bearing by design, default-absent, local-only, and persistently enabled.
 - **Record: one JSON line per call**, with a pinned schema — `schema_version`,
   `ts` (ISO 8601 UTC), `session` (per-process hex), `principal`, `tool`,
   `query` (the read's arguments verbatim: id, query string, topic, or depth),
-  `returned` (the list of artifact IDs, each with a `resolved` flag and a
-  provenance reference), `outcome`, and `duration_ms`. Artifact bodies and any
-  repository content beyond the returned IDs are never recorded. Adding a field
-  is a recorded decision, not a patch.
+  `returned` (the list of artifact references, each with an `id`, a `resolved`
+  flag, and a body-free `provenance.path` reference as pinned by ADR-127),
+  `outcome`, and `duration_ms`. Artifact bodies and any repository content
+  beyond the returned references are never recorded. Adding a field is a
+  recorded decision, not a patch.
 - **Enablement: an `audit:` stanza in `.rac/config.yaml`** — `enabled: true`, an
   optional `path` (default `$XDG_STATE_HOME/rac/audit.jsonl`, redirectable via
   `RAC_AUDIT_PATH` for residency), and `on_write_error` (`warn` | `block`,
@@ -112,7 +113,7 @@ content-bearing by design, default-absent, local-only, and persistently enabled.
 
 - Creep toward recording bodies or content under "richer audit" pressure.
   Mitigation: the schema is pinned here and in a contract battery; `returned` is
-  IDs only, and the absent body field is a test, not a comment.
+  body-free references only, and the absent body field is a test, not a comment.
 - A network import creeps into the audit module to "just ship it". Mitigation:
   the isolation battery forbids it; transmission is satellite-only.
 - The log is mistaken for authentication. Mitigation: the identity clause, the
@@ -128,7 +129,7 @@ One log, less code.
 
 #### Disadvantages
 
-- It makes the named-absent fields (query, returned IDs) present, destroying the
+- It makes the named-absent fields (query, returned references) present, destroying the
   content-free guarantee of ADR-040 and ADR-041 and the strict-superset property
   the whole posture rests on. Rejected.
 
@@ -183,14 +184,16 @@ selected.
   network code.
 - ADR-013 (leverage existing source control): the audit log is machine state
   under XDG directories, never repository state; it never enters the corpus.
+- ADR-127 pins the canonical shared-server carrier, migration conflict
+  behavior, returned-record reference shape, and activation diagnostic.
 
 ## Success Measures
 
 - With no `audit:` stanza, no audit file is created and MCP responses are
   byte-identical to today; the content-free guarantee battery passes unchanged.
 - With audit enabled, each MCP read-tool call appends exactly one line matching
-  the pinned schema, carrying the query and the returned IDs and no artifact
-  body.
+  the pinned schema, carrying the query and body-free returned references and
+  no artifact body.
 - The isolation battery rejects any network or socket import in the audit
   module.
 - `rac mcp` announces audit recording on stderr when it is enabled.

@@ -423,14 +423,23 @@ fn route_post(
             return json_response("400 Bad Request", frame);
         }
     }
+    let principal = match audit::resolve_http_principal(&req.headers) {
+        Ok(principal) => principal,
+        Err(reason) => {
+            return json_response(
+                "400 Bad Request",
+                protocol::principal_header_frame(&id_json, reason),
+            )
+        }
+    };
     // A notification (no id) is acknowledged with 202 and no body (ADR-032:
     // nothing to return; the read-only server holds no session to advance).
     if message.get("id").is_none() {
         return Response { status: "202 Accepted", body: None };
     }
-    // Attribution rides X-AsDecided-Principal (ADR-098): recorded by audit, never an
-    // access-control input — the response is identical whatever it says.
-    let principal = req.header("x-asdecided-principal");
+    // Attribution rides X-AsDecided-Principal: recorded by audit, never an
+    // access-control input — the response is
+    // identical whatever the caller claims.
     let frame = process_request(
         root,
         state,
@@ -438,7 +447,7 @@ fn route_post(
         &id_json,
         &message,
         recorder.as_mut(),
-        principal,
+        principal.as_deref(),
     );
     let status = if era == protocol::Era::Current
         && !protocol::current_method_supported(method)
