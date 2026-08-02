@@ -91,6 +91,17 @@ Mcp-Method: {method_header}\r\n"
         let status = headers.lines().next().unwrap().to_string();
         (status, parse(body))
     }
+
+    fn raw(&self, request: &str) -> String {
+        let mut stream = TcpStream::connect(("127.0.0.1", self.port)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        stream.write_all(request.as_bytes()).unwrap();
+        let mut response = String::new();
+        stream.read_to_string(&mut response).unwrap();
+        response
+    }
 }
 
 impl Drop for Server {
@@ -175,5 +186,44 @@ fn current_http_tool_call_requires_name_and_returns_current_result() {
     assert_eq!(
         response.pointer("/result/resultType"),
         Some(&json!("complete"))
+    );
+}
+
+#[test]
+fn stalled_client_does_not_block_a_later_request() {
+    let _guard = serial_http_test();
+    let server = Server::start("http-stalled-client");
+    let mut stalled = TcpStream::connect(("127.0.0.1", server.port)).unwrap();
+    stalled
+        .write_all(b"POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\n")
+        .unwrap();
+
+    let request = json!({
+        "jsonrpc": "2.0",
+        "id": 5,
+        "method": "server/discover",
+        "params": {"_meta": current_meta()}
+    });
+    let (status, response) = server.post(&request, "server/discover", None);
+    assert_eq!(status, "HTTP/1.1 200 OK");
+    assert_eq!(
+        response.pointer("/result/supportedVersions/0"),
+        Some(&json!(CURRENT_VERSION))
+    );
+}
+
+#[test]
+fn oversized_content_length_is_rejected_before_allocation() {
+    let _guard = serial_http_test();
+    let server = Server::start("http-oversized-body");
+    let request = format!(
+        "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nAccept: application/json\r\n\
+Content-Type: application/json\r\nContent-Length: {}\r\n\r\n",
+        1024 * 1024 + 1
+    );
+    let response = server.raw(&request);
+    assert_eq!(
+        response.lines().next(),
+        Some("HTTP/1.1 413 Payload Too Large")
     );
 }

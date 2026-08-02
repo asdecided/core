@@ -119,8 +119,8 @@ fn main() {
         if let Err(msg) = http::ensure_audit_sink(&audit_config) {
             usage_error(&msg);
         }
-        let mut recorder = audit::build(&root, "http", &audit_config);
-        http::serve_http(&root, &mut state, &mut recorder, &host, port, &path);
+        let recorder = audit::build(&root, "http", &audit_config);
+        http::serve_http(&root, state, recorder, &host, port, &path);
     }
     let mut recorder = audit::build(&root, "stdio", &audit_config);
     serve(&root, &mut state, &mut recorder);
