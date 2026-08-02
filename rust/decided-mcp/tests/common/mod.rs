@@ -27,10 +27,41 @@ pub fn scratch(tag: &str) -> PathBuf {
 }
 
 pub fn run_stdio(tag: &str, requests: &[String]) -> Vec<String> {
+    run_stdio_with_args_and_files(tag, &[], &[], requests)
+}
+
+pub fn run_stdio_with_budget(
+    tag: &str,
+    budget: i64,
+    files: &[(&str, &str)],
+    requests: &[String],
+) -> Vec<String> {
+    let args = [
+        "--budget".to_string(),
+        budget.to_string(),
+        "--no-cache".to_string(),
+    ];
+    run_stdio_with_args_and_files(tag, &args, files, requests)
+}
+
+fn run_stdio_with_args_and_files(
+    tag: &str,
+    args: &[String],
+    files: &[(&str, &str)],
+    requests: &[String],
+) -> Vec<String> {
     let corpus = scratch(tag);
-    let mut child = Command::new(env!("CARGO_BIN_EXE_decided-mcp"))
-        .arg("--root")
-        .arg(&corpus)
+    for (name, contents) in files {
+        let path = corpus.join(name);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).expect("create fixture parent");
+        }
+        std::fs::write(path, contents).expect("write fixture file");
+    }
+    let mut command = Command::new(env!("CARGO_BIN_EXE_decided-mcp"));
+    command.arg("--root").arg(&corpus);
+    command.args(args);
+    let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

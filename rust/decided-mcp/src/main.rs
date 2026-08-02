@@ -51,6 +51,7 @@ fn main() {
     let mut host = "127.0.0.1".to_string();
     let mut port: u16 = 8000;
     let mut path = "/mcp".to_string();
+    let mut server_budget = budget::DEFAULT_BUDGET;
     let mut allowed_origins = Vec::new();
     while let Some(a) = argv.next() {
         match a.as_str() {
@@ -79,6 +80,17 @@ fn main() {
             "--path" => match argv.next() {
                 Some(v) => path = v,
                 None => usage_error("--path requires a value"),
+            },
+            "--budget" => match argv.next() {
+                Some(v) => match v.parse::<i64>() {
+                    Ok(value) if budget::valid_configured_budget(value) => server_budget = value,
+                    Ok(value) => usage_error(&format!(
+                        "argument --budget: value must be at least {} (got {value})",
+                        budget::MIN_BUDGET
+                    )),
+                    Err(_) => usage_error(&format!("argument --budget: invalid int value: '{v}'")),
+                },
+                None => usage_error("--budget requires a value"),
             },
             "--allowed-origin" => match argv.next() {
                 Some(v) if !v.trim().is_empty() => allowed_origins.push(v),
@@ -137,13 +149,14 @@ fn main() {
             port,
             &path,
             &allowed_origins,
+            server_budget,
         );
     }
     let mut recorder = audit::build(&root, "stdio", &audit_config);
     if let Some(recorder) = recorder.as_ref() {
         audit::announce(recorder);
     }
-    serve(&root, &mut state, &mut recorder);
+    serve(&root, &mut state, &mut recorder, server_budget);
 }
 
 /// Startup diagnostic (stderr only; declared-normalized in parity, §0).
@@ -162,6 +175,7 @@ fn serve(
     root: &str,
     state: &mut ServerState,
     recorder: &mut Option<audit::Recorder>,
+    server_budget: i64,
 ) {
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
@@ -210,8 +224,16 @@ fn serve(
                 continue;
             }
         }
-        let frame =
-            process_request(root, state, era, &id_json, &message, recorder.as_mut(), None);
+        let frame = process_request(
+            root,
+            state,
+            era,
+            &id_json,
+            &message,
+            recorder.as_mut(),
+            None,
+            server_budget,
+        );
         writeln!(out, "{frame}").ok();
         out.flush().ok();
     }
@@ -221,6 +243,7 @@ fn serve(
 /// agnostic, so stdio and HTTP share exactly one code path — the byte-parity
 /// surface, PORT-CONTRACT.d/10 §2/§4/§5). Callers extract `method`/`id` and the
 /// per-transport envelope; this owns only the payload.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn process_request(
     root: &str,
     state: &mut ServerState,
@@ -229,6 +252,7 @@ pub(crate) fn process_request(
     message: &Value,
     recorder: Option<&mut audit::Recorder>,
     principal: Option<&str>,
+    server_budget: i64,
 ) -> String {
     let method = message
         .get("method")
@@ -263,9 +287,16 @@ pub(crate) fn process_request(
         (protocol::Era::Legacy, "resources/list") => {
             format!("{{\"jsonrpc\":\"2.0\",\"id\":{id_json},\"result\":{{\"resources\":[]}}}}")
         }
-        (_, "tools/call") => {
-            tools_call_frame(root, state, era, id_json, message, recorder, principal)
-        }
+        (_, "tools/call") => tools_call_frame(
+            root,
+            state,
+            era,
+            id_json,
+            message,
+            recorder,
+            principal,
+            server_budget,
+        ),
         (protocol::Era::Current, _) => protocol::method_not_found_frame(id_json, method),
         (protocol::Era::Legacy, _) => format!(
             "{{\"jsonrpc\":\"2.0\",\"id\":{id_json},\"error\":{{\"code\":-32602,\"message\":\"Invalid request parameters\",\"data\":\"\"}}}}"
@@ -304,6 +335,7 @@ fn call_result_frame(
     format!("{{\"jsonrpc\":\"2.0\",\"id\":{id_json},\"result\":{result_json}}}")
 }
 
+#[allow(clippy::too_many_arguments)]
 fn tools_call_frame(
     root: &str,
     state: &mut ServerState,
@@ -312,6 +344,7 @@ fn tools_call_frame(
     message: &Value,
     recorder: Option<&mut audit::Recorder>,
     principal: Option<&str>,
+    server_budget: i64,
 ) -> String {
     let name = message
         .pointer("/params/name")
@@ -320,7 +353,15 @@ fn tools_call_frame(
     let empty = json!({});
     let arguments = message.pointer("/params/arguments").unwrap_or(&empty);
     let dispatch_started = rac_engine::timing::start();
-    let dispatched = dispatch(root, state, name, arguments, recorder, principal);
+    let dispatched = dispatch(
+        root,
+        state,
+        name,
+        arguments,
+        recorder,
+        principal,
+        server_budget,
+    );
     rac_engine::timing::emit_since(
         "mcp.dispatch",
         dispatch_started,
@@ -379,6 +420,7 @@ fn dispatch(
     arguments: &Value,
     recorder: Option<&mut audit::Recorder>,
     principal: Option<&str>,
+    server_budget: i64,
 ) -> Result<String, String> {
     if !matches!(
         name,
@@ -391,9 +433,6 @@ fn dispatch(
     ) {
         return Err(format!("Unknown tool: {name}"));
     }
-    // ADR-033: the server budget is fixed at construction; the stdio CLI has
-    // no flag, so it is always the default.
-    let server_budget = budget::DEFAULT_BUDGET;
     // Freshen the read-model once per call (the corpus-change check every
     // tool answer rides, ADR-105); without the tracker every arm re-walks.
     let (generation, model) = match state.tracker.as_mut() {
@@ -416,6 +455,7 @@ fn dispatch(
             ];
             let a = args::validate(name, "get_artifactArguments", &params, arguments)?;
             let effective = tools::effective_budget(server_budget, a_int(&a, 1, 0));
+            budget::validate_call_budget(effective)?;
             let audit_args = json!({ "id": a_str(&a, 0, "") });
             Ok(sidecar::observe(name, || {
                 audit::observe(recorder, principal, name, audit_args, || {
@@ -474,6 +514,7 @@ fn dispatch(
             let raw_budget = a_int(&a, 3, 0);
             let live_only = a_bool(&a, 4, true);
             let effective = tools::effective_budget(server_budget, raw_budget);
+            budget::validate_call_budget(effective)?;
             let mut m = Map::new();
             m.insert("task".into(), Value::String(task.clone()));
             if !scope.is_empty() {
@@ -593,6 +634,7 @@ mod tests {
             &json!({}),
             None,
             None,
+            budget::DEFAULT_BUDGET,
         );
         assert_eq!(result, Err("Unknown tool: not_a_tool".to_string()));
         assert_eq!(state.tracker.as_ref().and_then(|t| t.corpus_hash()), None);
@@ -615,12 +657,30 @@ mod tests {
         };
         let arguments = json!({"id": "FIX-0DEC1GRAPH00", "depth": 2});
 
-        let first = dispatch(&root, &mut state, "get_related", &arguments, None, None).unwrap();
+        let first = dispatch(
+            &root,
+            &mut state,
+            "get_related",
+            &arguments,
+            None,
+            None,
+            budget::DEFAULT_BUDGET,
+        )
+        .unwrap();
         assert!(first.contains("FIX-0REQ1GRAPH00"), "{first}");
         assert_eq!(state.graph_cache.builds(), 1);
         let first_generation = state.tracker.as_ref().unwrap().serving_generation();
 
-        let second = dispatch(&root, &mut state, "get_related", &arguments, None, None).unwrap();
+        let second = dispatch(
+            &root,
+            &mut state,
+            "get_related",
+            &arguments,
+            None,
+            None,
+            budget::DEFAULT_BUDGET,
+        )
+        .unwrap();
         assert_eq!(second, first);
         assert_eq!(state.graph_cache.builds(), 1);
         assert_eq!(
@@ -629,7 +689,16 @@ mod tests {
         );
 
         std::fs::write(corpus.join("requirement-2.md"), requirement("FIX-0REQ2GRAPH00")).unwrap();
-        let changed = dispatch(&root, &mut state, "get_related", &arguments, None, None).unwrap();
+        let changed = dispatch(
+            &root,
+            &mut state,
+            "get_related",
+            &arguments,
+            None,
+            None,
+            budget::DEFAULT_BUDGET,
+        )
+        .unwrap();
         assert!(changed.contains("FIX-0REQ1GRAPH00"));
         assert!(changed.contains("FIX-0REQ2GRAPH00"));
         assert_eq!(state.graph_cache.builds(), 2);

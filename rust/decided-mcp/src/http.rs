@@ -77,6 +77,7 @@ HTTP (ADR-084).",
 /// model and audit recorder remain serialised behind mutexes, while request
 /// parsing happens outside those locks so a slow client cannot block the next
 /// client from being accepted.
+#[allow(clippy::too_many_arguments)]
 pub fn serve_http(
     root: &str,
     state: ServerState,
@@ -85,6 +86,7 @@ pub fn serve_http(
     port: u16,
     path: &str,
     allowed_origins: &[String],
+    server_budget: i64,
 ) -> ! {
     let listener = match TcpListener::bind((host, port)) {
         Ok(l) => l,
@@ -129,7 +131,15 @@ stateless per call; authentication belongs to the deployment proxy, ADR-085)."
                 let allowed_origins = Arc::clone(&allowed_origins);
                 std::thread::spawn(move || {
                     let _permit = ConnectionPermit { active };
-                    handle_connection(&root, &state, &recorder, &path, &allowed_origins, s);
+                    handle_connection(
+                        &root,
+                        &state,
+                        &recorder,
+                        &path,
+                        &allowed_origins,
+                        server_budget,
+                        s,
+                    );
                 });
             }
             Err(_) => continue,
@@ -174,6 +184,7 @@ fn handle_connection(
     recorder: &Mutex<Option<audit::Recorder>>,
     path: &str,
     allowed_origins: &[String],
+    server_budget: i64,
     mut stream: TcpStream,
 ) {
     if stream.set_read_timeout(Some(HTTP_IO_TIMEOUT)).is_err()
@@ -199,7 +210,7 @@ fn handle_connection(
     let response = {
         let mut state = state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut recorder = recorder.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        route(root, &mut state, &mut recorder, path, &req)
+        route(root, &mut state, &mut recorder, path, server_budget, &req)
     };
     respond(&mut stream, &response);
 }
@@ -355,6 +366,7 @@ fn route(
     state: &mut ServerState,
     recorder: &mut Option<audit::Recorder>,
     path: &str,
+    server_budget: i64,
     req: &Request,
 ) -> Response {
     if req.path() != path {
@@ -367,7 +379,7 @@ fn route(
         // SDK, which opens an idle stream).
         "GET" => Response { status: "405 Method Not Allowed", body: None },
         "DELETE" => Response { status: "405 Method Not Allowed", body: None },
-        "POST" => route_post(root, state, recorder, req),
+        "POST" => route_post(root, state, recorder, server_budget, req),
         _ => Response { status: "405 Method Not Allowed", body: None },
     }
 }
@@ -376,6 +388,7 @@ fn route_post(
     root: &str,
     state: &mut ServerState,
     recorder: &mut Option<audit::Recorder>,
+    server_budget: i64,
     req: &Request,
 ) -> Response {
     // Accept must be present and admit JSON (json_response mode): absent -> 406.
@@ -448,6 +461,7 @@ fn route_post(
         &message,
         recorder.as_mut(),
         principal.as_deref(),
+        server_budget,
     );
     let status = if era == protocol::Era::Current
         && !protocol::current_method_supported(method)
