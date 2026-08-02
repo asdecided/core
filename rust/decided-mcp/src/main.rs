@@ -51,6 +51,7 @@ fn main() {
     let mut host = "127.0.0.1".to_string();
     let mut port: u16 = 8000;
     let mut path = "/mcp".to_string();
+    let mut allowed_origins = Vec::new();
     while let Some(a) = argv.next() {
         match a.as_str() {
             "--root" => match argv.next() {
@@ -78,6 +79,11 @@ fn main() {
             "--path" => match argv.next() {
                 Some(v) => path = v,
                 None => usage_error("--path requires a value"),
+            },
+            "--allowed-origin" => match argv.next() {
+                Some(v) if !v.trim().is_empty() => allowed_origins.push(v),
+                Some(_) => usage_error("--allowed-origin requires a non-empty origin"),
+                None => usage_error("--allowed-origin requires a value"),
             },
             // Cache flags are real since INDEX-PLAN B6 and remain
             // output-neutral (ADR-112: cache-on vs cache-off runs are
@@ -120,7 +126,15 @@ fn main() {
             usage_error(&msg);
         }
         let recorder = audit::build(&root, "http", &audit_config);
-        http::serve_http(&root, state, recorder, &host, port, &path);
+        http::serve_http(
+            &root,
+            state,
+            recorder,
+            &host,
+            port,
+            &path,
+            &allowed_origins,
+        );
     }
     let mut recorder = audit::build(&root, "stdio", &audit_config);
     serve(&root, &mut state, &mut recorder);

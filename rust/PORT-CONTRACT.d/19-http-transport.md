@@ -42,6 +42,11 @@ contract):
 act, ADR-085); `--port` (default `8000`); `--path` (default `/mcp`). Serving is
 stateless per call (ADR-032): one JSON response per POST, no session store, no
 `Mcp-Session-Id`.
+The native server also accepts repeatable `--allowed-origin ORIGIN` values. A
+request without `Origin` is permitted for non-browser MCP clients; a request
+with `Origin` is accepted only on an exact allow-list match and otherwise gets
+HTTP 403 before its body is read. The default allow-list is empty: browser
+origins must be configured explicitly for local or reverse-proxy deployments.
 
 ## 2 — HTTP method / status map (captured empirically from the SDK)
 
