@@ -32,6 +32,7 @@ version = "0.26.2"
 dependencies = [
  "globset",
  "inotify",
+ "libc",
  "markdown-it",
  "memmap2",
  "rayon",

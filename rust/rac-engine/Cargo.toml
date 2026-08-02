@@ -26,3 +26,6 @@ serde_yaml = "0.9"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 inotify = { version = "0.11", default-features = false }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

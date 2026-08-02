@@ -9,6 +9,10 @@
 //! naming a different alias of the same target is left untouched).
 
 use std::collections::HashSet;
+use std::fs;
+use std::path::Path;
+#[cfg(unix)]
+use std::{fs::OpenOptions, io::Write};
 
 use crate::pycompat::{py_casefold, py_is_space, py_splitlines, py_strip};
 use crate::relationships::{
@@ -22,6 +26,8 @@ pub const REASON_OLD_AMBIGUOUS: &str = "old-ref-ambiguous";
 pub const REASON_NEW_COLLIDES: &str = "new-ref-collides";
 pub const REASON_NEW_INVALID: &str = "new-ref-invalid";
 pub const REASON_OLD_FILENAME_ONLY: &str = "old-ref-filename-only";
+pub const REASON_SYMLINK_PATH: &str = "symlink-path";
+pub const REASON_PATH_OUTSIDE_ROOT: &str = "path-outside-root";
 
 // Where the rewritten identity token lived in the target file.
 pub const IDENTITY_FRONTMATTER: &str = "frontmatter_id";
@@ -82,6 +88,88 @@ pub struct RenameResult {
     pub reference_edits: usize,
     pub identity_edits: usize,
     pub target_path: Option<String>,
+}
+
+#[derive(Debug)]
+struct PathIssue {
+    reason: &'static str,
+    path: String,
+    detail: String,
+}
+
+/// Check one path that a rename may mutate. The canonical root is resolved
+/// once for the plan and again for application; the final path itself must
+/// not be a symlink, and its resolved target must remain under that root.
+///
+/// The walker intentionally yields symlinked Markdown files for read-only
+/// parity, but rename is a mutation surface: following one here could write
+/// through to an unrelated file outside the requested corpus.
+fn check_mutation_path(root: &Path, path: &str) -> Result<(), PathIssue> {
+    let candidate = Path::new(path);
+    let metadata = fs::symlink_metadata(candidate).map_err(|error| PathIssue {
+        reason: REASON_PATH_OUTSIDE_ROOT,
+        path: path.to_string(),
+        detail: format!("cannot inspect path: {error}"),
+    })?;
+    if metadata.file_type().is_symlink() {
+        return Err(PathIssue {
+            reason: REASON_SYMLINK_PATH,
+            path: path.to_string(),
+            detail: "symlinked mutation paths are not permitted".to_string(),
+        });
+    }
+    if !metadata.file_type().is_file() {
+        return Err(PathIssue {
+            reason: REASON_PATH_OUTSIDE_ROOT,
+            path: path.to_string(),
+            detail: "mutation paths must be regular files".to_string(),
+        });
+    }
+    let canonical = fs::canonicalize(candidate).map_err(|error| PathIssue {
+        reason: REASON_PATH_OUTSIDE_ROOT,
+        path: path.to_string(),
+        detail: format!("cannot resolve path: {error}"),
+    })?;
+    if !canonical.starts_with(root) {
+        return Err(PathIssue {
+            reason: REASON_PATH_OUTSIDE_ROOT,
+            path: path.to_string(),
+            detail: format!(
+                "resolved path {} is outside corpus root {}",
+                canonical.display(),
+                root.display()
+            ),
+        });
+    }
+    Ok(())
+}
+
+fn path_issue_message(phase: &str, issue: &PathIssue) -> String {
+    format!(
+        "rename: refusing to {phase} {}: {}",
+        issue.path, issue.detail
+    )
+}
+
+/// Write an already-validated mutation path without following a last-second
+/// final-component symlink on Unix. The preceding containment check still
+/// protects the root boundary and is repeated immediately before this call.
+fn write_mutation_file(path: &str, text: &str) -> Result<(), std::io::Error> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut options = OpenOptions::new();
+        options
+            .write(true)
+            .truncate(true)
+            .custom_flags(libc::O_NOFOLLOW);
+        let mut file = options.open(path)?;
+        file.write_all(text.as_bytes())
+    }
+    #[cfg(not(unix))]
+    {
+        fs::write(path, text)
+    }
 }
 
 fn refused(
@@ -224,7 +312,12 @@ fn relationship_reference_lines<'a>(
 
 /// `_reference_edits(items, target_path, old_ref, new_ref)` — every inbound
 /// relationship line whose leading reference token equals `old_ref`.
-fn reference_edits(items: &[CorpusItem], old_ref: &str, new_ref: &str) -> Vec<RenameEdit> {
+fn reference_edits(
+    items: &[CorpusItem],
+    root: &Path,
+    old_ref: &str,
+    new_ref: &str,
+) -> Result<Vec<RenameEdit>, PathIssue> {
     let mut edits = Vec::new();
     for item in items {
         let Some(spec) = item.spec else { continue };
@@ -244,6 +337,7 @@ fn reference_edits(items: &[CorpusItem], old_ref: &str, new_ref: &str) -> Vec<Re
         if present.is_empty() {
             continue;
         }
+        check_mutation_path(root, &item.path)?;
         let raw = read_raw(&item.path);
         let raw_lines = py_splitlines(&raw);
         for (line_no, raw_line) in relationship_reference_lines(&raw_lines, &present) {
@@ -270,7 +364,7 @@ fn reference_edits(items: &[CorpusItem], old_ref: &str, new_ref: &str) -> Vec<Re
             }
         }
     }
-    edits
+    Ok(edits)
 }
 
 /// One matched frontmatter `id:` line: `(g1 prefix, g2 quote, g3 value,
@@ -509,6 +603,20 @@ pub fn compute_rename(
         return refused(directory, recursive, old_ref, &new_ref, None, REASON_NEW_INVALID);
     }
 
+    let root = match fs::canonicalize(directory) {
+        Ok(root) => root,
+        Err(_) => {
+            return refused(
+                directory,
+                recursive,
+                old_ref,
+                &new_ref,
+                Some(directory.to_string()),
+                REASON_PATH_OUTSIDE_ROOT,
+            )
+        }
+    };
+
     let items = corpus_items(directory, recursive);
     let rows: Vec<ValidationRow> = items
         .iter()
@@ -557,6 +665,16 @@ pub fn compute_rename(
         .iter()
         .find(|item| item.path == target_path)
         .expect("resolved target is in the walked corpus");
+    if let Err(issue) = check_mutation_path(&root, &target_path) {
+        return refused(
+            directory,
+            recursive,
+            old_ref,
+            &new_ref,
+            Some(issue.path),
+            issue.reason,
+        );
+    }
     let (identity, identity_field) = match identity_edit(target_item, old_ref, &new_ref) {
         Ok(pair) => pair,
         Err(reason) => {
@@ -564,7 +682,19 @@ pub fn compute_rename(
         }
     };
 
-    let mut edits = reference_edits(&items, old_ref, &new_ref);
+    let mut edits = match reference_edits(&items, &root, old_ref, &new_ref) {
+        Ok(edits) => edits,
+        Err(issue) => {
+            return refused(
+                directory,
+                recursive,
+                old_ref,
+                &new_ref,
+                Some(issue.path),
+                issue.reason,
+            )
+        }
+    };
     let (line, old_line, new_line) = identity;
     edits.push(RenameEdit {
         path: target_path.clone(),
@@ -606,6 +736,9 @@ pub fn apply_rename(plan: &RenamePlan) -> Result<RenameResult, String> {
         });
     }
 
+    let root = fs::canonicalize(&plan.directory)
+        .map_err(|e| format!("rename: cannot resolve corpus root {}: {e}", plan.directory))?;
+
     // Group by path, first-seen order (Python dict setdefault).
     let mut order: Vec<&str> = Vec::new();
     for edit in &plan.edits {
@@ -614,6 +747,7 @@ pub fn apply_rename(plan: &RenamePlan) -> Result<RenameResult, String> {
         }
     }
     for path in order {
+        check_mutation_path(&root, path).map_err(|issue| path_issue_message("read", &issue))?;
         let original = std::fs::read_to_string(path)
             .map_err(|e| format!("rename: cannot read {path}: {e}"))?;
         let had_final_newline = original.ends_with('\n');
@@ -636,7 +770,9 @@ pub fn apply_rename(plan: &RenamePlan) -> Result<RenameResult, String> {
         if had_final_newline {
             text.push('\n');
         }
-        std::fs::write(path, text).map_err(|e| format!("rename: cannot write {path}: {e}"))?;
+        check_mutation_path(&root, path).map_err(|issue| path_issue_message("replace", &issue))?;
+        write_mutation_file(path, &text)
+            .map_err(|e| format!("rename: cannot write {path}: {e}"))?;
     }
 
     Ok(RenameResult {

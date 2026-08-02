@@ -172,7 +172,8 @@ Refusal routing is split: human refusal → STDERR (`Rename <old> ->
 <new>` / blank / `✗ Refused: <phrase>.`), JSON refusal → STDOUT (the
 full plan with `ok:false` and a stable `reason` code: `old-ref-not-found`,
 `old-ref-ambiguous`, `new-ref-collides` (target_path still set),
-`new-ref-invalid`, `old-ref-filename-only`).
+`new-ref-invalid`, `old-ref-filename-only`, `symlink-path`, or
+`path-outside-root`).
 
 Plan semantics (all pinned): `new_ref` is stripped, then must match
 `^[A-Za-z][\w.-]*$` BEFORE any walk; `old_ref` resolves case-insensitively
@@ -202,7 +203,16 @@ and <I> identity edit across <F> file(s).`. Apply JSON is the
 RenameResult (no `edits` array). `--apply` replaces exact lines
 (verified against `old_line`) and preserves the file's final-newline
 shape; the plan `directory` echoes the argv verbatim (trailing slash
-kept) while edit paths are walk-normalized.
+kept) while edit paths are walk-normalized. Mutation is confined to the
+canonical corpus root (ADR-129): the target and every relationship-bearing
+edit path must be a non-symlink regular path whose canonical destination is
+under that root. A symlinked path or a path that cannot be resolved is a
+whole-plan refusal with reason `symlink-path` or `path-outside-root`; the
+human dry-run includes the offending path and JSON keeps it in
+`target_path`. Apply repeats the checks immediately before each read and
+replacement; Unix replacement also uses `O_NOFOLLOW` for the final path
+component. Read-only discovery still yields symlinked Markdown files for
+parity.
 
 ## 7. `rac migrate {metadata} <directory> [--dry-run] [--top-level] [--recursive] [--json]`
 
