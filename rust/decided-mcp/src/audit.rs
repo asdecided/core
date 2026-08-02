@@ -7,7 +7,7 @@
 //! Default-absent for stdio (no `audit:` stanza ⇒ no recorder ⇒ byte-unchanged,
 //! ADR-084's strict superset). For HTTP the sink is mandatory and the recorder
 //! is *shared*: its construction-time principal skips the host git identity
-//! (per-call attribution rides `X-Lore-Principal`), and a write failure blocks
+//! (per-call attribution rides `X-AsDecided-Principal`), and a write failure blocks
 //! the call rather than serving un-recordable reads.
 //!
 //! Not a wire-parity surface (the log is a side file with non-deterministic
@@ -28,8 +28,7 @@ const AUDIT_FILENAME: &str = "audit.jsonl";
 const PATH_ENV: &str = "DECIDED_AUDIT_PATH";
 const PRINCIPAL_ENV: &str = "DECIDED_AUDIT_PRINCIPAL";
 const UNATTRIBUTED: &str = "unattributed";
-pub const CANONICAL_PRINCIPAL_HEADER: &str = "X-Lore-Principal";
-pub const LEGACY_PRINCIPAL_HEADER: &str = "X-AsDecided-Principal";
+pub const CANONICAL_PRINCIPAL_HEADER: &str = "X-AsDecided-Principal";
 const MAX_PRINCIPAL_BYTES: usize = 512;
 const AUDIT_SCOPE: &str = "MCP read tools";
 
@@ -160,21 +159,11 @@ pub struct Recorder {
 
 /// Resolve the shared HTTP attribution carrier.
 ///
-/// `X-Lore-Principal` is canonical (ADR-098). The older
-/// `X-AsDecided-Principal` spelling remains a bounded migration alias so an
-/// already-deployed proxy does not silently lose attribution. Duplicate
+/// `X-AsDecided-Principal` is the only accepted carrier. Duplicate
 /// occurrences are rejected because accepting them would make intermediary
-/// header coalescing ambiguous. When both spellings are present, equal values
-/// resolve to the canonical value; different values are rejected.
+/// header coalescing ambiguous.
 pub fn resolve_http_principal(headers: &[(String, String)]) -> Result<Option<String>, &'static str> {
-    let canonical = principal_values(headers, CANONICAL_PRINCIPAL_HEADER)?;
-    let legacy = principal_values(headers, LEGACY_PRINCIPAL_HEADER)?;
-    match (canonical, legacy) {
-        (None, None) => Ok(None),
-        (Some(value), None) | (None, Some(value)) => Ok(Some(value)),
-        (Some(canonical), Some(legacy)) if canonical == legacy => Ok(Some(canonical)),
-        (Some(_), Some(_)) => Err("canonical and legacy principal headers disagree"),
-    }
+    principal_values(headers, CANONICAL_PRINCIPAL_HEADER)
 }
 
 fn principal_values(
@@ -458,25 +447,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn canonical_principal_wins_equal_migration_alias() {
+    fn canonical_principal_is_resolved_and_trimmed() {
         let headers = vec![
             (CANONICAL_PRINCIPAL_HEADER.to_string(), "alice".to_string()),
-            (LEGACY_PRINCIPAL_HEADER.to_string(), " alice ".to_string()),
         ];
         assert_eq!(resolve_http_principal(&headers).unwrap().as_deref(), Some("alice"));
     }
 
     #[test]
-    fn conflicting_or_duplicate_principals_are_rejected() {
-        let conflict = vec![
-            (CANONICAL_PRINCIPAL_HEADER.to_string(), "alice".to_string()),
-            (LEGACY_PRINCIPAL_HEADER.to_string(), "bob".to_string()),
-        ];
-        assert_eq!(
-            resolve_http_principal(&conflict),
-            Err("canonical and legacy principal headers disagree")
-        );
-
+    fn duplicate_principals_are_rejected() {
         let duplicate = vec![
             (CANONICAL_PRINCIPAL_HEADER.to_string(), "alice".to_string()),
             (CANONICAL_PRINCIPAL_HEADER.to_string(), "alice".to_string()),

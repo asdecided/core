@@ -467,7 +467,7 @@ fn http_audit_records_every_result_collection() {
             &tool_call(index as u64 + 1, name, arguments.clone()),
             "tools/call",
             Some(name),
-            &[("X-Lore-Principal", "alice@example.com")],
+            &[("X-AsDecided-Principal", "alice@example.com")],
         );
         assert_eq!(status, "HTTP/1.1 200 OK", "{name} request failed");
     }
@@ -507,57 +507,29 @@ fn http_audit_records_every_result_collection() {
 }
 
 #[test]
-fn http_principal_migration_is_explicit_and_response_independent() {
+fn http_principal_is_explicit_and_response_independent() {
     let _guard = serial_http_test();
-    let server = Server::start("http-principal-migration");
+    let server = Server::start("http-principal");
     let request = tool_call(20, "get_summary", json!({}));
 
     let (canonical_status, canonical) = server.post_with_principal_headers(
         &request,
         "tools/call",
         Some("get_summary"),
-        &[("X-Lore-Principal", "alice@example.com")],
+        &[("X-AsDecided-Principal", "alice@example.com")],
     );
-    let (legacy_status, legacy) = server.post_with_principal_headers(
-        &request,
-        "tools/call",
-        Some("get_summary"),
-        &[("X-AsDecided-Principal", "bob@example.com")],
-    );
+    let (local_status, local) = server.post(&request, "tools/call", Some("get_summary"));
     assert_eq!(canonical_status, "HTTP/1.1 200 OK");
-    assert_eq!(legacy_status, "HTTP/1.1 200 OK");
-    assert_eq!(canonical, legacy, "principal attribution must not authorize");
-
-    let (equal_status, _) = server.post_with_principal_headers(
-        &request,
-        "tools/call",
-        Some("get_summary"),
-        &[
-            ("X-Lore-Principal", "same@example.com"),
-            ("X-AsDecided-Principal", "same@example.com"),
-        ],
-    );
-    assert_eq!(equal_status, "HTTP/1.1 200 OK");
-
-    let (conflict_status, conflict) = server.post_with_principal_headers(
-        &request,
-        "tools/call",
-        Some("get_summary"),
-        &[
-            ("X-Lore-Principal", "alice@example.com"),
-            ("X-AsDecided-Principal", "bob@example.com"),
-        ],
-    );
-    assert_eq!(conflict_status, "HTTP/1.1 400 Bad Request");
-    assert_eq!(conflict["error"]["code"], json!(-32023));
+    assert_eq!(local_status, "HTTP/1.1 200 OK");
+    assert_eq!(canonical, local, "principal attribution must not authorize");
 
     let (duplicate_status, duplicate) = server.post_with_principal_headers(
         &request,
         "tools/call",
         Some("get_summary"),
         &[
-            ("X-Lore-Principal", "alice@example.com"),
-            ("X-Lore-Principal", "alice@example.com"),
+            ("X-AsDecided-Principal", "alice@example.com"),
+            ("X-AsDecided-Principal", "alice@example.com"),
         ],
     );
     assert_eq!(duplicate_status, "HTTP/1.1 400 Bad Request");

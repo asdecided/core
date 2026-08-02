@@ -14,7 +14,7 @@ gained a streamable HTTP transport so a team points every agent at one
 always-current `main`-backed endpoint (#263, under the serving decision ADR-098);
 an opt-in, content-addressed derived-index cache keeps per-call latency flat as
 the corpus grows, byte-identical to the uncached path (#264, ADR-099); the audit
-recorder resolves a per-request principal from the `X-Lore-Principal` header so
+recorder resolves a per-request principal from the `X-AsDecided-Principal` header so
 every caller on the shared endpoint is attributed distinctly, never as the host
 (#265); and an operator recipe — container, authenticating proxy, keep-current
 step, and the observability boundary — documents how to run it (#266). Both

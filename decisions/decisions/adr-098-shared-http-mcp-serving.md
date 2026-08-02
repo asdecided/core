@@ -59,8 +59,8 @@ following boundaries.
   deployment proxy that fronts the endpoint. The standing red lines — no SSO on
   a shared MCP, no RBAC on MCP tools, no hosted multi-tenant service — stand.
 
-- **The attribution carrier is the `X-Lore-Principal` request header.** A caller
-  on the shared endpoint asserts who it is by setting the `X-Lore-Principal`
+- **The attribution carrier is the `X-AsDecided-Principal` request header.** A caller
+  on the shared endpoint asserts who it is by setting the `X-AsDecided-Principal`
   HTTP header (case-insensitive); the audit recorder records that assertion as
   the per-request principal (`rac-shared-server-audit-identity`). It is
   *attribution, not authentication* (ADR-084): the engine records what the

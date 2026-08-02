@@ -92,7 +92,7 @@ matching the oracle (`create_recorder(transport="stdio")`).
 
 Per call, `audit::observe` (mirroring `audit.observe`) appends one JSON line to
 the sink: `schema_version`, `ts`, `session`, `principal`, `transport`,
-`attribution` (`asserted` when a per-request principal rode `X-Lore-Principal`,
+`attribution` (`asserted` when a per-request principal rode `X-AsDecided-Principal`,
 else `local`), `tool`, `query` (the args, never content — non-default arguments
 ride only when supplied, per-tool shapes exactly as `server.py`'s `observed(...)`
 calls), and `returned` (body-free artifact references from the primary `id` and
@@ -105,15 +105,14 @@ the call is refused with a structured `audit-unavailable` payload; stdio's
 `warn` default records-and-continues. The referee compares records
 field-for-field minus the non-deterministic `ts`/`session`/`duration_ms`.
 
-## 4 — Attribution: `X-Lore-Principal` (ADR-098, ADR-084, ADR-127)
+## 4 — Attribution: `X-AsDecided-Principal` (ADR-098, ADR-084, ADR-127)
 
-A caller asserts identity via the `X-Lore-Principal` request header
+A caller asserts identity via the `X-AsDecided-Principal` request header
 (case-insensitive). It is *attribution, not authentication*: recorded by the
 audit sink, never verified, and never an access-control input — the response is
 byte-identical whatever the header says (proven: body parity holds regardless of
-the header). `X-AsDecided-Principal` is accepted only as a bounded migration
-alias; empty, malformed, duplicate, and conflicting carriers are rejected before
-dispatch, while equal dual carriers resolve to the canonical header. An
+the header). Empty values are absent and malformed or duplicate carriers are
+rejected before dispatch. An
 unasserted call falls back to the recorder's resolution. Startup writes a stderr
 diagnostic containing the audit path, scope, and write-failure mode.
 
@@ -132,7 +131,7 @@ diagnostic containing the audit path, scope, and write-failure mode.
 `rust/tools/mcp_http_parity.py` drives a Python and a Rust `--transport http`
 server over real HTTP against an audit-enabled corpus and checks: body bytes for
 every request, the §2 status map, and the audit log — records field-for-field
-minus `ts`/`session`/`duration_ms`, plus an `X-Lore-Principal` call asserted on
+minus `ts`/`session`/`duration_ms`, plus an `X-AsDecided-Principal` call asserted on
 both. Run in both modes:
 
 ```sh

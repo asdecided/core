@@ -197,8 +197,7 @@ pub fn principal_header_frame(id_json: &str, reason: &str) -> String {
         "Invalid principal header",
         json!({
             "reason": reason,
-            "canonical": "X-Lore-Principal",
-            "legacy": "X-AsDecided-Principal",
+            "canonical": "X-AsDecided-Principal",
         }),
     )
 }

@@ -13,7 +13,7 @@
 //!
 //! HTTP is mandatory-audit-on (ADR-084, ADR-098): [`ensure_audit_sink`] proves
 //! a working audit sink at startup or the server refuses to start. Attribution
-//! rides the `X-Lore-Principal` request header (ADR-098) — recorded, never
+//! rides the `X-AsDecided-Principal` request header (ADR-098) — recorded, never
 //! verified, never an access-control input.
 //!
 //! Wire contract: `rust/PORT-CONTRACT.d/19-http-transport.md`.
@@ -437,8 +437,8 @@ fn route_post(
     if message.get("id").is_none() {
         return Response { status: "202 Accepted", body: None };
     }
-    // Attribution rides X-Lore-Principal (with the bounded legacy alias handled
-    // above): recorded by audit, never an access-control input — the response is
+    // Attribution rides X-AsDecided-Principal: recorded by audit, never an
+    // access-control input — the response is
     // identical whatever the caller claims.
     let frame = process_request(
         root,
