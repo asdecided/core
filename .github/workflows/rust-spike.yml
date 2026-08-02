@@ -88,6 +88,12 @@ jobs:
             --spec-dir "${{ github.workspace }}/asdecided-spec" \
             --engine "rust=${{ github.workspace }}/rust/target/release/decided"
 
+      - name: MCP compatibility vectors (Rust consumer)
+        working-directory: rust
+        env:
+          ASDECIDED_MCP_SPEC_DIR: ${{ github.workspace }}/asdecided-spec
+        run: cargo test -p decided-mcp --test spec_vectors --release -- --nocapture
+
       - name: Live RAC corpus invariants
         run: |
           python rust/tools/live_corpus_invariants.py \
