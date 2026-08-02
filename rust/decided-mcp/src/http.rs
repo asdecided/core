@@ -20,10 +20,23 @@
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::sync::{atomic::{AtomicUsize, Ordering}, Arc, Mutex};
+use std::time::Duration;
 
 use serde_json::Value;
 
 use crate::{audit, process_request, protocol, ServerState};
+
+/// Keep a malformed or abandoned client from consuming the shared endpoint
+/// indefinitely. These are transport limits, not MCP payload limits: the
+/// response budget is enforced by the engine after dispatch.
+const HTTP_IO_TIMEOUT: Duration = Duration::from_secs(5);
+const MAX_ACTIVE_CONNECTIONS: usize = 64;
+const MAX_REQUEST_LINE_BYTES: usize = 8 * 1024;
+const MAX_HEADER_LINE_BYTES: usize = 8 * 1024;
+const MAX_HEADER_BYTES: usize = 32 * 1024;
+const MAX_HEADER_COUNT: usize = 64;
+const MAX_BODY_BYTES: usize = 1024 * 1024;
 
 /// Prove a working audit sink for HTTP serving (ADR-084 fail-loud). Audit must
 /// be enabled in `.decided/config.yaml` and its resolved path writable, or the
@@ -60,13 +73,14 @@ HTTP (ADR-084).",
 }
 
 /// Serve `root` over streamable HTTP (stateless JSON mode) until interrupted.
-/// Single-threaded: one request served to completion before the next, so the
-/// per-server freshness tracker's mutable read-model is accessed serially
-/// without locking (stateless reads are cheap — 28 ms cold on the live corpus).
+/// Connections are handled by a bounded set of workers. The mutable freshness
+/// model and audit recorder remain serialised behind mutexes, while request
+/// parsing happens outside those locks so a slow client cannot block the next
+/// client from being accepted.
 pub fn serve_http(
     root: &str,
-    state: &mut ServerState,
-    recorder: &mut Option<audit::Recorder>,
+    state: ServerState,
+    recorder: Option<audit::Recorder>,
     host: &str,
     port: u16,
     path: &str,
@@ -82,13 +96,53 @@ pub fn serve_http(
         "decided-mcp: serving over HTTP at http://{host}:{port}{path} (read-only, \
 stateless per call; authentication belongs to the deployment proxy, ADR-085)."
     );
+    eprintln!(
+        "decided-mcp: HTTP limits — {MAX_ACTIVE_CONNECTIONS} active connections, \
+{MAX_REQUEST_LINE_BYTES}B request line, {MAX_HEADER_BYTES}B headers, \
+{MAX_BODY_BYTES}B body, {}s I/O timeout.",
+        HTTP_IO_TIMEOUT.as_secs()
+    );
+    let state = Arc::new(Mutex::new(state));
+    let recorder = Arc::new(Mutex::new(recorder));
+    let root = Arc::new(root.to_string());
+    let path = Arc::new(path.to_string());
+    let active = Arc::new(AtomicUsize::new(0));
     for stream in listener.incoming() {
         match stream {
-            Ok(s) => handle_connection(root, state, recorder, path, s),
+            Ok(s) => {
+                let admitted = active
+                    .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+                        (current < MAX_ACTIVE_CONNECTIONS).then_some(current + 1)
+                    })
+                    .is_ok();
+                if !admitted {
+                    reject_connection(s);
+                    continue;
+                }
+                let active = Arc::clone(&active);
+                let state = Arc::clone(&state);
+                let recorder = Arc::clone(&recorder);
+                let root = Arc::clone(&root);
+                let path = Arc::clone(&path);
+                std::thread::spawn(move || {
+                    let _permit = ConnectionPermit { active };
+                    handle_connection(&root, &state, &recorder, &path, s);
+                });
+            }
             Err(_) => continue,
         }
     }
     std::process::exit(0);
+}
+
+struct ConnectionPermit {
+    active: Arc<AtomicUsize>,
+}
+
+impl Drop for ConnectionPermit {
+    fn drop(&mut self) {
+        self.active.fetch_sub(1, Ordering::AcqRel);
+    }
 }
 
 struct Request {
@@ -113,57 +167,151 @@ impl Request {
 
 fn handle_connection(
     root: &str,
-    state: &mut ServerState,
-    recorder: &mut Option<audit::Recorder>,
+    state: &Mutex<ServerState>,
+    recorder: &Mutex<Option<audit::Recorder>>,
     path: &str,
-    stream: TcpStream,
+    mut stream: TcpStream,
 ) {
+    if stream.set_read_timeout(Some(HTTP_IO_TIMEOUT)).is_err()
+        || stream.set_write_timeout(Some(HTTP_IO_TIMEOUT)).is_err()
+    {
+        return;
+    }
     let mut reader = BufReader::new(match stream.try_clone() {
         Ok(s) => s,
         Err(_) => return,
     });
-    let mut writer = stream;
-    let Some(req) = read_request(&mut reader) else {
-        return;
+    let req = match read_request(&mut reader) {
+        Ok(Some(req)) => req,
+        Ok(None) => return,
+        Err(error) => {
+            respond(
+                &mut stream,
+                &Response { status: error.status(), body: None },
+            );
+            return;
+        }
     };
-    respond(&mut writer, &route(root, state, recorder, path, &req));
+    let response = {
+        let mut state = state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut recorder = recorder.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        route(root, &mut state, &mut recorder, path, &req)
+    };
+    respond(&mut stream, &response);
 }
 
 /// Parse one HTTP/1.1 request: request line, headers, and a Content-Length body.
-fn read_request(reader: &mut BufReader<TcpStream>) -> Option<Request> {
-    let mut line = String::new();
-    if reader.read_line(&mut line).ok()? == 0 {
-        return None;
+fn read_request(reader: &mut BufReader<TcpStream>) -> Result<Option<Request>, ReadError> {
+    let Some(line) = read_line_limited(reader, MAX_REQUEST_LINE_BYTES)? else {
+        return Ok(None);
+    };
+    let line = std::str::from_utf8(&line).map_err(|_| ReadError::BadRequest)?;
+    let mut parts = line.trim_end_matches(['\r', '\n']).split_whitespace();
+    let method = parts.next().ok_or(ReadError::BadRequest)?.to_string();
+    let target = parts.next().ok_or(ReadError::BadRequest)?.to_string();
+    let version = parts.next().ok_or(ReadError::BadRequest)?;
+    if parts.next().is_some() || version != "HTTP/1.1" {
+        return Err(ReadError::BadRequest);
     }
-    let mut parts = line.split_whitespace();
-    let method = parts.next()?.to_string();
-    let target = parts.next()?.to_string();
 
     let mut headers = Vec::new();
+    let mut header_bytes = 0usize;
     loop {
-        let mut h = String::new();
-        if reader.read_line(&mut h).ok()? == 0 {
-            break;
+        let Some(line) = read_line_limited(reader, MAX_HEADER_LINE_BYTES)? else {
+            return Err(ReadError::BadRequest);
+        };
+        header_bytes = header_bytes
+            .checked_add(line.len())
+            .ok_or(ReadError::TooLarge)?;
+        if header_bytes > MAX_HEADER_BYTES {
+            return Err(ReadError::TooLarge);
         }
-        let trimmed = h.trim_end_matches(['\r', '\n']);
+        let trimmed = std::str::from_utf8(&line)
+            .map_err(|_| ReadError::BadRequest)?
+            .trim_end_matches(['\r', '\n']);
         if trimmed.is_empty() {
             break;
         }
-        if let Some((k, v)) = trimmed.split_once(':') {
-            headers.push((k.trim().to_string(), v.trim().to_string()));
+        let (k, v) = trimmed.split_once(':').ok_or(ReadError::BadRequest)?;
+        if headers.len() >= MAX_HEADER_COUNT {
+            return Err(ReadError::TooLarge);
         }
+        headers.push((k.trim().to_string(), v.trim().to_string()));
     }
 
-    let len: usize = headers
+    if headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("transfer-encoding")) {
+        return Err(ReadError::BadRequest);
+    }
+    let mut len = None;
+    for (_, value) in headers
         .iter()
-        .find(|(k, _)| k.eq_ignore_ascii_case("content-length"))
-        .and_then(|(_, v)| v.trim().parse().ok())
-        .unwrap_or(0);
+        .filter(|(k, _)| k.eq_ignore_ascii_case("content-length"))
+    {
+        let parsed = value.trim().parse::<usize>().map_err(|_| ReadError::BadRequest)?;
+        if len.is_some_and(|previous| previous != parsed) {
+            return Err(ReadError::BadRequest);
+        }
+        len = Some(parsed);
+    }
+    let len = len.unwrap_or(0);
+    if len > MAX_BODY_BYTES {
+        return Err(ReadError::TooLarge);
+    }
     let mut body = vec![0u8; len];
     if len > 0 && reader.read_exact(&mut body).is_err() {
-        return None;
+        return Err(ReadError::BadRequest);
     }
-    Some(Request { method, target, headers, body })
+    Ok(Some(Request { method, target, headers, body }))
+}
+
+fn read_line_limited(
+    reader: &mut impl BufRead,
+    limit: usize,
+) -> Result<Option<Vec<u8>>, ReadError> {
+    let mut line = Vec::new();
+    loop {
+        let available = reader.fill_buf().map_err(|_| ReadError::BadRequest)?;
+        if available.is_empty() {
+            return if line.is_empty() {
+                Ok(None)
+            } else {
+                Err(ReadError::BadRequest)
+            };
+        }
+        let newline = available.iter().position(|byte| *byte == b'\n');
+        let take = newline.map_or(available.len(), |position| position + 1);
+        if line.len().saturating_add(take) > limit {
+            return Err(ReadError::TooLarge);
+        }
+        line.extend_from_slice(&available[..take]);
+        reader.consume(take);
+        if newline.is_some() {
+            return Ok(Some(line));
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum ReadError {
+    BadRequest,
+    TooLarge,
+}
+
+impl ReadError {
+    fn status(self) -> &'static str {
+        match self {
+            Self::BadRequest => "400 Bad Request",
+            Self::TooLarge => "413 Payload Too Large",
+        }
+    }
+}
+
+fn reject_connection(mut stream: TcpStream) {
+    let _ = stream.set_write_timeout(Some(HTTP_IO_TIMEOUT));
+    respond(
+        &mut stream,
+        &Response { status: "503 Service Unavailable", body: None },
+    );
 }
 
 struct Response {
