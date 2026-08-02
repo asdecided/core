@@ -27,9 +27,10 @@ boundary.
   the offending path; no file is written.
 - Application repeats the containment and symlink checks immediately before
   reading each file and immediately before replacing it.
-- Unix replacement opens the final path with `O_NOFOLLOW` as a final-component
-  race guard. Read-only discovery remains unchanged and may still report
-  symlinked Markdown files.
+- Unix staging opens each temporary final component with `O_NOFOLLOW` as a
+  final-component race guard; same-directory replacement uses the staged file
+  after the immediate root checks. Read-only discovery remains unchanged and
+  may still report symlinked Markdown files.
 
 ## Status
 
@@ -49,8 +50,8 @@ by the number of files in the deterministic edit set.
 
 The protection is deliberately narrow. It does not change read-only walk
 parity, rename ordering, identity semantics, or the exact-line stale-plan
-check. `O_NOFOLLOW` closes the final-component race on Unix; the immediate
-rechecks provide the same root-boundary policy on other platforms.
+check. `O_NOFOLLOW` closes the final-component race while staging on Unix; the
+immediate rechecks provide the same root-boundary policy on other platforms.
 
 ## Alternatives Considered
 
@@ -87,7 +88,7 @@ rules:
     kind: require_pattern
     path_glob: "rust/rac-engine/src/rename.rs"
     pattern: "O_NOFOLLOW"
-    message: "Unix rename replacement must refuse a final-component symlink race."
+    message: "Unix rename staging must refuse a final-component symlink race."
 ```
 
 ## Related Decisions
