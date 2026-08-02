@@ -457,16 +457,46 @@ fn route_post(
 fn http_era(req: &Request, message: &Value, id_json: &str) -> Result<protocol::Era, Response> {
     let header_version = req.header("mcp-protocol-version");
     let metadata_version = protocol::requested_version(message);
-    match header_version {
-        Some(protocol::CURRENT_PROTOCOL_VERSION) => Ok(protocol::Era::Current),
-        Some(version) if protocol::LEGACY_PROTOCOL_VERSIONS.contains(&version) => {
-            Ok(protocol::Era::Legacy)
+    if let Some(version) = header_version {
+        if version != protocol::CURRENT_PROTOCOL_VERSION
+            && !protocol::LEGACY_PROTOCOL_VERSIONS.contains(&version)
+        {
+            return Err(json_response(
+                "400 Bad Request",
+                protocol::unsupported_protocol_frame(message.get("id"), Some(version)),
+            ));
         }
-        Some(version) => Err(json_response(
-            "400 Bad Request",
-            protocol::unsupported_protocol_frame(message.get("id"), Some(version)),
-        )),
-        None if metadata_version == Some(protocol::CURRENT_PROTOCOL_VERSION) => Err(json_response(
+        if let Some(metadata) = metadata_version {
+            if metadata != version {
+                return Err(json_response(
+                    "400 Bad Request",
+                    protocol::header_mismatch_frame(
+                        id_json,
+                        "MCP-Protocol-Version",
+                        Some(version),
+                        Some(metadata),
+                    ),
+                ));
+            }
+        } else if version == protocol::CURRENT_PROTOCOL_VERSION {
+            return Err(json_response(
+                "400 Bad Request",
+                protocol::header_mismatch_frame(
+                    id_json,
+                    "MCP-Protocol-Version",
+                    Some(protocol::CURRENT_PROTOCOL_VERSION),
+                    None,
+                ),
+            ));
+        }
+        return Ok(if version == protocol::CURRENT_PROTOCOL_VERSION {
+            protocol::Era::Current
+        } else {
+            protocol::Era::Legacy
+        });
+    }
+    match metadata_version {
+        Some(protocol::CURRENT_PROTOCOL_VERSION) => Err(json_response(
             "400 Bad Request",
             protocol::header_mismatch_frame(
                 id_json,
@@ -474,6 +504,13 @@ fn http_era(req: &Request, message: &Value, id_json: &str) -> Result<protocol::E
                 Some(protocol::CURRENT_PROTOCOL_VERSION),
                 None,
             ),
+        )),
+        Some(version) if protocol::LEGACY_PROTOCOL_VERSIONS.contains(&version) => {
+            Ok(protocol::Era::Legacy)
+        }
+        Some(version) => Err(json_response(
+            "400 Bad Request",
+            protocol::unsupported_protocol_frame(message.get("id"), Some(version)),
         )),
         None => Ok(protocol::Era::Legacy),
     }
