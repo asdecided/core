@@ -24,6 +24,10 @@ struct Server {
 
 impl Server {
     fn start(tag: &str) -> Self {
+        Self::start_with_origins(tag, &[])
+    }
+
+    fn start_with_origins(tag: &str, allowed_origins: &[&str]) -> Self {
         let corpus = scratch(tag);
         let audit_path = corpus.join("audit.jsonl");
         std::fs::create_dir_all(corpus.join(".decided")).unwrap();
@@ -40,17 +44,22 @@ impl Server {
             .local_addr()
             .unwrap()
             .port();
+        let mut args = vec![
+                "--root".to_string(),
+                corpus.to_str().unwrap().to_string(),
+                "--transport".to_string(),
+                "http".to_string(),
+                "--host".to_string(),
+                "127.0.0.1".to_string(),
+                "--port".to_string(),
+                port.to_string(),
+        ];
+        for origin in allowed_origins {
+            args.push("--allowed-origin".to_string());
+            args.push((*origin).to_string());
+        }
         let child = Command::new(env!("CARGO_BIN_EXE_decided-mcp"))
-            .args([
-                "--root",
-                corpus.to_str().unwrap(),
-                "--transport",
-                "http",
-                "--host",
-                "127.0.0.1",
-                "--port",
-                &port.to_string(),
-            ])
+            .args(&args)
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
             .spawn()
@@ -70,6 +79,16 @@ impl Server {
     }
 
     fn post(&self, body: &Value, method_header: &str, name: Option<&str>) -> (String, Value) {
+        self.post_with_origin(body, method_header, name, None)
+    }
+
+    fn post_with_origin(
+        &self,
+        body: &Value,
+        method_header: &str,
+        name: Option<&str>,
+        origin: Option<&str>,
+    ) -> (String, Value) {
         let body = body.to_string();
         let mut request = format!(
             "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nAccept: application/json\r\n\
@@ -78,6 +97,9 @@ Mcp-Method: {method_header}\r\n"
         );
         if let Some(name) = name {
             request.push_str(&format!("Mcp-Name: {name}\r\n"));
+        }
+        if let Some(origin) = origin {
+            request.push_str(&format!("Origin: {origin}\r\n"));
         }
         request.push_str(&format!(
             "Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
@@ -225,5 +247,52 @@ Content-Type: application/json\r\nContent-Length: {}\r\n\r\n",
     assert_eq!(
         response.lines().next(),
         Some("HTTP/1.1 413 Payload Too Large")
+    );
+}
+
+#[test]
+fn current_http_rejects_unconfigured_origin_before_body_read() {
+    let _guard = serial_http_test();
+    let server = Server::start("http-origin-rejected");
+    let body = json!({
+        "jsonrpc": "2.0",
+        "id": 6,
+        "method": "server/discover",
+        "params": {"_meta": current_meta()}
+    });
+    let body = body.to_string();
+    let request = format!(
+        "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nOrigin: https://attacker.example\r\n\
+Accept: application/json\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+        1024 * 1024 + 1,
+        body
+    );
+    let mut stream = TcpStream::connect(("127.0.0.1", server.port)).unwrap();
+    stream.write_all(request.as_bytes()).unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).unwrap();
+    assert_eq!(response.lines().next(), Some("HTTP/1.1 403 Forbidden"));
+}
+
+#[test]
+fn current_http_allows_explicit_origin() {
+    let _guard = serial_http_test();
+    let server = Server::start_with_origins("http-origin-allowed", &["https://agent.example"]);
+    let request = json!({
+        "jsonrpc": "2.0",
+        "id": 6,
+        "method": "server/discover",
+        "params": {"_meta": current_meta()}
+    });
+    let (status, response) = server.post_with_origin(
+        &request,
+        "server/discover",
+        None,
+        Some("https://agent.example"),
+    );
+    assert_eq!(status, "HTTP/1.1 200 OK");
+    assert_eq!(
+        response.pointer("/result/supportedVersions/0"),
+        Some(&json!(CURRENT_VERSION))
     );
 }

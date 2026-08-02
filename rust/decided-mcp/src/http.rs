@@ -84,6 +84,7 @@ pub fn serve_http(
     host: &str,
     port: u16,
     path: &str,
+    allowed_origins: &[String],
 ) -> ! {
     let listener = match TcpListener::bind((host, port)) {
         Ok(l) => l,
@@ -106,6 +107,7 @@ stateless per call; authentication belongs to the deployment proxy, ADR-085)."
     let recorder = Arc::new(Mutex::new(recorder));
     let root = Arc::new(root.to_string());
     let path = Arc::new(path.to_string());
+    let allowed_origins = Arc::new(allowed_origins.to_vec());
     let active = Arc::new(AtomicUsize::new(0));
     for stream in listener.incoming() {
         match stream {
@@ -124,9 +126,10 @@ stateless per call; authentication belongs to the deployment proxy, ADR-085)."
                 let recorder = Arc::clone(&recorder);
                 let root = Arc::clone(&root);
                 let path = Arc::clone(&path);
+                let allowed_origins = Arc::clone(&allowed_origins);
                 std::thread::spawn(move || {
                     let _permit = ConnectionPermit { active };
-                    handle_connection(&root, &state, &recorder, &path, s);
+                    handle_connection(&root, &state, &recorder, &path, &allowed_origins, s);
                 });
             }
             Err(_) => continue,
@@ -170,6 +173,7 @@ fn handle_connection(
     state: &Mutex<ServerState>,
     recorder: &Mutex<Option<audit::Recorder>>,
     path: &str,
+    allowed_origins: &[String],
     mut stream: TcpStream,
 ) {
     if stream.set_read_timeout(Some(HTTP_IO_TIMEOUT)).is_err()
@@ -181,7 +185,7 @@ fn handle_connection(
         Ok(s) => s,
         Err(_) => return,
     });
-    let req = match read_request(&mut reader) {
+    let req = match read_request(&mut reader, allowed_origins) {
         Ok(Some(req)) => req,
         Ok(None) => return,
         Err(error) => {
@@ -201,7 +205,10 @@ fn handle_connection(
 }
 
 /// Parse one HTTP/1.1 request: request line, headers, and a Content-Length body.
-fn read_request(reader: &mut BufReader<TcpStream>) -> Result<Option<Request>, ReadError> {
+fn read_request(
+    reader: &mut BufReader<TcpStream>,
+    allowed_origins: &[String],
+) -> Result<Option<Request>, ReadError> {
     let Some(line) = read_line_limited(reader, MAX_REQUEST_LINE_BYTES)? else {
         return Ok(None);
     };
@@ -239,6 +246,9 @@ fn read_request(reader: &mut BufReader<TcpStream>) -> Result<Option<Request>, Re
         headers.push((k.trim().to_string(), v.trim().to_string()));
     }
 
+    if !origin_allowed(&headers, allowed_origins) {
+        return Err(ReadError::OriginDenied);
+    }
     if headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("transfer-encoding")) {
         return Err(ReadError::BadRequest);
     }
@@ -295,6 +305,7 @@ fn read_line_limited(
 enum ReadError {
     BadRequest,
     TooLarge,
+    OriginDenied,
 }
 
 impl ReadError {
@@ -302,6 +313,7 @@ impl ReadError {
         match self {
             Self::BadRequest => "400 Bad Request",
             Self::TooLarge => "413 Payload Too Large",
+            Self::OriginDenied => "403 Forbidden",
         }
     }
 }
@@ -312,6 +324,19 @@ fn reject_connection(mut stream: TcpStream) {
         &mut stream,
         &Response { status: "503 Service Unavailable", body: None },
     );
+}
+
+fn origin_allowed(headers: &[(String, String)], allowed_origins: &[String]) -> bool {
+    let origins: Vec<&str> = headers
+        .iter()
+        .filter(|(name, _)| name.eq_ignore_ascii_case("origin"))
+        .map(|(_, value)| value.trim())
+        .collect();
+    match origins.as_slice() {
+        [] => true,
+        [origin] => allowed_origins.iter().any(|allowed| allowed == origin),
+        _ => false,
+    }
 }
 
 struct Response {
