@@ -79,7 +79,17 @@ impl Server {
     }
 
     fn post(&self, body: &Value, method_header: &str, name: Option<&str>) -> (String, Value) {
-        self.post_with_origin(body, method_header, name, None)
+        self.post_with_version_and_origin(body, method_header, name, CURRENT_VERSION, None)
+    }
+
+    fn post_with_version(
+        &self,
+        body: &Value,
+        method_header: &str,
+        name: Option<&str>,
+        version: &str,
+    ) -> (String, Value) {
+        self.post_with_version_and_origin(body, method_header, name, version, None)
     }
 
     fn post_with_origin(
@@ -89,10 +99,21 @@ impl Server {
         name: Option<&str>,
         origin: Option<&str>,
     ) -> (String, Value) {
+        self.post_with_version_and_origin(body, method_header, name, CURRENT_VERSION, origin)
+    }
+
+    fn post_with_version_and_origin(
+        &self,
+        body: &Value,
+        method_header: &str,
+        name: Option<&str>,
+        version: &str,
+        origin: Option<&str>,
+    ) -> (String, Value) {
         let body = body.to_string();
         let mut request = format!(
             "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nAccept: application/json\r\n\
-Content-Type: application/json\r\nMCP-Protocol-Version: {CURRENT_VERSION}\r\n\
+Content-Type: application/json\r\nMCP-Protocol-Version: {version}\r\n\
 Mcp-Method: {method_header}\r\n"
         );
         if let Some(name) = name {
@@ -163,6 +184,26 @@ fn current_http_rejects_header_body_mismatch() {
         "params": {"_meta": current_meta()}
     });
     let (status, response) = server.post(&request, "resources/list", None);
+    assert_eq!(status, "HTTP/1.1 400 Bad Request");
+    assert_eq!(response.pointer("/error/code"), Some(&json!(-32020)));
+}
+
+#[test]
+fn current_http_rejects_legacy_header_with_current_body_metadata() {
+    let _guard = serial_http_test();
+    let server = Server::start("http-version-mismatch");
+    let request = json!({
+        "jsonrpc": "2.0",
+        "id": 11,
+        "method": "tools/list",
+        "params": {"_meta": current_meta()}
+    });
+    let (status, response) = server.post_with_version(
+        &request,
+        "tools/list",
+        None,
+        "2025-11-25",
+    );
     assert_eq!(status, "HTTP/1.1 400 Bad Request");
     assert_eq!(response.pointer("/error/code"), Some(&json!(-32020)));
 }
