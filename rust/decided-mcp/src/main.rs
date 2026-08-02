@@ -126,6 +126,9 @@ fn main() {
             usage_error(&msg);
         }
         let recorder = audit::build(&root, "http", &audit_config);
+        if let Some(recorder) = recorder.as_ref() {
+            audit::announce(recorder);
+        }
         http::serve_http(
             &root,
             state,
@@ -137,6 +140,9 @@ fn main() {
         );
     }
     let mut recorder = audit::build(&root, "stdio", &audit_config);
+    if let Some(recorder) = recorder.as_ref() {
+        audit::announce(recorder);
+    }
     serve(&root, &mut state, &mut recorder);
 }
 

@@ -28,6 +28,18 @@ impl Server {
     }
 
     fn start_with_origins(tag: &str, allowed_origins: &[&str]) -> Self {
+        Self::start_with_origins_and_files(tag, allowed_origins, &[])
+    }
+
+    fn start_with_files(tag: &str, files: &[(&str, &str)]) -> Self {
+        Self::start_with_origins_and_files(tag, &[], files)
+    }
+
+    fn start_with_origins_and_files(
+        tag: &str,
+        allowed_origins: &[&str],
+        files: &[(&str, &str)],
+    ) -> Self {
         let corpus = scratch(tag);
         let audit_path = corpus.join("audit.jsonl");
         std::fs::create_dir_all(corpus.join(".decided")).unwrap();
@@ -39,20 +51,28 @@ impl Server {
             ),
         )
         .unwrap();
+        for (name, contents) in files {
+            let path = corpus.join(name);
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).unwrap();
+            }
+            std::fs::write(path, contents).unwrap();
+        }
         let port = TcpListener::bind(("127.0.0.1", 0))
             .unwrap()
             .local_addr()
             .unwrap()
             .port();
         let mut args = vec![
-                "--root".to_string(),
-                corpus.to_str().unwrap().to_string(),
-                "--transport".to_string(),
-                "http".to_string(),
-                "--host".to_string(),
-                "127.0.0.1".to_string(),
-                "--port".to_string(),
-                port.to_string(),
+            "--root".to_string(),
+            corpus.to_str().unwrap().to_string(),
+            "--no-cache".to_string(),
+            "--transport".to_string(),
+            "http".to_string(),
+            "--host".to_string(),
+            "127.0.0.1".to_string(),
+            "--port".to_string(),
+            port.to_string(),
         ];
         for origin in allowed_origins {
             args.push("--allowed-origin".to_string());
@@ -110,6 +130,42 @@ impl Server {
         version: &str,
         origin: Option<&str>,
     ) -> (String, Value) {
+        self.post_with_version_origin_headers(
+            body,
+            method_header,
+            name,
+            version,
+            origin,
+            &[],
+        )
+    }
+
+    fn post_with_principal_headers(
+        &self,
+        body: &Value,
+        method_header: &str,
+        name: Option<&str>,
+        headers: &[(&str, &str)],
+    ) -> (String, Value) {
+        self.post_with_version_origin_headers(
+            body,
+            method_header,
+            name,
+            CURRENT_VERSION,
+            None,
+            headers,
+        )
+    }
+
+    fn post_with_version_origin_headers(
+        &self,
+        body: &Value,
+        method_header: &str,
+        name: Option<&str>,
+        version: &str,
+        origin: Option<&str>,
+        extra_headers: &[(&str, &str)],
+    ) -> (String, Value) {
         let body = body.to_string();
         let mut request = format!(
             "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nAccept: application/json\r\n\
@@ -121,6 +177,9 @@ Mcp-Method: {method_header}\r\n"
         }
         if let Some(origin) = origin {
             request.push_str(&format!("Origin: {origin}\r\n"));
+        }
+        for (key, value) in extra_headers {
+            request.push_str(&format!("{key}: {value}\r\n"));
         }
         request.push_str(&format!(
             "Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
@@ -144,6 +203,15 @@ Mcp-Method: {method_header}\r\n"
         let mut response = String::new();
         stream.read_to_string(&mut response).unwrap();
         response
+    }
+
+    fn audit_events(&self) -> Vec<Value> {
+        std::fs::read_to_string(self.corpus.join("audit.jsonl"))
+            .unwrap_or_default()
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .map(parse)
+            .collect()
     }
 }
 
@@ -352,4 +420,146 @@ fn current_http_allows_explicit_origin() {
         response.pointer("/result/supportedVersions/0"),
         Some(&json!(CURRENT_VERSION))
     );
+}
+
+fn tool_call(id: u64, name: &str, arguments: Value) -> Value {
+    json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "method": "tools/call",
+        "params": {
+            "name": name,
+            "arguments": arguments,
+            "_meta": current_meta()
+        }
+    })
+}
+
+#[test]
+fn http_audit_records_every_result_collection() {
+    let _guard = serial_http_test();
+    let server = Server::start_with_files(
+        "http-audit-collections",
+        &[(
+            "src/valid.md",
+            "---\nschema_version: 1\nid: RAC-111111111111\ntype: decision\n---\n\
+# Valid fixture\n\n## Status\n\nAccepted\n\n## Category\n\nTechnical\n\n## Context\n\nA valid fixture.\n\n\
+## Decision\n\nKeep scope explicit.\n\n\
+## Consequences\n\nThe audit is testable.\n\n\
+## Applies To\n\n- src/valid.md\n",
+        )],
+    );
+
+    let calls = [
+        ("get_artifact", json!({"id": "RAC-111111111111"})),
+        ("search_artifacts", json!({"query": "valid fixture"})),
+        ("retrieve_grounding", json!({"task": "valid fixture"})),
+        ("find_decisions", json!({"topic": "valid"})),
+        (
+            "find_decisions",
+            json!({"topic": "", "path": "src/valid.md"}),
+        ),
+        ("get_related", json!({"id": "RAC-111111111111"})),
+        ("get_summary", json!({})),
+    ];
+    for (index, (name, arguments)) in calls.iter().enumerate() {
+        let (status, _) = server.post_with_principal_headers(
+            &tool_call(index as u64 + 1, name, arguments.clone()),
+            "tools/call",
+            Some(name),
+            &[("X-Lore-Principal", "alice@example.com")],
+        );
+        assert_eq!(status, "HTTP/1.1 200 OK", "{name} request failed");
+    }
+
+    let events = server.audit_events();
+    assert_eq!(events.len(), calls.len());
+    for event in &events {
+        assert_eq!(event["principal"], json!("alice@example.com"));
+        assert_eq!(event["attribution"], json!("asserted"));
+        for record in event["returned"].as_array().unwrap() {
+            assert!(record["id"].is_string());
+            assert!(record["resolved"].is_boolean());
+            assert!(record["provenance"].is_object());
+            assert!(record["provenance"]["path"].is_string());
+            assert!(record.get("content").is_none());
+        }
+    }
+
+    let returned: Vec<Vec<String>> = events
+        .iter()
+        .map(|event| {
+            event["returned"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|record| record["id"].as_str().unwrap().to_string())
+                .collect()
+        })
+        .collect();
+    assert!(returned[0].contains(&"RAC-111111111111".to_string()));
+    assert!(returned[1].contains(&"RAC-111111111111".to_string()));
+    assert!(returned[2].contains(&"RAC-111111111111".to_string()));
+    assert!(returned[3].contains(&"RAC-111111111111".to_string()));
+    assert!(returned[4].contains(&"RAC-111111111111".to_string()));
+    assert!(returned[5].contains(&"RAC-111111111111".to_string()));
+    assert!(returned[6].is_empty());
+}
+
+#[test]
+fn http_principal_migration_is_explicit_and_response_independent() {
+    let _guard = serial_http_test();
+    let server = Server::start("http-principal-migration");
+    let request = tool_call(20, "get_summary", json!({}));
+
+    let (canonical_status, canonical) = server.post_with_principal_headers(
+        &request,
+        "tools/call",
+        Some("get_summary"),
+        &[("X-Lore-Principal", "alice@example.com")],
+    );
+    let (legacy_status, legacy) = server.post_with_principal_headers(
+        &request,
+        "tools/call",
+        Some("get_summary"),
+        &[("X-AsDecided-Principal", "bob@example.com")],
+    );
+    assert_eq!(canonical_status, "HTTP/1.1 200 OK");
+    assert_eq!(legacy_status, "HTTP/1.1 200 OK");
+    assert_eq!(canonical, legacy, "principal attribution must not authorize");
+
+    let (equal_status, _) = server.post_with_principal_headers(
+        &request,
+        "tools/call",
+        Some("get_summary"),
+        &[
+            ("X-Lore-Principal", "same@example.com"),
+            ("X-AsDecided-Principal", "same@example.com"),
+        ],
+    );
+    assert_eq!(equal_status, "HTTP/1.1 200 OK");
+
+    let (conflict_status, conflict) = server.post_with_principal_headers(
+        &request,
+        "tools/call",
+        Some("get_summary"),
+        &[
+            ("X-Lore-Principal", "alice@example.com"),
+            ("X-AsDecided-Principal", "bob@example.com"),
+        ],
+    );
+    assert_eq!(conflict_status, "HTTP/1.1 400 Bad Request");
+    assert_eq!(conflict["error"]["code"], json!(-32023));
+
+    let (duplicate_status, duplicate) = server.post_with_principal_headers(
+        &request,
+        "tools/call",
+        Some("get_summary"),
+        &[
+            ("X-Lore-Principal", "alice@example.com"),
+            ("X-Lore-Principal", "alice@example.com"),
+        ],
+    );
+    assert_eq!(duplicate_status, "HTTP/1.1 400 Bad Request");
+    assert_eq!(duplicate["error"]["code"], json!(-32023));
 }

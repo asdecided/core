@@ -65,7 +65,7 @@ Nothing about it is special to the engine. What makes it work is editorial:
 
 Operationally the org endpoint **is** a shared AsDecided server — follow
 [Operating a Shared AsDecided Server](shared-server.md) as written: the container,
-the authenticating proxy that overwrites `X-AsDecided-Principal`, the keep-current
+the authenticating proxy that overwrites `X-Lore-Principal`, the keep-current
 step, and wrapper-side observability. This page adds no serving machinery.
 
 ## 5. Wire the fleet

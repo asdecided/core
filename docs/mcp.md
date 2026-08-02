@@ -337,7 +337,7 @@ nothing at all — `decided telemetry status` will say so.
 ## 8. Read-access audit log (enterprise, opt-in)
 
 For regulated installs that must record *who consulted which decision, when, and
-which artifact IDs came back* — the audit trail telemetry deliberately does not
+which artifact references came back* — the audit trail telemetry deliberately does not
 keep — the server can append one JSON line per read-tool call to a local file
 ([ADR-084](https://github.com/asdecided/core/blob/main/decisions/decisions/adr-084-read-access-audit-recorder.md)).
 
@@ -345,7 +345,9 @@ It is **content-bearing by design and off by default**: with no `audit:` stanza
 nothing is written and responses are byte-identical to a server with no recorder.
 It is **local-only** — the engine never transmits it; shipping the log to a sink
 (Loki, S3, Elastic) is a separate collector's job. The log records the query and
-the returned artifact IDs, **never artifact bodies**.
+the returned artifact references, **never artifact bodies**. Each reference
+contains `id`, `resolved`, and a body-free `provenance.path` back into the
+served corpus (ADR-127).
 
 Enable it in `.decided/config.yaml` (committed and team-wide, so an auditor has one
 git-diffable artifact to point at):
@@ -366,7 +368,7 @@ audit:
 
 Each line records `ts`, a per-process `session`, the `principal`, the `transport`
 (`stdio` or `http`), the `attribution` (`asserted` or `local`), the `tool`, the
-`query`, the `returned` artifact IDs, `outcome`, and `duration_ms`. The
+`query`, the `returned` artifact references, `outcome`, and `duration_ms`. The
 **principal is attributable, not authenticated** (ADR-084): it defaults to the git
 `user.name`/`user.email` in the served repository and can be overridden with the
 `DECIDED_AUDIT_PRINCIPAL` environment variable. The enforced access boundary stays the
@@ -378,24 +380,28 @@ startup; it is never silent.
 
 On a shared HTTP endpoint (`--transport http`) one process serves the whole team,
 so a single construction-time principal would record every caller as the host.
-Each request instead asserts who it is with the **`X-AsDecided-Principal`** header, and
-the audit line records that per-request principal with `transport: http` and
+Each request instead asserts who it is with the canonical **`X-Lore-Principal`**
+header, and the audit line records that per-request principal with `transport: http` and
 `attribution: asserted`
 ([ADR-098](https://github.com/asdecided/core/blob/main/decisions/decisions/adr-098-shared-http-mcp-serving.md)):
 
 ```
-X-AsDecided-Principal: Alice Ng <alice@example.com>
+X-Lore-Principal: Alice Ng <alice@example.com>
 ```
 
 This stays **attribution, not authentication**: the engine records what the caller
 claimed and never verifies it, and the principal is never an access-control input —
 tool responses are identical whatever the header says. If you need the assertion to
-be trustworthy, your fronting proxy authenticates the caller and sets the header it
-trusts (ADR-085). A request that asserts nothing is recorded with `attribution:
-local`, and the shared server's fallback **skips the host's git identity** (it
-resolves `DECIDED_AUDIT_PRINCIPAL`, else `unattributed`) so a caller's read is never
-mislabelled as the host. Shared HTTP serving is also mandatory audit-on: it refuses
-to start without a working sink, and a sink write failure blocks the call.
+be trustworthy, your fronting proxy authenticates the caller and overwrites the
+header it trusts (ADR-085). `X-AsDecided-Principal` remains a migration alias;
+empty values are absent, duplicate carriers are rejected, and conflicting
+canonical/legacy values fail with HTTP 400 (`-32023`). A request that asserts
+nothing is recorded with `attribution: local`, and the shared server's fallback
+**skips the host's git identity** (it resolves `DECIDED_AUDIT_PRINCIPAL`, else
+`unattributed`) so a caller's read is never mislabelled as the host. Shared HTTP
+serving is also mandatory audit-on: it refuses to start without a working sink,
+and a sink write failure blocks the call. When enabled, startup announces the
+resolved path, recorded scope, transport, and write-failure mode on stderr.
 
 ## 9. Shared HTTP endpoint (team scale)
 

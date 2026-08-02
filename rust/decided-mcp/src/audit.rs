@@ -1,13 +1,13 @@
 //! Read-access audit recorder (ADR-084), ported for the HTTP transport
 //! (ADR-098's mandatory-audit-on). Mirrors `src/asdecided/mcp/audit.py`: one JSON
 //! line per read-tool call — who claimed to query, which tool, the query args
-//! (never content), the artifact IDs returned, the outcome — appended to the
-//! configured `.decided/config.yaml` audit sink.
+//! (never content), the body-free artifact references returned, the outcome —
+//! appended to the configured `.decided/config.yaml` audit sink.
 //!
 //! Default-absent for stdio (no `audit:` stanza ⇒ no recorder ⇒ byte-unchanged,
 //! ADR-084's strict superset). For HTTP the sink is mandatory and the recorder
 //! is *shared*: its construction-time principal skips the host git identity
-//! (per-call attribution rides `X-AsDecided-Principal`), and a write failure blocks
+//! (per-call attribution rides `X-Lore-Principal`), and a write failure blocks
 //! the call rather than serving un-recordable reads.
 //!
 //! Not a wire-parity surface (the log is a side file with non-deterministic
@@ -19,7 +19,7 @@ use std::path::PathBuf;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use rac_engine::pyjson::dumps_compact;
-use serde_json::{Map, Value};
+use serde_json::{json, Map, Value};
 
 const SCHEMA_VERSION: &str = "1";
 const CONFIG_DIR: &str = ".decided";
@@ -28,6 +28,10 @@ const AUDIT_FILENAME: &str = "audit.jsonl";
 const PATH_ENV: &str = "DECIDED_AUDIT_PATH";
 const PRINCIPAL_ENV: &str = "DECIDED_AUDIT_PRINCIPAL";
 const UNATTRIBUTED: &str = "unattributed";
+pub const CANONICAL_PRINCIPAL_HEADER: &str = "X-Lore-Principal";
+pub const LEGACY_PRINCIPAL_HEADER: &str = "X-AsDecided-Principal";
+const MAX_PRINCIPAL_BYTES: usize = 512;
+const AUDIT_SCOPE: &str = "MCP read tools";
 
 /// The `audit:` stanza (ADR-084): enabled, configured path, on-write-error mode.
 pub struct AuditConfig {
@@ -154,6 +158,50 @@ pub struct Recorder {
     warned: bool,
 }
 
+/// Resolve the shared HTTP attribution carrier.
+///
+/// `X-Lore-Principal` is canonical (ADR-098). The older
+/// `X-AsDecided-Principal` spelling remains a bounded migration alias so an
+/// already-deployed proxy does not silently lose attribution. Duplicate
+/// occurrences are rejected because accepting them would make intermediary
+/// header coalescing ambiguous. When both spellings are present, equal values
+/// resolve to the canonical value; different values are rejected.
+pub fn resolve_http_principal(headers: &[(String, String)]) -> Result<Option<String>, &'static str> {
+    let canonical = principal_values(headers, CANONICAL_PRINCIPAL_HEADER)?;
+    let legacy = principal_values(headers, LEGACY_PRINCIPAL_HEADER)?;
+    match (canonical, legacy) {
+        (None, None) => Ok(None),
+        (Some(value), None) | (None, Some(value)) => Ok(Some(value)),
+        (Some(canonical), Some(legacy)) if canonical == legacy => Ok(Some(canonical)),
+        (Some(_), Some(_)) => Err("canonical and legacy principal headers disagree"),
+    }
+}
+
+fn principal_values(
+    headers: &[(String, String)],
+    name: &str,
+) -> Result<Option<String>, &'static str> {
+    let values: Vec<&str> = headers
+        .iter()
+        .filter(|(key, _)| key.eq_ignore_ascii_case(name))
+        .map(|(_, value)| value.as_str())
+        .collect();
+    if values.len() > 1 {
+        return Err("duplicate principal header");
+    }
+    let Some(value) = values.first().copied() else {
+        return Ok(None);
+    };
+    let value = value.trim();
+    if value.is_empty() {
+        return Ok(None);
+    }
+    if value.len() > MAX_PRINCIPAL_BYTES || value.chars().any(char::is_control) {
+        return Err("malformed principal header");
+    }
+    Ok(Some(value.to_string()))
+}
+
 /// Build a recorder when audit is enabled, else None (default-absent path).
 /// `transport` shapes the shared-server posture: on `"http"` the recorder skips
 /// the host git identity and blocks on write failure (ADR-098).
@@ -200,6 +248,23 @@ impl Recorder {
     }
 }
 
+/// Announce an enabled recorder on stderr. Audit is deliberately explicit at
+/// startup: operators should see the sink, covered scope, and failure posture
+/// without having to infer them from a later JSONL line (ADR-084).
+pub fn announce(recorder: &Recorder) {
+    eprintln!("{}", activation_message(recorder));
+}
+
+fn activation_message(recorder: &Recorder) -> String {
+    format!(
+        "decided-mcp: audit enabled (path={}, scope={}, on_write_error={}, transport={}).",
+        recorder.path.display(),
+        AUDIT_SCOPE,
+        recorder.on_write_error,
+        recorder.transport,
+    )
+}
+
 /// Run `call`, record one audit event, and return the payload unchanged
 /// (ADR-084: audit is observability outside the response contract). With no
 /// recorder this is exactly `call()`. Under `on_write_error: block` a failed
@@ -223,7 +288,7 @@ pub fn observe(
         recorder,
         tool,
         args,
-        returned_ids(&payload),
+        returned_records(&payload),
         outcome(&payload),
         started,
         &principal,
@@ -244,7 +309,7 @@ fn build_event(
     recorder: &Recorder,
     tool: &str,
     args: Value,
-    returned: Vec<String>,
+    returned: Vec<Value>,
     outcome: &str,
     started: Instant,
     principal: &str,
@@ -262,7 +327,7 @@ fn build_event(
     );
     e.insert("tool".into(), Value::String(tool.into()));
     e.insert("query".into(), args);
-    e.insert("returned".into(), Value::Array(returned.into_iter().map(Value::String).collect()));
+    e.insert("returned".into(), Value::Array(returned));
     e.insert("outcome".into(), Value::String(outcome.into()));
     e.insert(
         "duration_ms".into(),
@@ -274,36 +339,67 @@ fn build_event(
 /// `"error"` when the payload is a structured error, else `"ok"` (ADR-034).
 fn outcome(payload: &str) -> &'static str {
     match serde_json::from_str::<Value>(payload) {
-        Ok(Value::Object(m)) if m.get("error").and_then(Value::as_str).is_some() => "error",
+        Ok(Value::Object(m)) if m.contains_key("error") => "error",
         _ => "ok",
     }
 }
 
-/// The resolved artifact IDs a call surfaced (IDs only, never bodies, ADR-084):
-/// the primary `id`, plus `matches`/`incoming`/`neighborhood` item ids; deduped.
-fn returned_ids(payload: &str) -> Vec<String> {
+/// The artifact identities a call surfaced, without artifact bodies (ADR-084).
+///
+/// The audit schema deliberately keeps a small reference rather than copying
+/// result records: `id` is the stable identity, `resolved` records the
+/// resolution state, and `provenance.path` points back into the served corpus.
+/// The extractor covers every result collection emitted by the MCP tools. Raw
+/// outgoing relationship text is intentionally excluded because it can be an
+/// unresolved declaration rather than a returned artifact.
+fn returned_records(payload: &str) -> Vec<Value> {
     let Ok(Value::Object(data)) = serde_json::from_str::<Value>(payload) else {
         return Vec::new();
     };
-    if data.get("error").and_then(Value::as_str).is_some() {
+    if data.contains_key("error") {
         return Vec::new();
     }
-    let mut ids = Vec::new();
-    if let Some(id) = data.get("id").and_then(Value::as_str) {
-        ids.push(id.to_string());
+    let mut records = Vec::new();
+    if let Some(record) = returned_record(&data) {
+        records.push(record);
     }
-    for key in ["matches", "incoming", "neighborhood"] {
+    for key in ["matches", "items", "decisions", "incoming", "neighborhood"] {
         if let Some(Value::Array(items)) = data.get(key) {
             for item in items {
-                if let Some(id) = item.get("id").and_then(Value::as_str) {
-                    ids.push(id.to_string());
+                if let Some(object) = item.as_object() {
+                    if let Some(record) = returned_record(object) {
+                        records.push(record);
+                    }
                 }
             }
         }
     }
     let mut seen = std::collections::HashSet::new();
-    ids.retain(|id| seen.insert(id.clone()));
-    ids
+    records.retain(|record| {
+        record
+            .get("id")
+            .and_then(Value::as_str)
+            .is_some_and(|id| seen.insert(id.to_string()))
+    });
+    records
+}
+
+fn returned_record(object: &Map<String, Value>) -> Option<Value> {
+    let id = object.get("id").and_then(Value::as_str)?;
+    let resolved = object
+        .get("resolved")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    let provenance = object
+        .get("path")
+        .and_then(Value::as_str)
+        .map(|path| json!({ "path": path }))
+        .unwrap_or(Value::Null);
+    Some(json!({
+        "id": id,
+        "resolved": resolved,
+        "provenance": provenance,
+    }))
 }
 
 fn token_hex(nbytes: usize) -> String {
@@ -355,4 +451,92 @@ fn civil_from_days(z0: i64) -> (i64, u32, u32) {
     let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
     let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
     (if m <= 2 { y + 1 } else { y }, m, d)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn canonical_principal_wins_equal_migration_alias() {
+        let headers = vec![
+            (CANONICAL_PRINCIPAL_HEADER.to_string(), "alice".to_string()),
+            (LEGACY_PRINCIPAL_HEADER.to_string(), " alice ".to_string()),
+        ];
+        assert_eq!(resolve_http_principal(&headers).unwrap().as_deref(), Some("alice"));
+    }
+
+    #[test]
+    fn conflicting_or_duplicate_principals_are_rejected() {
+        let conflict = vec![
+            (CANONICAL_PRINCIPAL_HEADER.to_string(), "alice".to_string()),
+            (LEGACY_PRINCIPAL_HEADER.to_string(), "bob".to_string()),
+        ];
+        assert_eq!(
+            resolve_http_principal(&conflict),
+            Err("canonical and legacy principal headers disagree")
+        );
+
+        let duplicate = vec![
+            (CANONICAL_PRINCIPAL_HEADER.to_string(), "alice".to_string()),
+            (CANONICAL_PRINCIPAL_HEADER.to_string(), "alice".to_string()),
+        ];
+        assert_eq!(resolve_http_principal(&duplicate), Err("duplicate principal header"));
+    }
+
+    #[test]
+    fn empty_and_malformed_principals_have_explicit_behaviour() {
+        let empty = vec![(CANONICAL_PRINCIPAL_HEADER.to_string(), "  ".to_string())];
+        assert_eq!(resolve_http_principal(&empty).unwrap(), None);
+
+        let malformed = vec![(CANONICAL_PRINCIPAL_HEADER.to_string(), "alice\nproxy".to_string())];
+        assert_eq!(resolve_http_principal(&malformed), Err("malformed principal header"));
+
+        let oversized = vec![(CANONICAL_PRINCIPAL_HEADER.to_string(), "a".repeat(513))];
+        assert_eq!(resolve_http_principal(&oversized), Err("malformed principal header"));
+    }
+
+    #[test]
+    fn returned_records_cover_every_result_collection_without_bodies() {
+        let payload = json!({
+            "id": "A",
+            "path": "a.md",
+            "content": "secret body",
+            "matches": [{"id": "B", "path": "b.md"}, {"id": "A", "path": "a.md"}],
+            "items": [{"id": "C", "path": "c.md", "resolved": false}],
+            "decisions": [{"id": "D", "path": "d.md"}],
+            "incoming": [{"id": "E", "path": "e.md"}],
+            "neighborhood": [{"id": "F", "path": "f.md"}],
+        })
+        .to_string();
+        assert_eq!(
+            returned_records(&payload),
+            vec![
+                json!({"id": "A", "resolved": true, "provenance": {"path": "a.md"}}),
+                json!({"id": "B", "resolved": true, "provenance": {"path": "b.md"}}),
+                json!({"id": "C", "resolved": false, "provenance": {"path": "c.md"}}),
+                json!({"id": "D", "resolved": true, "provenance": {"path": "d.md"}}),
+                json!({"id": "E", "resolved": true, "provenance": {"path": "e.md"}}),
+                json!({"id": "F", "resolved": true, "provenance": {"path": "f.md"}}),
+            ]
+        );
+        assert!(!returned_records(&payload).iter().any(|item| item.to_string().contains("secret")));
+        assert!(returned_records(r#"{"error":{"code":-1},"id":"A"}"#).is_empty());
+    }
+
+    #[test]
+    fn activation_message_declares_path_scope_and_failure_mode() {
+        let recorder = Recorder {
+            path: PathBuf::from("/tmp/audit.jsonl"),
+            principal: UNATTRIBUTED.to_string(),
+            on_write_error: "block".to_string(),
+            transport: "http",
+            session: "session".to_string(),
+            warned: false,
+        };
+        let message = activation_message(&recorder);
+        assert!(message.contains("path=/tmp/audit.jsonl"));
+        assert!(message.contains("scope=MCP read tools"));
+        assert!(message.contains("on_write_error=block"));
+    }
 }

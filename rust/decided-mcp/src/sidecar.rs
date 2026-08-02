@@ -5,12 +5,12 @@
 //! `on_write_error: block`, is out of scope for this port).
 //!
 //! This module is the documented seam: `observe` wraps every tool call the
-//! way the oracle's `telemetry.observe(audit.observe(...))` nesting does, and
-//! currently records nothing. A future port of the JSONL audit recorder
-//! (config-driven via `.decided/config.yaml`) or the opt-in telemetry log plugs
-//! in here without touching the protocol layer — the payload passes through
-//! unchanged by contract. The daily ping (consent + compiled-in key) is
-//! deliberately never implemented: a build without it stays wire-identical.
+//! way the oracle's `telemetry.observe(audit.observe(...))` nesting does. The
+//! JSONL audit recorder is implemented in `audit.rs` (config-driven via
+//! `.decided/config.yaml`); the opt-in telemetry log can still plug in here
+//! without touching the protocol layer — the payload passes through unchanged
+//! by contract. The daily ping (consent + compiled-in key) is deliberately
+//! never implemented: a build without it stays wire-identical.
 
 /// The no-op observation seam: time-and-record hooks would wrap `call` here.
 pub fn observe<F: FnOnce() -> String>(_tool: &str, call: F) -> String {

@@ -40,7 +40,7 @@ needs no proxy, and has no operational surface.
  agents ──TLS──▶  authenticating proxy  ──HTTP──▶  decided-mcp --transport http
                   (terminates TLS,                 (read-only, stateless,
                    authenticates the caller,        mandatory audit-on,
-                   sets X-AsDecided-Principal)           serves one main checkout)
+                   sets X-Lore-Principal)                 serves one main checkout)
                                                           ▲
                                         keep-current  ────┘
                                         (merge webhook or periodic git pull)
@@ -86,7 +86,8 @@ internet.
 The engine does not authenticate — by design
 ([ADR-085](https://github.com/asdecided/core/blob/main/decisions/decisions/adr-085-enterprise-configuration-not-mode.md)).
 Put a reverse proxy in front to terminate TLS, authenticate the caller, and
-assert the caller's identity to the audit log via the **`X-AsDecided-Principal`**
+assert the caller's identity to the audit log via the canonical
+**`X-Lore-Principal`**
 header. The engine records that header as the per-request principal
 ([ADR-098](https://github.com/asdecided/core/blob/main/decisions/decisions/adr-098-shared-http-mcp-serving.md)).
 
@@ -96,17 +97,19 @@ location /mcp {
     auth_request_set $principal $upstream_http_x_user; # identity it resolved
 
     # Overwrite the header from the *authenticated* identity. This also strips
-    # any client-supplied X-AsDecided-Principal, so a caller cannot forge another's
+    # any client-supplied X-Lore-Principal, so a caller cannot forge another's
     # identity in the audit log.
-    proxy_set_header X-AsDecided-Principal $principal;
+    proxy_set_header X-Lore-Principal $principal;
 
     proxy_pass http://lore:8000/mcp;
 }
 ```
 
 The critical line is the last `proxy_set_header`: the proxy must **overwrite**
-`X-AsDecided-Principal` with the identity it authenticated, never pass through a
-client-supplied value. Attribution in AsDecided is *attributable, not
+`X-Lore-Principal` with the identity it authenticated, never pass through a
+client-supplied value. `X-AsDecided-Principal` is accepted only as a bounded
+migration alias; duplicate or conflicting carriers are rejected. Attribution in
+AsDecided is *attributable, not
 authenticated* — the engine records what it is told and never verifies it, so
 the trust of the header is exactly the trust of the proxy that sets it. If you
 run the endpoint with no authenticating proxy, principals are self-asserted and

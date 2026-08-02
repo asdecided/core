@@ -381,7 +381,10 @@ bytes:
   `principal`: `DECIDED_AUDIT_PRINCIPAL` > `git config user.name/user.email`
   **run in the root dir** > `"unattributed"`. `query` echoes the audit args
   the wrapper builds (optional args ride only when supplied); `returned` is
-  the deduped ID list parsed back out of the payload. The audit **file** is
+  the deduped, body-free artifact-reference list parsed back out of the payload.
+  Every reference carries `id`, `resolved`, and `provenance.path`; the parser
+  considers the primary artifact plus `matches`, `items`, `decisions`, `incoming`,
+  and `neighborhood` collections and never records artifact bodies. The audit **file** is
   a side artifact — compare it structurally if at all, never byte-wise.
 - Telemetry: requires `--telemetry`; JSONL at
   `$XDG_STATE_HOME/rac/guide-telemetry.jsonl`; content-free; never wire-
