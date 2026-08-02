@@ -191,6 +191,29 @@ fn current_requests_require_client_capabilities_metadata() {
 }
 
 #[test]
+fn current_initialize_and_invalid_envelopes_use_current_validation() {
+    let initialize = json!({
+        "jsonrpc": "2.0",
+        "id": "initialize",
+        "method": "initialize",
+        "params": {"_meta": current_meta()}
+    });
+    let invalid = json!({
+        "jsonrpc": "1.0",
+        "id": {"object": true},
+        "method": "server/discover",
+        "params": {"_meta": current_meta()}
+    });
+    let frames = run_stdio(
+        "current-envelope",
+        &[initialize.to_string(), invalid.to_string()],
+    );
+    assert_eq!(parse(&frames[0]).pointer("/error/code"), Some(&json!(-32601)));
+    assert_eq!(parse(&frames[1]).pointer("/error/code"), Some(&json!(-32600)));
+    assert_eq!(parse(&frames[1]).pointer("/id"), Some(&json!(null)));
+}
+
+#[test]
 fn tool_schemas_are_json_schema_2020_12_compatible_and_local() {
     let list: serde_json::Value =
         serde_json::from_str(include_str!("../src/tools_list_result.json")).unwrap();

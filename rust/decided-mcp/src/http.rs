@@ -403,18 +403,14 @@ fn route_post(
             );
         }
     };
-    let Some(method) = message.get("method").and_then(Value::as_str) else {
-        return json_response(
-            "400 Bad Request",
-            "{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{\"code\":-32600,\
-\"message\":\"Invalid Request\"}}"
-                .to_string(),
-        );
-    };
-    let id_json = message
-        .get("id")
-        .and_then(|id| serde_json::to_string(id).ok())
-        .unwrap_or_else(|| "null".to_string());
+    let id_json = protocol::request_id_json(&message);
+    if let Err(frame) = protocol::validate_request_envelope(&message, &id_json) {
+        return json_response("400 Bad Request", frame);
+    }
+    let method = message
+        .get("method")
+        .and_then(Value::as_str)
+        .expect("envelope validator requires a method");
     let era = match http_era(req, &message, &id_json) {
         Ok(era) => era,
         Err(response) => return response,

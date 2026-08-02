@@ -35,8 +35,49 @@ pub fn requested_version(message: &Value) -> Option<&str> {
         .and_then(Value::as_str)
 }
 
+/// Return a request ID only when it is safe to echo under JSON-RPC. Invalid
+/// IDs are represented as `null` in the invalid-request response rather than
+/// reflecting an object, array, boolean, or null value back to the client.
+pub fn request_id_json(message: &Value) -> String {
+    message
+        .get("id")
+        .filter(|id| valid_request_id(id))
+        .and_then(|id| serde_json::to_string(id).ok())
+        .unwrap_or_else(|| "null".to_string())
+}
+
+/// Validate the JSON-RPC request envelope before either protocol era dispatches
+/// it. Both transports share this gate so current and legacy tools cannot
+/// accidentally accept a non-2.0 envelope or a non-scalar request ID.
+pub fn validate_request_envelope(message: &Value, id_json: &str) -> Result<(), String> {
+    let Some(object) = message.as_object() else {
+        return Err(invalid_request_frame(id_json));
+    };
+    if object.get("jsonrpc").and_then(Value::as_str) != Some("2.0") {
+        return Err(invalid_request_frame(id_json));
+    }
+    if object.get("method").and_then(Value::as_str).is_none() {
+        return Err(invalid_request_frame(id_json));
+    }
+    if let Some(id) = object.get("id") {
+        if !valid_request_id(id) {
+            return Err(invalid_request_frame("null"));
+        }
+    }
+    if let Some(params) = object.get("params") {
+        if !params.is_object() && !params.is_array() {
+            return Err(invalid_request_frame(id_json));
+        }
+    }
+    Ok(())
+}
+
+fn valid_request_id(id: &Value) -> bool {
+    id.is_string() || id.as_i64().is_some() || id.as_u64().is_some()
+}
+
 pub fn era_for_stdio(method: &str, message: &Value) -> Result<Era, String> {
-    if method == "initialize" {
+    if method == "initialize" && requested_version(message) != Some(CURRENT_PROTOCOL_VERSION) {
         return Ok(Era::Legacy);
     }
     match requested_version(message) {
@@ -226,6 +267,10 @@ fn invalid_params_frame(id_json: &str, detail: &str) -> String {
     error_frame(id_json, -32602, "Invalid params", json!({ "detail": detail }))
 }
 
+pub fn invalid_request_frame(id_json: &str) -> String {
+    error_frame(id_json, -32600, "Invalid Request", Value::Null)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -245,6 +290,22 @@ mod tests {
             }
         });
         assert_eq!(era_for_stdio("tools/list", &request), Ok(Era::Current));
+    }
+
+    #[test]
+    fn current_initialize_is_not_treated_as_legacy() {
+        let request = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "_meta": {
+                    PROTOCOL_VERSION_META_KEY: CURRENT_PROTOCOL_VERSION,
+                    CLIENT_CAPABILITIES_META_KEY: {}
+                }
+            }
+        });
+        assert_eq!(era_for_stdio("initialize", &request), Ok(Era::Current));
     }
 
     #[test]

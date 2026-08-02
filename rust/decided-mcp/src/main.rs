@@ -175,11 +175,18 @@ fn serve(
             out.flush().ok();
             continue;
         };
-        let id = message.get("id");
-        let Some(id) = id else {
+        let id_present = message.get("id").is_some();
+        let id_json = protocol::request_id_json(&message);
+        if let Err(frame) = protocol::validate_request_envelope(&message, &id_json) {
+            if id_present {
+                writeln!(out, "{frame}").ok();
+                out.flush().ok();
+            }
+            continue;
+        }
+        if !id_present {
             continue; // notification (e.g. notifications/initialized): no response
-        };
-        let id_json = serde_json::to_string(id).unwrap_or_else(|_| "null".to_string());
+        }
         // stdio has no per-request principal; attribution stays the recorder's
         // locally resolved identity (ADR-098).
         let era = match protocol::era_for_stdio(method, &message) {
