@@ -148,6 +148,25 @@ The `examples/guide/` corpus contains one requirement, decision, design, and
 roadmap for a fictional user management service — enough to explore all four
 tools.
 
+### Response budgets
+
+The native server caps each successful tool payload at 10,000 characters by
+default. Set a different startup budget for either transport with
+`--budget N` (the minimum is 128 characters):
+
+```bash
+decided-mcp --root /path/to/your/repo --budget 20000
+```
+
+The limit is measured on the JSON payload in `content[0].text`, not the outer
+JSON-RPC frame. Collection results are truncated deterministically at whole
+items and carry `truncated`, `omitted`, and `hint` fields. Artifact content
+and retrieval excerpts may be shortened by character prefix. If fixed fields
+alone cannot fit, the tool returns a small `response_budget_exceeded` error
+instead of an oversized success. `get_artifact` and `retrieve_grounding` also
+accept a positive per-call `budget` that can lower the startup value; values
+below 128 are rejected as a tool error.
+
 ## 4. Your first grounded question
 
 Once the server is connected, ask your agent:
@@ -412,7 +431,7 @@ server gains a streamable **HTTP transport** for exactly this
 ([ADR-098](https://github.com/asdecided/core/blob/main/decisions/decisions/adr-098-shared-http-mcp-serving.md)):
 
 ```bash
-decided-mcp --root /path/to/your/repo --transport http --host 127.0.0.1 --port 8000 --path /mcp
+decided-mcp --root /path/to/your/repo --transport http --host 127.0.0.1 --port 8000 --path /mcp --budget 10000
 ```
 
 - **`--transport`** — `stdio` (default) or `http`. Bare `decided-mcp` is unchanged,

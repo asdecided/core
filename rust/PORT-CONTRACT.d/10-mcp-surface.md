@@ -324,36 +324,33 @@ bytes:
 
 - Default budget **10,000 characters**, measured over the serialized
   **payload string** (`content[0].text`), *not* the wire frame (which is
-  ~2× + escaping). Configured only at server construction
-  (`build_server(budget=…)`); the stdio CLI has **no flag** — it is always
-  10,000. ORACLE-NEXT adds per-call `budget` args that may only *lower*
-  it: `effective = server if arg<=0 else min(server, arg)`.
-- Truncation is whole-item, from the tail, deterministic; marker fields are
-  appended (insertion order puts them last): `"truncated": true`,
-  `"omitted": <int>`, `"hint": "<pinned string>"`. `truncated` is **absent**
-  (never `false`) on complete responses. Pinned hints: `HINT_SEARCH`,
-  `HINT_RELATED`, `HINT_CONTENT`, `HINT_SUMMARY` in `budget.py`
-  (+ `HINT_RETRIEVE` = `"Lower top_k, raise the budget, or narrow the
-  task."` on NEXT).
-- Per-shape rule (first matching key wins — order matters):
-  `matches` → drop whole matches; `incoming` → drop whole incoming entries;
-  (NEXT: `items` → binary-search-trim the **last kept item's `excerpt`**
-  first, drop whole items only if an empty excerpt still doesn't fit;
-  `omitted` counts dropped whole items, a pure excerpt trim is
-  `truncated:true, omitted:0`); `content` → binary-search the largest
-  fitting prefix, `omitted` = characters dropped; anything else (summary) →
-  marker added, **nothing dropped**.
-- Verified wire consequences (live corpus, defaults):
-  - `get_artifact` on a >10k artifact → payload **exactly 10,000 chars**,
-    `omitted:14350`, `HINT_CONTENT`.
-  - `search_artifacts "telemetry"` → 9,950 chars, `omitted:15`.
-  - **`get_summary` CAN exceed the budget**: live-corpus payload is 24,346
-    chars with `truncated:true, omitted:0, HINT_SUMMARY` — marked, not cut.
-  - **`get_related` with `depth>1` CAN massively exceed the budget
-    (landmine):** the truncator only shrinks `incoming`; `neighborhood` is
-    not truncatable, so `depth:3` on ADR-001 served a 62,609-char payload
-    with `truncated:true, omitted:10, HINT_RELATED`. This is the oracle's
-    real behavior — port it bug-for-bug; do not "fix" it in the port.
+  ~2× + escaping). The native server accepts `--budget N` on both stdio and
+  HTTP; `N` must be at least **128**. The default remains 10,000 when the
+  flag is omitted.
+- ORACLE-NEXT per-call `budget` arguments may only lower the configured
+  server budget: `effective = server if arg<=0 else min(server, arg)`. A
+  positive per-call value below 128 is a tool error, never an oversized
+  successful response.
+- Truncation is deterministic and whole-item wherever a repeated collection
+  is involved. Marker fields are appended (insertion order puts them last):
+  `"truncated": true`, `"omitted": <int>`, `"hint": "<pinned string>"`.
+  `truncated` is **absent** (never `false`) on complete responses. Pinned
+  hints: `HINT_SEARCH`, `HINT_RELATED`, `HINT_CONTENT`, `HINT_SUMMARY`, and
+  `HINT_RETRIEVE`.
+- The serializer applies stable shape rules: `matches`, `incoming`,
+  `neighborhood`, `items`, `decisions`, `attention`, and outgoing relationship
+  targets are reduced from the tail as whole entries. Retrieve `items` may
+  first shorten the last kept `excerpt`; artifact `content` may be shortened
+  to the largest fitting prefix. Omitted counts include source overflow and
+  every dropped item; a pure excerpt/content reduction reports dropped
+  characters where the source shape supports it.
+- **Every successful payload string is at or below the configured budget.**
+  If fixed fields alone cannot fit, the server returns the small structured
+  error `{"error":"response_budget_exceeded", "hint":"..."}` (or its
+  shorter form at unusually small direct serializer limits), rather than an
+  oversized success. This replaces the historical summary and deep-
+  neighborhood overrun exceptions; the native engine does not preserve those
+  bugs for compatibility.
 - The budget serializer re-measures with `_dumps` (spaces included) — the
   10,000 counts those spaces.
 

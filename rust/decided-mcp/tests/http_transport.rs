@@ -40,6 +40,15 @@ impl Server {
         allowed_origins: &[&str],
         files: &[(&str, &str)],
     ) -> Self {
+        Self::start_with_origins_and_files_and_budget(tag, allowed_origins, files, 10_000)
+    }
+
+    fn start_with_origins_and_files_and_budget(
+        tag: &str,
+        allowed_origins: &[&str],
+        files: &[(&str, &str)],
+        budget: i64,
+    ) -> Self {
         let corpus = scratch(tag);
         let audit_path = corpus.join("audit.jsonl");
         std::fs::create_dir_all(corpus.join(".decided")).unwrap();
@@ -73,6 +82,8 @@ impl Server {
             "127.0.0.1".to_string(),
             "--port".to_string(),
             port.to_string(),
+            "--budget".to_string(),
+            budget.to_string(),
         ];
         for origin in allowed_origins {
             args.push("--allowed-origin".to_string());
@@ -334,6 +345,41 @@ fn current_http_tool_call_requires_name_and_returns_current_result() {
         response.pointer("/result/resultType"),
         Some(&json!("complete"))
     );
+}
+
+#[test]
+fn http_caps_large_artifact_payload_to_configured_budget() {
+    let _guard = serial_http_test();
+    let artifact = format!(
+        "---\nschema_version: 1\nid: RAC-111111111111\ntype: decision\n---\n# HTTP budget fixture\n\n## Status\n\nAccepted\n\n## Context\n\n{}\n\n## Decision\n\nKeep the response bounded.\n\n## Consequences\n\nThe caller can request the source file for the remainder.\n",
+        "large-context ".repeat(2_000)
+    );
+    let server = Server::start_with_origins_and_files_and_budget(
+        "http-budget",
+        &[],
+        &[("large.md", artifact.as_str())],
+        512,
+    );
+    let request = json!({
+        "jsonrpc": "2.0",
+        "id": 41,
+        "method": "tools/call",
+        "params": {
+            "name": "get_artifact",
+            "arguments": {"id": "RAC-111111111111"},
+            "_meta": current_meta()
+        }
+    });
+    let (status, response) = server.post(&request, "tools/call", Some("get_artifact"));
+    assert_eq!(status, "HTTP/1.1 200 OK");
+    let text = response
+        .pointer("/result/content/0/text")
+        .and_then(Value::as_str)
+        .expect("tool text");
+    assert!(text.chars().count() <= 512, "{} characters", text.chars().count());
+    let payload: Value = serde_json::from_str(text).expect("serialized payload");
+    assert_eq!(payload["truncated"], json!(true));
+    assert!(payload["omitted"].as_i64().unwrap_or(0) > 0);
 }
 
 #[test]
