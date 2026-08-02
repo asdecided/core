@@ -209,6 +209,22 @@ fn current_http_rejects_legacy_header_with_current_body_metadata() {
 }
 
 #[test]
+fn current_http_rejects_invalid_jsonrpc_envelope() {
+    let _guard = serial_http_test();
+    let server = Server::start("http-envelope");
+    let request = json!({
+        "jsonrpc": "1.0",
+        "id": {"object": true},
+        "method": "server/discover",
+        "params": {"_meta": current_meta()}
+    });
+    let (status, response) = server.post(&request, "server/discover", None);
+    assert_eq!(status, "HTTP/1.1 400 Bad Request");
+    assert_eq!(response.pointer("/error/code"), Some(&json!(-32600)));
+    assert_eq!(response.pointer("/id"), Some(&json!(null)));
+}
+
+#[test]
 fn current_http_unknown_rpc_uses_404_and_method_not_found() {
     let _guard = serial_http_test();
     let server = Server::start("http-unknown");
