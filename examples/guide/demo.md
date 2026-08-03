@@ -1,4 +1,4 @@
-# RAC Guide — grounding demo
+# AsDecided — grounding demo
 
 This demo proves one claim:
 
@@ -6,7 +6,7 @@ This demo proves one claim:
 > agent violates.
 
 It runs the same coding task twice against the same client — once with no MCP
-server, once with RAC Guide connected — and shows the behavioural difference.
+server, once with AsDecided connected — and shows the behavioural difference.
 A stranger can reproduce it from this file alone.
 
 The demo is specified by `decisions/designs/guide-grounding-demo.md` and implements
@@ -49,17 +49,17 @@ obvious thing, not a trap.
 
 ## Run 1 — ungrounded (no MCP server)
 
-**Setup.** A clean Claude Code session with **no** RAC Guide server configured.
+**Setup.** A clean Claude Code session with **no** AsDecided server configured.
 If you have previously added it, remove it for this run:
 
 ```bash
-claude mcp remove lore
+claude mcp remove asdecided
 ```
 
 Confirm it is gone:
 
 ```bash
-claude mcp list        # lore must not appear
+claude mcp list        # asdecided must not appear
 ```
 
 **Run.** From `examples/guide/task/`, start Claude Code and paste the task
@@ -84,14 +84,14 @@ never had the decision in front of it, so it could not honour it.
 
 ## Configure the client (between runs)
 
-Add RAC Guide to Claude Code, pointed at the demo corpus. This is the exact
+Add AsDecided to Claude Code, pointed at the demo corpus. This is the exact
 config block from the README Guide section and `docs/mcp.md`; only `--root`
 changes to the demo corpus.
 
 **Command form:**
 
 ```bash
-claude mcp add lore -- decided-mcp --root /absolute/path/to/examples/guide
+claude mcp add asdecided -- decided-mcp --root /absolute/path/to/examples/guide
 ```
 
 **`.mcp.json` form** (in the project root):
@@ -110,17 +110,18 @@ claude mcp add lore -- decided-mcp --root /absolute/path/to/examples/guide
 Confirm the server is connected before Run 2:
 
 ```bash
-claude mcp list        # lore must appear
+claude mcp list        # asdecided must appear
 ```
 
-In a Claude Code session, `/mcp` should list `lore` with its four tools:
-`get_summary`, `search_artifacts`, `get_artifact`, `get_related`.
+In a Claude Code session, `/mcp` should list `asdecided` with its six tools:
+`get_summary`, `search_artifacts`, `retrieve_grounding`, `get_artifact`,
+`get_related`, `find_decisions`.
 
 ---
 
-## Run 2 — grounded (RAC Guide connected)
+## Run 2 — grounded (AsDecided connected)
 
-**Setup.** A fresh Claude Code session with `lore` connected (above),
+**Setup.** A fresh Claude Code session with `asdecided` connected (above),
 started from `examples/guide/task/`.
 
 **Run.** Paste the **same** task prompt. Do not change a word; do not mention
@@ -185,7 +186,7 @@ asserted from a single run.
   **identifier** — `ADR-001` or `GUIDE-KTW9YBDWDBFM`. Naming only the topic
   ("there's a soft-delete policy") does **not** count.
 - **Re-run trigger:** the measurement is re-run before release and after **any**
-  change to the four tool descriptions (the design contract in
+  change to the six tool descriptions (the design contract in
   `decisions/designs/guide-tool-surface.md`). A miss feeds back into description text,
   never into the prompt.
 
@@ -196,7 +197,7 @@ for the release. It is intentionally blank here — these numbers must come from
 real runs, not be pre-filled.
 
 ```text
-RAC Guide grounding measurement
+AsDecided grounding measurement
 -------------------------------
 Date:               <YYYY-MM-DD>
 Client:             Claude Code <version>
@@ -233,8 +234,8 @@ visible. Shot order per `decisions/designs/guide-grounding-demo.md`:
 2. **Ungrounded violation (compressed)** — Run 1: the agent produces the hard
    `DELETE FROM users`. Trim the agent's thinking; keep the resulting diff
    visible.
-3. **The config block** — show adding `lore` (the `claude mcp add` line or
-   the `.mcp.json` block), then `/mcp` listing the four tools.
+3. **The config block** — show adding `asdecided` (the `claude mcp add` line or
+   the `.mcp.json` block), then `/mcp` listing the six tools.
 4. **Grounded run** — Run 2: show the `search_artifacts` tool call and its
    result, and the agent's response **citing `ADR-001` / `GUIDE-KTW9YBDWDBFM`**.
    The tool call and the citation must both be on screen.

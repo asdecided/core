@@ -1,10 +1,10 @@
-# The `lore` MCP server as an Omnigent tool.
-# Add this `lore` entry under the `tools:` section of your Omnigent custom
+# The `asdecided` MCP server as an Omnigent tool.
+# Add this `asdecided` entry under the `tools:` section of your Omnigent custom
 # agent's config.yaml. Omnigent runs the command as an MCP server and exposes
 # its read-only tools to whichever harness the agent is bound to. Use an
 # absolute path for --root if the agent runs from a different working directory.
 tools:
-  lore:
+  asdecided:
     type: mcp
     command: decided-mcp
     args: ["--root", "."]

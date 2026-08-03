@@ -39,7 +39,8 @@ Before completing any 0.x.n release, answer each question below.
 - Are adjacent artifact types tested against each other?
 - Are incomplete-but-recognizable artifacts tested?
 - Are CLI human and JSON outputs tested?
-- Was pytest run before commit?
+- Was the relevant Rust test battery run before commit (normally
+  `cargo test --workspace --release`)?
 
 ## Output
 

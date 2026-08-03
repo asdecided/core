@@ -3,14 +3,14 @@ schema_version: 1
 id: RAC-KV2J371GG7K7
 type: prompt
 ---
-# RAC Module Simplification Refactor Contract
+# AsDecided Module Simplification Refactor Contract
 
 ## Objective
 
-Reduce implementation complexity in a target RAC module without changing
+Reduce implementation complexity in a target AsDecided module without changing
 user-facing behavior.
 
-RAC has grown quickly through roadmap-led implementation, and some modules
+AsDecided has grown quickly through roadmap-led implementation, and some modules
 now risk accumulating additive paths faster than they are simplified. This
 prompt is for behavior-preserving module simplification.
 
@@ -21,7 +21,7 @@ prompt is for behavior-preserving module simplification.
 
 ## Instructions
 
-We are simplifying the Python modules in `requirements-as-code`.
+We are simplifying the native Rust modules in `rust/`.
 
 Before editing:
 

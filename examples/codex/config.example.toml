@@ -1,6 +1,6 @@
-# The `lore` MCP server for OpenAI Codex.
+# The `asdecided` MCP server for OpenAI Codex.
 # Add this to ~/.codex/config.toml (global) or .codex/config.toml (trusted
 # project). Use an absolute path for --root in the global file.
-[mcp_servers.lore]
+[mcp_servers.asdecided]
 command = "decided-mcp"
 args = ["--root", "."]

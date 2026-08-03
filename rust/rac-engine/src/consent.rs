@@ -5,7 +5,9 @@
 //! consent, loading never raises, and saving tolerates filesystem trouble
 //! silently. The install id is random (`secrets.token_hex(16)`), minted at
 //! opt-in and preserved across off-and-on toggles; the enterprise hard-lock
-//! (ADR-086) forces the ping off and refuses opt-in until unlocked.
+//! (ADR-086) records a forced-off choice and refuses opt-in until unlocked.
+//! The native engine has no sender (ADR-131), so this state is local
+//! compatibility data only.
 //!
 //! Loading mirrors CPython's coercions field-by-field: `bool(value)` truth
 //! semantics for the flags and `str(value)` (including `str(None) == "None"`
@@ -23,11 +25,10 @@ use crate::pycompat::py_float_repr;
 use crate::pyjson;
 use crate::walk::normalize_root;
 
-/// The PostHog public write key (ADR-041) — inert here; emptying it is the
-/// kill switch that makes `telemetry on`/`status` print the not-configured
-/// notes. The reference build embeds a non-empty key, so those lines are
-/// absent from every captured oracle run.
-pub const POSTHOG_API_KEY: &str = "phc_whK4Ndn7Pae3ZtgNRJWswiafYEyPc9d3eVoFihxzDysZ";
+/// ADR-131 retires the native PostHog sender. Keep the symbol as an explicit
+/// empty kill switch for compatibility with the consent/status contract; no
+/// network client or sender exists in this build.
+pub const POSTHOG_API_KEY: &str = "";
 
 const CONSENT_FILENAME: &str = "telemetry.json";
 
@@ -284,10 +285,8 @@ pub fn consent_status() -> ConsentStatus {
         install_id: consent.install_id,
         consented_at: consent.consented_at,
         path: consent_path(),
-        // `bool(POSTHOG_API_KEY)` — compile-time non-empty by construction;
-        // the const expression IS the oracle's semantics (the empty-key
-        // kill switch), so the lint is silenced rather than the check
-        // restructured.
+        // Keep the status field deterministic for existing JSON consumers;
+        // ADR-131 makes the native build explicitly unconfigured.
         #[allow(clippy::const_is_empty)]
         endpoint_configured: !POSTHOG_API_KEY.is_empty(),
         enterprise_locked: consent.enterprise_locked,

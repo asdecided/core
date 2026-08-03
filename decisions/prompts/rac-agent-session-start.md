@@ -3,25 +3,25 @@ schema_version: 1
 id: RAC-KV2J31Z1EV4T
 type: prompt
 ---
-# RAC Agent Session Start
+# AsDecided Agent Session Start
 
 ## Objective
 
-Establish the working frame for an agent session on RAC, so changes stay
+Establish the working frame for an agent session on AsDecided, so changes stay
 correctly scoped, respect recorded decisions, and pass the corpus gates
 before they are pushed.
 
-RAC is a Python CLI for requirements-as-code. It models product-management
-Markdown artifacts as deterministic, typed artifacts. Current artifact
-families include Requirements, Decisions, Roadmaps, Prompts, and Design.
+AsDecided is a native Rust CLI and MCP server. It models requirements,
+decisions, roadmaps, prompts, and designs as deterministic, typed Markdown
+artifacts served from the repository that owns them.
 
 ## Input
 
-- The RAC repository and its corpus under `rac/` — requirements, decisions
+- The AsDecided repository and its corpus under `decisions/` — requirements, decisions
   (ADRs), roadmaps, prompts, and designs.
 - The roadmap item relevant to the task, and the ADRs it touches.
-- The `lore` MCP tools when available in the session; without them, the
-  same knowledge via the `rac` CLI (`find`, `resolve`, `relationships`).
+- The AsDecided MCP tools when available in the session; without them, the
+  same knowledge via the `decided` CLI (`find`, `resolve`, `relationships`).
 
 ## Instructions
 
@@ -36,9 +36,9 @@ families include Requirements, Decisions, Roadmaps, Prompts, and Design.
 - Keep classification separate from validation.
 - Invalid but recognizable artifacts may still classify as their artifact type, then fail validation.
 - Durable thinking lives in the corpus, not in ephemeral tool scratch space.
-  Record plans, designs, and decisions as RAC artifacts under `rac/` — a
+  Record plans, designs, and decisions as AsDecided artifacts under `decisions/` — a
   Design for the *how*, a Roadmap for the *what/why* (a non-versioned
-  `rac/roadmaps/future/` item when unscheduled), an ADR for a decision —
+  `decisions/roadmaps/future/` item when unscheduled), an ADR for a decision —
   where the gates validate them. A tool's plan or scratch file is working
   memory only; it has no authority and does not persist.
 
@@ -51,7 +51,7 @@ families include Requirements, Decisions, Roadmaps, Prompts, and Design.
 5. Produce an implementation contract.
 6. Wait for approval.
 
-### Grounding (when the `lore` MCP tools are available in your session)
+### Grounding (when the AsDecided MCP tools are available in your session)
 
 - Call `get_summary` once at session start to learn what recorded
   knowledge exists.
@@ -62,14 +62,14 @@ families include Requirements, Decisions, Roadmaps, Prompts, and Design.
 - Cite decisions by ID. If a task conflicts with a recorded decision,
   say so and stop — do not silently override it.
 
-Without the tools, the same knowledge lives under `rac/`; use the `rac` CLI
+Without the tools, the same knowledge lives under `decisions/`; use the `decided` CLI
 (`find`, `resolve`, `relationships`) instead.
 
 ### Testing
 
 - Add negative boundary tests for each new artifact type.
 - Test that adjacent artifact types do not misclassify as each other.
-- Run pytest before commit.
+- Run the relevant Rust tests before commit, normally `cargo test --workspace --release`.
 
 ## Output
 
@@ -88,9 +88,9 @@ After a GitHub merge, refresh local main; prune merged branches when asked.
 
 Before pushing:
 
-- `rac validate rac/` and `rac relationships rac/ --validate` exit 0.
-- `rac review rac/` reports no priority 1-2 findings.
-- Commits follow `rac/prompts/rac-agent-commit-guidelines.md`: format,
+- `decided validate decisions/` and `decided relationships decisions/ --validate` exit 0.
+- `decided review decisions/` reports no priority 1-2 findings.
+- Commits follow `decisions/prompts/rac-agent-commit-guidelines.md`: format,
   maintainer identity on author and committer, no tool attribution.
 
 ## Related Decisions

@@ -27,19 +27,19 @@ Writes `AGENTS.md` at the repo root, in a managed block (your own content is
 preserved). Codex discovers it from the project root; re-run the export when
 decisions change (`decided export decisions/ --agent-rules --check` fails CI on drift).
 
-## 2. Add the `lore` MCP server (the pull)
+## 2. Add the `asdecided` MCP server (the pull)
 
 Either use the CLI:
 
 ```bash
-codex mcp add lore -- decided-mcp --root .
+codex mcp add asdecided -- decided-mcp --root .
 ```
 
-…or add a `[mcp_servers.lore]` table to Codex's `config.toml` (a sample is in
+…or add a `[mcp_servers.asdecided]` table to Codex's `config.toml` (a sample is in
 [`config.example.toml`](config.example.toml)):
 
 ```toml
-[mcp_servers.lore]
+[mcp_servers.asdecided]
 command = "decided-mcp"
 args = ["--root", "."]
 ```
@@ -50,8 +50,8 @@ args = ["--root", "."]
   *trusted* projects; some Codex surfaces only load the global file, so if the
   server does not appear, fall back to `~/.codex/config.toml`.
 
-This exposes the five read-only `lore` tools (`get_summary`, `search_artifacts`,
-`get_artifact`, `get_related`, `find_decisions`). The server re-reads the corpus
+This exposes the six read-only `asdecided` tools (`get_summary`, `search_artifacts`,
+`retrieve_grounding`, `get_artifact`, `get_related`, `find_decisions`). The server re-reads the corpus
 on every call and never writes to the repo.
 
 ## 3. Enforcement is separate, and Codex-agnostic
@@ -67,7 +67,7 @@ CI gate, which keeps Codex's loop untouched and adds no latency.
 ## Verify it
 
 Run the bundled grounding demo — same task twice, once unconnected and once with
-`lore` connected — and watch the connected run respect a recorded decision the
+`asdecided` connected — and watch the connected run respect a recorded decision the
 unconnected run violates: [`examples/guide/`](../guide/demo.md).
 
 ## Summary
@@ -75,5 +75,5 @@ unconnected run violates: [`examples/guide/`](../guide/demo.md).
 | Surface | Command | What Codex does with it |
 | --- | --- | --- |
 | `AGENTS.md` | `decided export decisions/ --agent-rules` | Reads it as project instructions |
-| `lore` MCP | `codex mcp add lore -- decided-mcp --root .` | Calls `find_decisions` / `get_related` on demand |
+| `asdecided` MCP | `codex mcp add asdecided -- decided-mcp --root .` | Calls `find_decisions` / `get_related` on demand |
 | CI gate | `decided validate` · `decided relationships --validate` | Enforces on every PR |

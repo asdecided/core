@@ -1,6 +1,6 @@
 # Validation: overrides & SARIF
 
-`decided validate` is RAC's write-time gate: it fails when any artifact carries an
+`decided validate` is AsDecided's write-time gate: it fails when any artifact carries an
 error-severity finding, and (over a directory) when the corpus is not a
 conformant OKF v0.2 bundle. Two features make that gate adoptable in CI on a
 real, pre-existing repository.
@@ -20,7 +20,7 @@ Beyond structure, `decided validate` lints each type against the standards it ci
 | `roadmap-no-advancement-link` | warning | A roadmap should link a `## Related Requirements` or `## Related Decisions` it advances. |
 
 The BCP-14 error is the only gate-breaker; the rest are warnings, and all are
-overridable below. (RAC's own corpus predates these checks and disables them in
+overridable below. (AsDecided's own corpus predates these checks and disables them in
 its `.decided/config.yaml` — the warnings-first path in action.)
 
 ## Severity overrides (warnings-first onboarding)
@@ -147,7 +147,7 @@ fail the check; warnings — including findings downgraded in `.decided/config.y
 annotate without failing, so a legacy repo can adopt the gate green on day one and
 tighten over time.
 
-> **Extensibility boundary.** RAC's built-in artifact types and relationship
+> **Extensibility boundary.** AsDecided's built-in artifact types and relationship
 > edges are the supported surface, defined in code. Custom artifact types and
 > custom relationship edges are deferred (ADR-052, ADR-055); a repo-local schema
 > registry is a future, separately recorded decision.

@@ -858,16 +858,16 @@ artifacts — existing output is overwritten.
 decided export decisions/                      # viewer JSON to stdout
 decided export decisions/ --documents          # JSONL, one record per artifact
 decided export decisions/ --graph              # typed node+edge graph
-decided export decisions/ --html --out lore.html
+decided export decisions/ --html --out asdecided.html
 ```
 
 ### Exporting to external memory / RAG / graph backends
 
-`--documents` and `--graph` exist to feed RAC's recorded decisions into the tools
+`--documents` and `--graph` exist to feed AsDecided's recorded decisions into the tools
 teams already run, so an agent can recall fuzzily there and then **verify in
 AsDecided**. They are additive (ADR-007): the default viewer JSON is unchanged, and
 nothing here computes embeddings — that stays in the consuming backend (ADR-002,
-ADR-066). The connectors themselves live in the separate `lore-connectors`
+ADR-066). The connectors themselves live in the separate `asdecided-connectors`
 companion, one module per backend rather than a repo per provider (ADR-073).
 
 **What it exports to, by name.** The shapes are deliberately the common
@@ -883,7 +883,7 @@ ingestion denominators, so most targets need no bespoke code:
 - **`--graph` (one node+edge JSON object)** — graph / GraphRAG backends
   (**Neo4j**, **Zep Graphiti**, **Cognee**, **Microsoft GraphRAG**). Nodes are
   `{id, type, status, title}`; edges carry the real relationship kind
-  (`supersedes`, `related_*`) and direction, so the backend gets RAC's validated
+  (`supersedes`, `related_*`) and direction, so the backend gets AsDecided's validated
   decision graph instead of one inferred from prose.
 
 **How the answer is then validated (verify-in-AsDecided).** The backend gives
@@ -1118,30 +1118,30 @@ default. `--json` and `--share` are mutually exclusive.
 
 ## telemetry
 
-Show or change anonymous usage-sharing consent (ADR-041). With consent on,
-the native CLI sends at most one anonymous daily ping — a random install id, the
-version, and an active-repo count; never paths, queries, or repository
-content. Sharing is independent of MCP serving; `decided-mcp` never sends
-product telemetry.
+Show or change the local usage-sharing preference (ADR-131). The native
+engine records this preference for compatibility with the local usage
+read-back commands, but it has no outbound telemetry sender, endpoint, or
+network side channel. `decided-mcp` never sends product telemetry.
 
 ```bash
-decided telemetry                          # status (default): what is shared, and whether sending is possible
-decided telemetry on                       # opt in; mints a random install id
-decided telemetry off                      # opt out; nothing else changes
-decided telemetry off --enterprise         # hard-lock the ping off (forces the kill state, refuses 'on')
+decided telemetry                            # status (default): local preference and consent file
+decided telemetry on                         # record local opt-in; mints a random install id
+decided telemetry off                        # record local opt-out
+decided telemetry off --enterprise           # hard-lock sharing off for regulated installs
 decided telemetry off --enterprise --unlock  # remove the enterprise hard-lock
 ```
 
-`status` also reports when the build has no endpoint key configured — in
-that state nothing is sent even with consent. Consent lives at
-`~/.config/decisions/telemetry.json`.
+Consent lives at `~/.config/decisions/telemetry.json`. `status` reports that
+the native endpoint is not configured: opting in does not send anything.
+Explicit `decided usage --share` and `decided mcp-stats --share` URLs remain
+user-reviewed, manual sharing paths.
 
 **Enterprise hard-lock (ADR-086).** For regulated installs that must *prove* the
-ping is off, `decided telemetry off --enterprise` forces the kill state at runtime
-(independent of the build's endpoint key), records a persistent lock, and refuses
-`decided telemetry on` until it is removed with `decided telemetry off --enterprise
---unlock`. While locked, `status` reports `Sharing: locked (enterprise)`. The lock
-governs the anonymous ping only.
+sharing is off, `decided telemetry off --enterprise` records a persistent lock
+and refuses `decided telemetry on` until it is removed with `decided telemetry
+off --enterprise --unlock`. While locked, `status` reports
+`Sharing: locked (enterprise)`. ADR-131 makes this an explicit local state
+control; there is no native sender to disable.
 
 - **Exit codes:** `0` consent shown or changed · `2` invalid action, or `on`
   refused while enterprise-locked
@@ -1253,13 +1253,13 @@ configuration, not artifact meaning — it never dictates folder structure.
   is unchanged. A parent-corpus line is added once corpus federation ships
   (ADR-089); until then the enterprise profile is hollow on it.
 - **`--org-endpoint URL`** wires the shared **org AsDecided endpoint** (ADR-117): it
-  ensures a `lore-org` entry — `{"type": "http", "url": URL}` — under
+  ensures an `asdecided-org` entry — `{"type": "http", "url": URL}` — under
   `mcpServers` in `.mcp.json` and `.cursor/mcp.json`. Unlike a profile, org
   wiring is an explicit operator action, so it also applies to an
   **already-initialized** repository: it merges into an existing file, touches
-  only the `lore-org` key, never removes what you wrote, and a re-run with the
+  only the `asdecided-org` key, never removes what you wrote, and a re-run with the
   same URL writes nothing. The URL must start with `http://` or `https://`.
-  Composes with `--profile` (local `lore` and `lore-org` side by side). See
+  Composes with `--profile` (local `asdecided` and `asdecided-org` side by side). See
   [Org Grounding](org-grounding.md).
 - **Exit codes:** `0` initialized, or already initialized with the same key
   (idempotent) · `1` a different key is already established (never silently
@@ -1277,7 +1277,7 @@ decided init
 decided init --key PROJ
 decided init --key ACME --ticketing jira
 decided init --key ACME --profile enterprise
-decided init --org-endpoint https://lore.example.com/mcp
+decided init --org-endpoint https://asdecided.example.com/mcp
 decided init docs/ --json
 ```
 

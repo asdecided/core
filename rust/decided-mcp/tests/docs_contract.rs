@@ -135,3 +135,134 @@ fn guide_documents_the_native_surface_and_starts_the_example_server() {
     http.wait().expect("reap HTTP smoke server");
     fs::remove_dir_all(http_root).expect("remove HTTP smoke corpus");
 }
+
+#[test]
+fn public_docs_and_recipes_do_not_reintroduce_retired_surfaces() {
+    let root = repo_root();
+    let surfaces = [
+        "docs/mcp.md",
+        "docs/cli.md",
+        "docs/index.md",
+        "docs/security.md",
+        "docs/quickstart.md",
+        "docs/integration-recipes.md",
+        "docs/ecosystem.md",
+        "docs/governance.md",
+        "docs/relationships.md",
+        "examples/_recipe-template/README.md",
+        "examples/amp/README.md",
+        "examples/claude-code/README.md",
+        "examples/cline/README.md",
+        "examples/codex/README.md",
+        "examples/copilot/README.md",
+        "examples/cursor/README.md",
+        "examples/guide/demo.md",
+        "examples/obey-demo/README.md",
+        "examples/omnigent/README.md",
+        "examples/opencode/README.md",
+        "examples/windsurf/README.md",
+        "examples/zed/README.md",
+    ];
+    let banned = [
+        "--telemetry",
+        "daily ping",
+        "PostHog",
+        "2026.6.1",
+        "MIT license",
+        "mcp_servers.lore",
+        "mcpServers.lore",
+        "examples/guide/rac",
+        ".rac/",
+    ];
+    for relative in surfaces {
+        let path = root.join(relative);
+        let text = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("read public contract surface {relative}: {error}"));
+        for needle in banned {
+            assert!(
+                !text.contains(needle),
+                "{relative} reintroduces retired surface {needle:?}"
+            );
+        }
+    }
+
+    let index = fs::read_to_string(root.join("docs/index.md")).expect("read docs index");
+    assert!(index.contains("Apache-2.0 license"));
+    assert!(index.contains("tree/main/decisions"));
+
+    let mcp = fs::read_to_string(root.join(".mcp.json")).expect("read project MCP config");
+    let mcp: Value = serde_json::from_str(&mcp).expect("project MCP config is JSON");
+    let server = mcp
+        .pointer("/mcpServers/asdecided")
+        .expect("project MCP config has the canonical server key");
+    assert_eq!(
+        server.get("command").and_then(Value::as_str),
+        Some("decided-mcp")
+    );
+    assert_eq!(
+        server.get("args").and_then(Value::as_array),
+        Some(&vec![
+            Value::String("--root".into()),
+            Value::String(".".into())
+        ])
+    );
+    assert!(mcp.pointer("/mcpServers/lore").is_none());
+
+    for relative in [
+        "CLAUDE.md",
+        "AGENTS.md",
+        ".github/copilot-instructions.md",
+        ".cursor/rules",
+    ] {
+        let text = fs::read_to_string(root.join(relative)).expect("read generated agent rules");
+        if relative == "CLAUDE.md" {
+            assert!(
+                text.contains("decisions/prompts"),
+                "{relative} has stale prompt paths"
+            );
+        }
+        assert!(
+            text.contains("AsDecided MCP tools"),
+            "{relative} has stale MCP branding"
+        );
+        assert!(
+            !text.contains("rac/prompts"),
+            "{relative} has retired prompt paths"
+        );
+        assert!(
+            !text.contains("rac/roadmaps"),
+            "{relative} has retired roadmap paths"
+        );
+        assert!(
+            !text.contains("rac/decisions"),
+            "{relative} has retired decision paths"
+        );
+    }
+
+    for relative in [
+        "docs/integration-recipes.md",
+        "examples/_recipe-template/README.md",
+        "examples/amp/README.md",
+        "examples/claude-code/README.md",
+        "examples/cline/README.md",
+        "examples/codex/README.md",
+        "examples/copilot/README.md",
+        "examples/cursor/README.md",
+        "examples/guide/demo.md",
+        "examples/obey-demo/README.md",
+        "examples/omnigent/README.md",
+        "examples/opencode/README.md",
+        "examples/windsurf/README.md",
+        "examples/zed/README.md",
+    ] {
+        let text = fs::read_to_string(root.join(relative)).expect("read MCP recipe");
+        assert!(
+            text.contains("retrieve_grounding"),
+            "{relative} omits retrieve_grounding"
+        );
+        assert!(
+            text.contains("decided-mcp"),
+            "{relative} omits the native server command"
+        );
+    }
+}

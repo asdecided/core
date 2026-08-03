@@ -1892,8 +1892,8 @@ fn handle_share_answer(answer: &str) -> Option<&'static str> {
     if share_answer_is_yes(answer) {
         crate::consent::opt_in();
         Some(
-            "Sharing on \u{2014} one anonymous daily ping. 'decided telemetry status' \
-             shows exactly what; 'decided telemetry off' stops it.",
+            "Sharing preference recorded locally. This native build has no outbound \
+             telemetry sender; 'decided telemetry status' shows the local state.",
         )
     } else {
         crate::consent::decline();
@@ -2198,18 +2198,18 @@ pub fn cmd_telemetry(args: &TelemetryArgs) -> i32 {
             );
         }
         let record = crate::consent::opt_in();
-        emit(format!("Sharing on. Install id: {}", record.install_id));
+        emit(format!(
+            "Sharing preference recorded locally. Install id: {}",
+            record.install_id
+        ));
         emit(
-            "One anonymous daily ping: install id, decided version, active-repo count. \
-             Never paths, queries, or content (ADR-041)."
+            "This native build has no outbound telemetry sender; nothing is sent. \
+             Local usage read-back and explicit share URLs remain available (ADR-131)."
                 .to_string(),
         );
-        // `if not consent.POSTHOG_API_KEY:` — the compiled-in key is the
-        // kill switch; the reference build's key is non-empty, so this
-        // line is absent from every captured run.
         #[allow(clippy::const_is_empty)]
         if crate::consent::POSTHOG_API_KEY.is_empty() {
-            emit("Note: this build has no PostHog key configured; nothing will be sent.".to_string());
+            emit("Endpoint key: not configured — nothing is sent.".to_string());
         }
     } else if args.action == "off" {
         if args.enterprise && args.unlock {
@@ -2222,7 +2222,7 @@ pub fn cmd_telemetry(args: &TelemetryArgs) -> i32 {
         } else if args.enterprise {
             crate::consent::enterprise_lock();
             emit(
-                "Sharing off and enterprise-locked. The daily ping is forced off \
+                "Sharing off and enterprise-locked. Outbound sharing is disabled \
                  and cannot be re-enabled until unlocked with \
                  'decided telemetry off --enterprise --unlock' (ADR-086)."
                     .to_string(),
@@ -2262,14 +2262,14 @@ pub fn cmd_telemetry(args: &TelemetryArgs) -> i32 {
         emit(format!("Consent file: {}", status.path));
         if status.enterprise_locked {
             emit(
-                "Enterprise lock: on \u{2014} the daily ping is forced off. Remove with \
+                "Enterprise lock: on \u{2014} outbound sharing is disabled. Remove with \
                  'decided telemetry off --enterprise --unlock' (ADR-086)."
                     .to_string(),
             );
         } else if status.sharing {
             emit(
-                "Shared daily: install id, decided version, active-repo count. \
-                 Never paths, queries, or content (ADR-041)."
+                "Local sharing preference: enabled. This native build has no outbound \
+                 telemetry sender; no paths, queries, or content leave the machine (ADR-131)."
                     .to_string(),
             );
         }

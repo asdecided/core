@@ -227,7 +227,7 @@ fn render_managed_block(entries: &[AgentRulesEntry], digest: &str) -> String {
         "## Settled decisions (AsDecided)".to_string(),
         String::new(),
         "These decisions are already accepted. Do not re-open or contradict them; \
-         ask the `lore` MCP tools (`get_artifact`, `search_artifacts`) for the \
+         ask the AsDecided MCP tools (`get_artifact`, `search_artifacts`) for the \
          full text before proposing a change that touches one."
             .to_string(),
         String::new(),

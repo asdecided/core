@@ -1,7 +1,7 @@
 # RAC with Cursor
 
 [Cursor](https://cursor.com) consumes RAC on two surfaces — a generated context
-file Cursor reads, and the `lore` MCP server it connects to. A stranger can
+file Cursor reads, and the `asdecided` MCP server it connects to. A stranger can
 reproduce this from the file alone.
 
 ## Prerequisites
@@ -32,7 +32,7 @@ This writes several agent-context files, two of which Cursor reads:
 The managed block keeps your own content intact; re-run on change
 (`decided export decisions/ --agent-rules --check` fails CI on drift).
 
-## 2. The `lore` MCP server (the pull)
+## 2. The `asdecided` MCP server (the pull)
 
 Add `.cursor/mcp.json` in the repo root (project-scoped; a sample is in
 [`mcp.example.json`](mcp.example.json)):
@@ -48,9 +48,9 @@ Add `.cursor/mcp.json` in the repo root (project-scoped; a sample is in
 - **Project:** `.cursor/mcp.json` (commit it to share with the team).
 - **Global:** `~/.cursor/mcp.json` — use an absolute `--root` path.
 
-Enable the server in Cursor's MCP settings if prompted. It exposes the five
-read-only `lore` tools (`get_summary`, `search_artifacts`, `get_artifact`,
-`get_related`, `find_decisions`); the server re-reads the corpus on every call
+Enable the server in Cursor's MCP settings if prompted. It exposes the six
+read-only `asdecided` tools (`get_summary`, `search_artifacts`, `retrieve_grounding`,
+`get_artifact`, `get_related`, `find_decisions`); the server re-reads the corpus on every call
 and never writes to the repo.
 
 ## 3. Enforcement is separate, and Cursor-agnostic
@@ -64,7 +64,7 @@ Claude-Code-specific — see [`examples/claude-code/`](../claude-code/README.md)
 ## Verify it
 
 Run the bundled grounding demo — same task twice, once unconnected and once with
-`lore` connected — and watch the connected run respect a recorded decision the
+`asdecided` connected — and watch the connected run respect a recorded decision the
 unconnected run violates: [`examples/guide/`](../guide/demo.md).
 
 ## Summary
@@ -72,5 +72,5 @@ unconnected run violates: [`examples/guide/`](../guide/demo.md).
 | Surface | Command | What Cursor does with it |
 | --- | --- | --- |
 | `AGENTS.md` | `decided export decisions/ --agent-rules` | Reads it as project instructions |
-| `lore` MCP | `.cursor/mcp.json` → `decided-mcp --root .` | Calls `find_decisions` / `get_related` on demand |
+| `asdecided` MCP | `.cursor/mcp.json` → `decided-mcp --root .` | Calls `find_decisions` / `get_related` on demand |
 | CI gate | `decided validate` · `decided relationships --validate` | Enforces on every PR |

@@ -11,8 +11,9 @@ brew install asdecided/tap/asdecided-core
 ```
 
 No Python runtime or extra is needed. The server is read-only and has no
-network side channel; optional anonymous product sharing is configured
-separately with `decided telemetry` and does not change MCP responses.
+network side channel. The native `decided telemetry` command records local
+compatibility state only; it has no sender and does not change MCP responses
+(ADR-131).
 
 ## Protocol compatibility
 

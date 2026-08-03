@@ -1,5 +1,5 @@
-# The same `lore` server invocation as the JSON and YAML dialects, in TOML.
+# The same `asdecided` server invocation as the JSON and YAML dialects, in TOML.
 # Some harnesses (e.g. OpenAI Codex) namespace MCP servers under `mcp_servers`.
-[mcp_servers.lore]
+[mcp_servers.asdecided]
 command = "decided-mcp"
 args = ["--root", "."]

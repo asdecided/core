@@ -270,7 +270,7 @@ pub fn load_repository_config(start_dir: &str) -> Result<Option<RepositoryConfig
 // Init profiles (decided.services.profiles, ADR-088)
 // ---------------------------------------------------------------------------
 
-/// The lore MCP server wiring, identical for Claude Code (`.mcp.json`) and
+/// The AsDecided MCP server wiring, identical for Claude Code (`.mcp.json`) and
 /// Cursor (`.cursor/mcp.json`).
 pub const MCP_JSON: &str = "{\n  \"mcpServers\": {\n    \"asdecided\": {\n      \"command\": \"decided-mcp\",\n      \"args\": [\"--root\", \".\"]\n    }\n  }\n}\n";
 
@@ -321,12 +321,12 @@ fn write_mcp_configs(directory: &str) -> std::io::Result<Vec<String>> {
 }
 
 /// The shared org endpoint's server name in client configs (ADR-117).
-const ORG_SERVER_KEY: &str = "lore-org";
+const ORG_SERVER_KEY: &str = "asdecided-org";
 
 fn invalid_org_endpoint(url: &str) -> ScaffoldError {
     ScaffoldError::InvalidOrgEndpoint(format!(
         "invalid org endpoint: {} (expected an http:// or https:// URL, \
-         e.g. https://lore.example.com/mcp)",
+         e.g. https://asdecided.example.com/mcp)",
         py_repr_str(url)
     ))
 }
@@ -337,7 +337,7 @@ fn malformed_client_config(config_path: &str, reason: &str) -> ScaffoldError {
     ))
 }
 
-/// The `lore-org` streamable-HTTP server entry for `url` (ADR-117),
+/// The `asdecided-org` streamable-HTTP server entry for `url` (ADR-117),
 /// insertion-ordered like the oracle's dict literal.
 fn org_server_entry(url: &str) -> serde_json::Value {
     let mut entry = serde_json::Map::new();
@@ -346,9 +346,9 @@ fn org_server_entry(url: &str) -> serde_json::Value {
     serde_json::Value::Object(entry)
 }
 
-/// `write_org_endpoint(directory, url)` — ensure the `lore-org` entry in
+/// `write_org_endpoint(directory, url)` — ensure the `asdecided-org` entry in
 /// each client config (profiles.write_org_endpoint, ADR-117): merge into an
-/// existing file touching only the `lore-org` key, create absent files,
+/// existing file touching only the `asdecided-org` key, create absent files,
 /// skip files already carrying the exact entry, and parse every target
 /// before writing any (no partial writes). `serde_json`'s `preserve_order`
 /// keeps user key order exactly as the oracle's `dict` does.

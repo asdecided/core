@@ -23,8 +23,9 @@ written, repeatable recipe for producing it yourself.
    through human PR review, the trust boundary (ADR-065). This obey-demo reuses
    that reviewed corpus rather than minting a second one; the code task it acts
    on is `examples/guide/task/`.
-2. **The agent** — a real coding agent wired to **exactly** the four read-only
-   AsDecided tools (`get_summary`, `search_artifacts`, `get_artifact`, `get_related`)
+2. **The agent** — a real coding agent wired to **exactly** the six read-only
+   AsDecided tools (`get_summary`, `search_artifacts`, `retrieve_grounding`,
+   `get_artifact`, `get_related`, `find_decisions`)
    and nothing that can issue a verdict. The headline client is Claude Code.
 3. **The prompt** — one verbatim request for the change the ADR forbids
    (a hard delete), recorded with the capture:
@@ -42,7 +43,7 @@ Point the AsDecided MCP server at the demo corpus. Use an absolute path to
 **Command form (Claude Code):**
 
 ```bash
-claude mcp add lore -- decided-mcp --root /absolute/path/to/examples/guide
+claude mcp add asdecided -- decided-mcp --root /absolute/path/to/examples/guide
 ```
 
 **`.mcp.json` form** (in the project root you run the agent from):
@@ -58,13 +59,13 @@ claude mcp add lore -- decided-mcp --root /absolute/path/to/examples/guide
 }
 ```
 
-In the session, `/mcp` should list `lore` with its four tools. Do **not** add
+In the session, `/mcp` should list `asdecided` with its six tools. Do **not** add
 any hint about RAC, MCP, or which tool to call — the grounded behaviour must come
 from the tool descriptions alone (ADR-030, ADR-034).
 
 ## Replay
 
-1. Connect `lore` as above.
+1. Connect `asdecided` as above.
 2. Start the agent from inside `examples/guide/task/`.
 3. Paste the verbatim prompt. Change not a word.
 4. **Expected, grounded behaviour:** before writing code the agent calls

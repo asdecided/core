@@ -1,34 +1,41 @@
-# RAC — agent session context
+# AsDecided — agent session context
 
-This file is a router. Canonical agent guidance lives in `rac/prompts/`,
-where the RAC corpus gates validate it. Do not add rules here — add them
+This file is a router. Canonical agent guidance lives in `decisions/prompts/`,
+where the AsDecided corpus gates validate it. Do not add rules here — add them
 to the corpus artifact and they load through the imports below.
 
 ## Loaded every session
 
-@rac/prompts/rac-agent-session-start.md
-@rac/prompts/rac-agent-commit-guidelines.md
+@decisions/prompts/rac-agent-session-start.md
+@decisions/prompts/rac-agent-commit-guidelines.md
 
 ## Situational prompts — read when the task calls for it, do not import
 
-- Pull request preparation: `rac/prompts/rac-agent-pr-guidelines.md`
-- Minor release gate: `rac/prompts/rac-agent-release-gate-minor.md`
-- Major release gate: `rac/prompts/rac-agent-release-gate-major.md`
-- Refactoring and simplification: `rac/prompts/rac-agent-simplification-guidelines.md`
-- Context compression: `rac/prompts/rac-agent-compression.md`
+- Pull request preparation: `decisions/prompts/rac-agent-pr-guidelines.md`
+- Minor release gate: `decisions/prompts/rac-agent-release-gate-minor.md`
+- Major release gate: `decisions/prompts/rac-agent-release-gate-major.md`
+- Refactoring and simplification: `decisions/prompts/rac-agent-simplification-guidelines.md`
+- Context compression: `decisions/prompts/rac-agent-compression.md`
 
 ## Working corpus
 
-- Current series: `rac/roadmaps/v0.22.x-housekeeping/` (next up: v0.22.0)
-- Previous series: `rac/roadmaps/v0.21.x-editor/` (complete)
-- Decisions (ADRs): `rac/decisions/`
+- Current roadmap: `decisions/roadmaps/future/` (release execution is tracked in GitHub)
+- Historical roadmaps: `decisions/roadmaps/archive/`
+- Decisions (ADRs): `decisions/decisions/`
 
-<!-- BEGIN RAC MANAGED BLOCK (digest: 85425bcf952c265e10a1016ee63073a5ba3e17ec4c43f3ffb9aaca019c3f3562) -->
+<!-- BEGIN RAC MANAGED BLOCK (digest: 6c9d9989b5479ed3212cccbe56059da69911017e08ec753ff1d11712520752b1) -->
 <!-- Managed by `decided export --agent-rules`. Edit decisions in decisions/, not here; content outside this block is preserved. -->
 ## Settled decisions (AsDecided)
 
-These decisions are already accepted. Do not re-open or contradict them; ask the `lore` MCP tools (`get_artifact`, `search_artifacts`) for the full text before proposing a change that touches one.
+These decisions are already accepted. Do not re-open or contradict them; ask the AsDecided MCP tools (`get_artifact`, `search_artifacts`) for the full text before proposing a change that touches one.
 
+- **RAC-01K8P7A3M5QZ** — ADR-125: Distribute AsDecided as a Local Pilot App _(Architecture)_
+- **RAC-01K8Q7MCP407** — ADR-129: Confine Rename Writes to the Corpus Root _(Technical)_
+- **RAC-01K8Q7MCP408** — ADR-130: Transactional Rename Application _(Technical)_
+- **RAC-01K8Q7MCP411** — ADR-128: Hard MCP Response Budgets _(Technical)_
+- **RAC-01K8Q7MCP413** — ADR-127: Attributable MCP Audit Records _(Technical)_
+- **RAC-01K8Q7MCP431** — ADR-131: Native Telemetry Is Local-Only _(Product)_
+- **RAC-01K8Q7MCP432** — ADR-132: AsDecided MCP Server Identity _(Product)_
 - **RAC-KTQ63DPSMF19** — ADR-001 Markdown First
 - **RAC-KTQ63DPT6008** — ADR-002 AI Optional
 - **RAC-KTQ63DPVVB37** — ADR-003 Structured Outputs First
@@ -109,9 +116,14 @@ These decisions are already accepted. Do not re-open or contradict them; ask the
 - **RAC-KX04DH293JG8** — ADR-111: Revert to SemVer Release Versioning _(Process)_
 - **RAC-KX2WTHEMDEY0** — ADR-112: Cache On by Default, Stat-Proxy Freshness as the Floor _(Technical)_
 - **RAC-KX8GEA45HRBM** — ADR-113: Capture Writes Arrive Through a Sibling Surface, Not Guide _(Architecture)_
+- **RAC-KX9H2M7Q4V8C** — ADR-122: OKF v0.2 Is a Truthful Derived Carrier _(Architecture)_
+- **RAC-KXBD3T7Q9M2N** — ADR-123: Deterministic Decision-to-Code Enforcement _(Architecture)_
 - **RAC-KXE0M2QBF2MP** — ADR-114: Native Index Workspace Dependencies — memmap2 In, inotify Deferred _(Technical)_
 - **RAC-KXFK11FQDN1Y** — ADR-115: The Shared Artifact-Spec Registry Both Engines Read (ADR-063 Guard 1) _(Architecture)_
 - **RAC-KXGVR299XY5E** — ADR-116: The Native Rust Engine Is a Sanctioned Second Implementation Under Lockstep Guards _(Architecture)_
+- **RAC-KYVTHFQD44BP** — ADR-124: Publish the Native MCP Server Through OCI and the Official Registry _(Architecture)_
+- **RAC-KYYC7HBFMRBA** — ADR-126: Package the Native MCP Server for Docker's MCP Catalog _(Architecture)_
+- **RAC-MCP20260728A** — ADR-121: Dual-Era MCP Protocol Compatibility _(Architecture)_
 - **RAC-P55FRE5HNE55** — ADR-118: Native Event Freshness Acceleration
 - **RAC-P61BA5EDE7A0** — ADR-119: Base-Plus-Delta Serving Generations
 - **RAC-PYRE71RECER7** — ADR-120: Rust CI Uses Contract Fixtures and Live-Corpus Invariants

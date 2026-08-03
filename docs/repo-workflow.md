@@ -25,12 +25,12 @@ easy to read.
 
 ### Three documentation layers
 
-RAC's own repository separates concerns into three layers
+AsDecided's own repository separates concerns into three layers
 ([ADR-022](https://github.com/asdecided/core/blob/main/decisions/decisions/adr-022-documentation-boundaries.md)):
 
 - **`README.md`** — the front door: what RAC is and how to try it.
 - **`docs/`** — user-facing guides (this directory).
-- **`decisions/`** — RAC's internal, structured product knowledge.
+- **`decisions/`** — AsDecided's internal, structured product knowledge.
 
 `decisions/` is the corpus RAC manages; `docs/` is documentation *for people*. Keep them
 distinct: users shouldn't need to read internal roadmaps or ADRs to be productive.
