@@ -1,4 +1,4 @@
-//! decided-mcp — the Guide MCP server over stdio, a Rust port of `decided mcp`
+//! decided-mcp — the AsDecided MCP server over stdio
 //! (PORT-CONTRACT.d/10-mcp-surface.md is the binding wire contract).
 //!
 //! Framing: newline-delimited JSON-RPC, UTF-8, non-ASCII raw, no

@@ -8,8 +8,9 @@ Python runtime.
 ## No-egress boundary
 
 Validation, relationships, review, gate, search, and export operate on the
-local filesystem. Optional MCP usage telemetry remains consent-gated and
-content-free; regulated installations can hard-disable it with:
+local filesystem. The native MCP server emits no usage telemetry and has no
+network side channel. Optional product sharing is configured separately
+through the CLI; regulated installations can hard-disable it with:
 
 ```bash
 decided telemetry off --enterprise

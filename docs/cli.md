@@ -1046,20 +1046,26 @@ Explorer is retired and is not part of the native product.
 
 ## mcp
 
-Serve RAC repository knowledge to coding agents over MCP (stdio). The four
-read-only tools, client configuration, and team setup are documented in the
-[MCP server guide](mcp.md).
+Serve AsDecided repository knowledge to coding agents over MCP. The native
+server exposes six read-only tools; client configuration, response budgets,
+and team setup are documented in the [MCP server guide](mcp.md).
 
 ```bash
 decided-mcp --root /path/to/repo
-decided-mcp --root /path/to/repo --telemetry
+decided-mcp --root /path/to/repo \
+  --transport http --host 127.0.0.1 --port 8000 --path /mcp --budget 10000
 ```
 
 - **`--root PATH`** — repository root to serve (default: current directory)
-- **`--telemetry`** — record tool-call counts and metadata (never arguments
-  or content) to a local log under `$XDG_STATE_HOME/decisions/` (default
-  `~/.local/state/decisions/guide-telemetry.jsonl`); off by default, announced on
-  stderr when on
+- **`--transport {stdio,http}`** — MCP transport (default: `stdio`)
+- **`--host HOST`** — HTTP bind host (default: `127.0.0.1`)
+- **`--port PORT`** — HTTP bind port (default: `8000`)
+- **`--path PATH`** — HTTP endpoint path (default: `/mcp`)
+- **`--budget N`** — maximum response size in characters (minimum `128`)
+- **`--allowed-origin ORIGIN`** — allow an HTTP `Origin` header; repeat for
+  multiple origins
+- **`--cache` / `--no-cache`** — enable or disable the derived read-model cache
+  (cache is enabled by default and output-neutral)
 - **Exit codes:** `0` server shutdown on client disconnect · `2` `--root` is
   not a directory
 
@@ -1067,18 +1073,18 @@ decided-mcp --root /path/to/repo --telemetry
 
 ## mcp-stats
 
-Summarize the local Guide telemetry log: events, sessions, first and last
-timestamps, and per-tool calls, errors, truncation, and average duration.
-An empty or missing log is a valid answer — telemetry is opt-in and off by
-default.
+Read a local compatibility MCP usage log, if one exists: events, sessions,
+first and last timestamps, and per-tool calls, errors, truncation, and average
+duration. The native `decided-mcp` server does not write this log; an empty or
+missing log is therefore the normal answer for new installations.
 
 ```bash
-decided-mcp-stats           # human summary
-decided-mcp-stats --json    # the same summary as JSON (the shareable export)
-decided-mcp-stats --share   # prefilled GitHub usage-report issue URL
+decided mcp-stats           # human summary
+decided mcp-stats --json    # the same summary as JSON (the shareable export)
+decided mcp-stats --share   # prefilled GitHub usage-report issue URL
 ```
 
-`--share` prints a URL that opens a prefilled usage-report issue containing
+`decided mcp-stats --share` prints a URL that opens a prefilled usage-report issue containing
 only counts and timestamps; you review and submit it in your own browser —
 RAC sends nothing itself. `--json` and `--share` are mutually exclusive.
 
@@ -1089,16 +1095,16 @@ RAC sends nothing itself. `--json` and `--share` are mutually exclusive.
 
 ## usage
 
-Summarize recorded **CLI usage** alongside the Guide MCP tools — per-command and
-per-tool call counts, errors, session count, and a recent-activity trend. When
-sharing consent is recorded (`decided telemetry on`), each completed `rac` command
+Summarize recorded **CLI usage** alongside any compatibility MCP log —
+per-command and per-tool call counts, errors, session count, and a recent-activity trend. When
+sharing consent is recorded (`decided telemetry on`), each completed `decided` command
 appends one **content-free** event (subcommand name, outcome, duration — never
 argv, paths, or artifact ids) to a local log; `decided usage` reads it back.
-`decided-mcp-stats` stays Guide-only for back-compat; `decided usage` covers both logs
+`decided mcp-stats` remains a compatibility read-back; `decided usage` covers both logs
 (ADR-046).
 
 ```bash
-decided usage           # human summary of CLI + Guide usage
+decided usage           # human summary of CLI + MCP compatibility usage
 decided usage --json    # the same summary as JSON
 decided usage --share   # prefilled GitHub usage-report issue URL (counts only)
 ```
@@ -1113,9 +1119,10 @@ default. `--json` and `--share` are mutually exclusive.
 ## telemetry
 
 Show or change anonymous usage-sharing consent (ADR-041). With consent on,
-`decided-mcp` sends at most one anonymous daily ping — a random install id, the
+the native CLI sends at most one anonymous daily ping — a random install id, the
 version, and an active-repo count; never paths, queries, or repository
-content. Sharing is independent of the local `decided-mcp --telemetry` flag.
+content. Sharing is independent of MCP serving; `decided-mcp` never sends
+product telemetry.
 
 ```bash
 decided telemetry                          # status (default): what is shared, and whether sending is possible
@@ -1510,7 +1517,7 @@ decided decisions-for rust/Cargo.toml decisions/ --json
 ```
 
 The same lookup is available to agents over MCP as an additive optional `path`
-argument on the `find_decisions` tool (the five-tool surface is unchanged);
+argument on the `find_decisions` tool (the six-tool surface is unchanged);
 `find_decisions` called with a `topic` is byte-identical to before.
 
 ### Herald rendering

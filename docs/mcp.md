@@ -1,4 +1,4 @@
-# AsDecided Guide — MCP Server
+# AsDecided MCP Server
 
 AsDecided MCP serves your repository's requirements,
 decisions, designs, and roadmaps to coding agents as callable tools. It ships
@@ -10,7 +10,9 @@ as the native `decided-mcp` binary.
 brew install asdecided/tap/asdecided-core
 ```
 
-No Python runtime or extra is needed.
+No Python runtime or extra is needed. The server is read-only and has no
+network side channel; optional anonymous product sharing is configured
+separately with `decided telemetry` and does not change MCP responses.
 
 ## Protocol compatibility
 
@@ -123,7 +125,7 @@ harness Omnigent routes to. A worked setup — including pointing the agent's
 
 <!-- TODO: verify against Omnigent <version> before release -->
 
-## 3. Point Guide at a repository
+## 3. Point AsDecided at a repository
 
 `--root` accepts any directory. It does not have to be the top of a Git
 repository — point it at the folder where your RAC Markdown artifacts live.
@@ -137,7 +139,7 @@ decided index /path/to/your/repo
 That should list your artifacts. If it shows nothing, run
 `decided init /path/to/your/repo` to initialize the repository.
 
-To try Guide against a ready-made corpus before using your own, point `--root`
+To try AsDecided against a ready-made corpus before using your own, point `--root`
 at the included examples:
 
 ```bash
@@ -145,7 +147,7 @@ decided-mcp --root examples/guide
 ```
 
 The `examples/guide/` corpus contains one requirement, decision, design, and
-roadmap for a fictional user management service — enough to explore all four
+roadmap for a fictional user management service — enough to explore all six
 tools.
 
 ### Response budgets
@@ -180,12 +182,14 @@ and cite the decision ID in its response.
 If you are pointing at your own repository, substitute a topic you know
 a decision covers.
 
-## 5. The four tools
+## 5. The six tools
 
 | Tool | When the agent calls it |
 |---|---|
 | `get_summary` | Once at session start — counts artifacts, flags health issues |
-| `search_artifacts` | Before designing or implementing anything that a recorded decision might cover |
+| `search_artifacts` | Before designing or implementing anything that a recorded decision might cover — keyword search across the corpus |
+| `retrieve_grounding` | For one-call task grounding, optionally scoped to a path, with ranked excerpts and provenance |
+| `find_decisions` | To find live decisions by topic or the decisions whose declared scope governs a code path |
 | `get_artifact` | When an artifact ID appears, or before changing anything a decision covers |
 | `get_related` | After retrieving an artifact — finds what else the change could affect |
 
@@ -245,7 +249,7 @@ Canonical agent guidance lives in `decisions/prompts/` as validated RAC artifact
 Claude Code inlines the referenced artifact at session start, so the effect is
 identical to pasting the text — but the guidance is now a governed artifact:
 `decided validate` checks it in CI, it is versioned and diffable like any other
-decision, and Guide itself can serve it (`get_artifact` retrieves your usage
+decision, and AsDecided itself can serve it (`get_artifact` retrieves your usage
 instructions — the system is self-describing).
 
 Two caveats:
@@ -256,108 +260,11 @@ Two caveats:
   carry the same pointer in their native convention (for example
   `.cursor/rules`); the prompt artifact remains the single source of truth.
 
-## 7. Telemetry (opt-in)
-
-Guide records nothing by default. If you want to see whether it is actually
-being used — and help decide where Guide investment goes — opt in with an
-explicit flag in your client's server configuration:
-
-```json
-{
-  "mcpServers": {
-    "asdecided": {
-      "command": "decided-mcp",
-      "args": ["--root", "/path/to/repo", "--telemetry"]
-    }
-  }
-}
-```
-
-When enabled, each tool call appends one JSON line to a local log
-(`~/.local/state/decisions/guide-telemetry.jsonl`, or under `$XDG_STATE_HOME`):
-
-```json
-{"schema_version": "1", "ts": "2026-06-12T14:03:22.512Z", "session": "a3f29c1b",
- "tool": "search_artifacts", "outcome": "ok", "duration_ms": 12, "truncated": false}
-```
-
-What is recorded: timestamp, a random per-session id, the tool name, whether
-the call succeeded, how long it took, and whether the response was truncated.
-What is **never** recorded: tool arguments, artifact IDs, search queries,
-file paths, or any repository content. The server announces the log path on
-stderr at startup, so enablement is never silent.
-
-Read the log back any time:
-
-```bash
-decided-mcp-stats          # human summary: events, sessions, per-tool usage
-decided-mcp-stats --json   # the same summary as JSON — this is the export
-```
-
-If you want to share your usage with the project (early reports directly
-shape Guide's roadmap):
-
-```bash
-decided-mcp-stats --share
-```
-
-This prints a prefilled GitHub issue URL. Open it, review the report — counts
-and timestamps only — and submit it with your own account. RAC never sends
-anything anywhere; building a URL is string formatting, and transmission
-belongs to you and your browser. Submitted reports are public issues.
-
-### Share anonymously (optional)
-
-If you'd rather contribute a signal without writing anything, opt in to an
-anonymous daily ping:
-
-```bash
-decided telemetry on       # opt in (decided init also asks once, on a real terminal)
-decided telemetry status   # exactly what is shared, and whether sending is possible
-decided telemetry off      # stop; nothing else changes
-```
-
-With consent on, `decided-mcp` sends at most one ping per 24 hours. This is the
-entire transmission — adding a field requires a new recorded decision
-(ADR-041):
-
-```json
-{
-  "api_key": "<public project write key>",
-  "event": "asdecided-daily-ping",
-  "timestamp": "<ISO 8601 UTC>",
-  "properties": {
-    "distinct_id": "<random install id>",
-    "$process_person_profile": false,
-    "schema_version": "1",
-    "rac_version": "<version>",
-    "active_repos": 2
-  }
-}
-```
-
-What the fields are: the install id is a random token minted when you opt in
-(derived from nothing, so it identifies nothing); `$process_person_profile:
-false` tells PostHog to create no person profile, so the event stays
-anonymous on the receiving side as well; `active_repos` counts the
-distinct repositories Guide served in the last 30 days, tracked locally as
-salted digests in `~/.local/state/decisions/active-repos.json` — the salt never
-leaves your machine and only the count is sent. The last-ping marker lives at
-`~/.local/state/decisions/last-ping`; your consent record at
-`~/.config/decisions/telemetry.json`.
-
-Sharing is independent of `--telemetry` — each is its own opt-in. When
-sharing is on, the server announces it on stderr at startup; it is never
-silent. The sender is one readable module (`decisions/mcp/ping.py`, the only
-network code in RAC): failures are dropped without retries, the socket
-timeout is three seconds, and a build with no endpoint key configured sends
-nothing at all — `decided telemetry status` will say so.
-
-## 8. Read-access audit log (enterprise, opt-in)
+## 7. Read-access audit log (enterprise, opt-in)
 
 For regulated installs that must record *who consulted which decision, when, and
-which artifact references came back* — the audit trail telemetry deliberately does not
-keep — the server can append one JSON line per read-tool call to a local file
+which artifact references came back* — information the response payload does not
+carry — the server can append one JSON line per read-tool call to a local file
 ([ADR-084](https://github.com/asdecided/core/blob/main/decisions/decisions/adr-084-read-access-audit-recorder.md)).
 
 It is **content-bearing by design and off by default**: with no `audit:` stanza
@@ -374,11 +281,11 @@ git-diffable artifact to point at):
 ```yaml
 audit:
   enabled: true
-  # path: /var/log/asdecided/audit.jsonl   # optional; default: $XDG_STATE_HOME/decisions/audit.jsonl
+  # path: /var/log/asdecided/audit.jsonl   # optional; default: $XDG_STATE_HOME/decided/audit.jsonl
   # on_write_error: warn              # warn (default) | block
 ```
 
-- **`path`** — where the JSONL is written. Default `$XDG_STATE_HOME/decisions/audit.jsonl`;
+- **`path`** — where the JSONL is written. Default `$XDG_STATE_HOME/decided/audit.jsonl`;
   override per machine with the `DECIDED_AUDIT_PATH` environment variable (for data
   residency).
 - **`on_write_error`** — `warn` (the default) reports a write failure on stderr
@@ -421,7 +328,7 @@ serving is also mandatory audit-on: it refuses to start without a working sink,
 and a sink write failure blocks the call. When enabled, startup announces the
 resolved path, recorded scope, transport, and write-failure mode on stderr.
 
-## 9. Shared HTTP endpoint (team scale)
+## 8. Shared HTTP endpoint (team scale)
 
 By default `decided-mcp` speaks **stdio**: one server process per developer, against
 that developer's own checkout. At team scale you may instead want **one
@@ -440,7 +347,7 @@ decided-mcp --root /path/to/your/repo --transport http --host 127.0.0.1 --port 8
   (defaults `127.0.0.1`, `8000`, `/mcp`). It binds to loopback by default;
   exposing it to a network is a deliberate deployment choice.
 
-The HTTP transport is **serving-layer only**: the five tools are unchanged, the
+The HTTP transport is **serving-layer only**: the six tools are unchanged, the
 server re-reads the repository per call (no cache, no session state), and an
 HTTP response is **payload-identical to stdio** for the same corpus bytes.
 
@@ -453,7 +360,7 @@ authenticated* (ADR-084).
 **HTTP serving is mandatory audit-on.** Because a shared endpoint serves reads
 no single developer's git identity can attribute, the HTTP transport **refuses
 to start without a working audit log** — enable the `audit:` stanza (see
-[section 8](#8-read-access-audit-log-enterprise-opt-in)) first, or the server
+[section 7](#7-read-access-audit-log-enterprise-opt-in)) first, or the server
 exits with an actionable error. stdio is unaffected.
 
 Keeping the fronted checkout current with `main` — a merge webhook or a periodic
@@ -483,26 +390,24 @@ correctness — the files in git remain the single source of truth. Pass
 `--no-cache` (or set `DECIDED_NO_CACHE=1`) to restore the zero-state posture where
 every tool call re-reads the repository from disk.
 
-## 10. Troubleshooting
+## 9. Troubleshooting
 
 ### Server not listed in the client
 
-- Confirm `rac` is on the PATH the client uses. Test with:
+- Confirm `decided-mcp` is on the PATH the client uses. Test with:
   ```bash
-  which rac
+  which decided-mcp
   decided --version
   ```
-- If you installed with `uv tool install`, the tool binary may be in
-  `~/.local/bin/` — add that to PATH or use the full path in the config.
 - Check the client's MCP server log for startup errors.
 
-### Wrong root (Guide answers from the wrong repository)
+### Wrong root (AsDecided answers from the wrong repository)
 
 - Verify the `--root` path in your config matches the directory you intend.
 - Run `decided index /path/to/your/repo` to confirm the right artifacts are visible.
 - In Claude Code, run `/mcp` to inspect the server configuration.
 
-### Empty corpus (Guide says no artifacts found)
+### Empty corpus (AsDecided says no artifacts found)
 
 When the server starts against a root with no RAC artifacts it prints a
 diagnostic to stderr:
@@ -528,7 +433,7 @@ the repository has not been initialized. See the troubleshooting steps above.
 
 ## Further reading
 
-- [CLI reference](cli.md) — every `rac` command including `decided-mcp`
+- [CLI reference](cli.md) — every `decided` command including `decided-mcp`
 - [Artifact types](artifacts.md) — what requirements, decisions, designs, roadmaps, and prompts look like
 - [Repository workflow](repo-workflow.md) — how to organize a RAC repository
-- [Examples corpus](https://github.com/asdecided/core/tree/main/examples/guide/) — the ready-made guide corpus
+- [Examples corpus](https://github.com/asdecided/core/tree/main/examples/guide/) — the ready-made AsDecided corpus
