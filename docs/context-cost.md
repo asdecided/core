@@ -18,7 +18,7 @@ compression — payloads stay small because they are *scoped*, not lossily shrun
 
 ## 1. The MCP surface is measured and budgeted
 
-The standing cost of the MCP server — the five tool descriptions and their JSON
+The standing cost of the MCP server — the six tool descriptions and their JSON
 schemas a client loads every session — is measured deterministically and offline
 (no model, no network) and held under a budget as a regression check. Today it
 measures ~915 tokens against a 1000 budget — roughly 25× under the ~23k figure the

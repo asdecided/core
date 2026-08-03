@@ -1575,7 +1575,7 @@ fn run_resolve(rest: &[&String]) -> u8 {
 
     for arg in rest {
         let arg = arg.as_str();
-        if positional_only || !arg.starts_with('-') {
+        if positional_only || arg == "-" || !arg.starts_with('-') {
             if id.is_none() {
                 id = Some(arg.to_string());
             } else if directory.is_none() {
@@ -1628,7 +1628,7 @@ fn run_find(rest: &[&String]) -> u8 {
     let mut i = 0;
     while i < rest.len() {
         let arg = rest[i].as_str();
-        if positional_only || !arg.starts_with('-') {
+        if positional_only || arg == "-" || !arg.starts_with('-') {
             if query.is_none() {
                 query = Some(arg.to_string());
             } else if directory.is_none() {

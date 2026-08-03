@@ -1,24 +1,24 @@
-name: Guide usage report
+name: MCP usage report
 description: >-
-  Share an opt-in Guide telemetry summary. The report contains only tool-call
+  Share an opt-in MCP usage summary. The report contains only tool-call
   counts, outcomes, durations, and timestamps — never tool arguments, queries,
   or repository content. Submitting posts it as a public issue.
-title: "Guide usage report"
+title: "MCP usage report"
 labels:
   - usage-report
 body:
   - type: markdown
     attributes:
       value: >-
-        Thanks for sharing! This report comes from `rac mcp-stats --share` and
-        helps decide where Guide investment goes. Review the prefilled summary
+        Thanks for sharing! This report comes from `decided mcp-stats --share` and
+        helps decide where MCP investment goes. Review the prefilled summary
         below before submitting — it should contain only counts and
         timestamps, and it will be publicly visible.
   - type: textarea
     id: report
     attributes:
       label: Telemetry summary
-      description: The JSON summary produced by `rac mcp-stats --share`.
+      description: The JSON summary produced by `decided mcp-stats --share`.
       render: json
     validations:
       required: true
@@ -27,7 +27,7 @@ body:
     attributes:
       label: Anything to add? (optional)
       description: >-
-        How you use Guide, what worked, what didn't — anything that gives the
+        How you use the MCP server, what worked, what didn't — anything that gives the
         numbers context.
     validations:
       required: false

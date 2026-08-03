@@ -17,10 +17,10 @@ on:
       - ".github/workflows/rust-spike.yml"
 
 jobs:
-  windows-compile:
-    name: Windows native compile
+  windows-runtime:
+    name: Windows native runtime smoke
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
 
@@ -31,9 +31,63 @@ jobs:
         with:
           workspaces: rust
 
-      - name: Check native workspace
+      - name: Build native release binaries
         working-directory: rust
-        run: cargo check --workspace --locked
+        run: cargo build --release --locked
+
+      # Keep this bounded: Linux owns the full workspace and inotify matrix;
+      # Windows proves that the shipped CLI, cache/store, rename transaction,
+      # and MCP wire contracts execute on the native filesystem.
+      - name: Native CLI and cache/store smoke
+        working-directory: rust
+        run: |
+          cargo test -p decided --test cli --release
+          cargo test -p asdecided-core --test index_store_vectors --release
+          cargo test -p asdecided-core --lib --release rename::tests::successful_transaction_replaces_all_files_and_cleans_backups
+
+      - name: MCP contract smoke
+        working-directory: rust
+        run: |
+          cargo test -p decided-mcp --test protocol_legacy --release
+          cargo test -p decided-mcp --test protocol_2026 --release
+          cargo test -p decided-mcp --test response_budget --release
+          cargo test -p decided-mcp --test docs_contract --release
+
+  macos-runtime:
+    name: macOS native runtime smoke
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install rust toolchain (pinned by rust/rust-toolchain.toml)
+        run: rustup show
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+
+      - name: Build native release binaries
+        working-directory: rust
+        run: cargo build --release --locked
+
+      # Keep this bounded: macOS proves the shipped CLI, cache/store, rename
+      # transaction, and MCP contracts without duplicating Linux's watcher
+      # correctness gate.
+      - name: Native CLI and cache/store smoke
+        working-directory: rust
+        run: |
+          cargo test -p decided --test cli --release
+          cargo test -p asdecided-core --test index_store_vectors --release
+          cargo test -p asdecided-core --lib --release rename::tests::successful_transaction_replaces_all_files_and_cleans_backups
+
+      - name: MCP contract smoke
+        working-directory: rust
+        run: |
+          cargo test -p decided-mcp --test protocol_legacy --release
+          cargo test -p decided-mcp --test protocol_2026 --release
+          cargo test -p decided-mcp --test response_budget --release
+          cargo test -p decided-mcp --test docs_contract --release
 
   rust-contract:
     name: Rust contract + live-corpus invariants

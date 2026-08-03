@@ -3210,7 +3210,7 @@ pub fn render_find_human(result: &SearchResult, explain: bool) -> String {
 /// populated log whose events all lack a string `ts` prints `None`.
 pub fn render_mcp_stats_human(summary: &crate::telemetry::TelemetrySummary) -> String {
     let mut lines = vec![
-        bold("Guide Telemetry"),
+        bold("MCP Usage (compatibility read-back)"),
         "===============".to_string(),
         String::new(),
         format!("Log: {}", summary.path),
@@ -3218,7 +3218,7 @@ pub fn render_mcp_stats_human(summary: &crate::telemetry::TelemetrySummary) -> S
     if summary.event_count == 0 {
         lines.push(String::new());
         lines.push("No telemetry recorded.".to_string());
-        lines.push("Telemetry is off by default; enable it with: decided mcp --telemetry".to_string());
+        lines.push("The native decided-mcp server does not record usage telemetry; this command only reads an existing compatibility log.".to_string());
         if summary.skipped_lines != 0 {
             lines.push(String::new());
             lines.push(format!("Skipped Unreadable Lines: {}", summary.skipped_lines));

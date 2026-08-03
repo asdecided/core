@@ -69,7 +69,7 @@ docker run --rm --entrypoint decided-mcp -p 8000:8000 -v "$PWD:/corpus:ro" \
 HTTP serving is **mandatory audit-on**: the server refuses to start without a
 working audit sink. Enable it in the corpus's `.decided/config.yaml` (committed, so
 an auditor has one git-diffable artifact) — see
-[the audit section](mcp.md#8-read-access-audit-log-enterprise-opt-in):
+[the audit section](mcp.md#7-read-access-audit-log-enterprise-opt-in):
 
 ```yaml
 audit:

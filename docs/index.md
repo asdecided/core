@@ -22,7 +22,9 @@ Point your agent at your repo and ask:
 
 The agent calls AsDecided, finds your soft-delete decision, cites it by ID, and proposes the compliant change — instead of reintroducing the thing you removed on purpose.
 
-The server exposes four read-only tools: `get_artifact`, `search_artifacts`, `get_related`, `get_summary`. It never writes to your repo.
+The server exposes six read-only tools: `get_artifact`, `search_artifacts`,
+`retrieve_grounding`, `find_decisions`, `get_related`, and `get_summary`. It
+never writes to your repo.
 
 ▶ **Full walkthrough + runnable example: [examples/guide/](https://github.com/asdecided/core/tree/main/examples/guide)**
 
@@ -102,7 +104,7 @@ AsDecided asks you to trust it with your product knowledge, so it holds itself t
 - **No AI in the core.** Retrieval is deterministic: the same repo state and the same query always return the same result. The reasoning is your agent's job; AsDecided's job is to hand it the facts.
 - **It dogfoods itself.** AsDecided's own planning corpus under [`decisions/`](https://github.com/asdecided/core/tree/main/rac) is validated by RAC in CI — if the tool's rules break the tool's own artifacts, the build fails.
 - **Output is a contract.** Golden tests pin CLI and MCP output; any change to what the tools return is reviewed as a product change.
-- **Telemetry is opt-in twice over.** Local recording needs an explicit `--telemetry` flag and never includes your arguments or repository content. Remote sharing is a separate, explicit consent (`decided telemetry on`, or one honest question at `decided init`): one anonymous daily ping — a random install id, the version, and an active-repo count — never paths, queries, or content. `decided telemetry status` shows exactly what is shared, the network surface is a single readable module, and ADR-041 records the decision.
+- **Telemetry is opt-in.** Optional anonymous sharing is configured explicitly with `decided telemetry on` (or one honest question at `decided init`): one daily ping with a random install id, the version, and an active-repo count — never paths, queries, or repository content. `decided telemetry status` shows exactly what is shared, the network surface is a single readable module, and ADR-041 records the decision. The native MCP server itself never sends telemetry.
 
 ## Sharing the corpus (the Portal)
 
