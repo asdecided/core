@@ -10,7 +10,7 @@
 > Applications, SemVer and Keep a Changelog, Diátaxis, SIG/CAIQ-style vendor
 > security review, CIS Docker Benchmark, and air-gap delivery patterns. The
 > chair independently re-verified every load-bearing claim against source
-> before scoring; one seat claim was corrected during synthesis (§8). Static
+> before scoring; one seat claim was corrected during synthesis (§9). Static
 > review only — no builds, no network calls, no code changes; the sibling
 > contract repo (`asdecided/spec`) was consulted read-only. Question under
 > review: *what should change to improve enterprise deployability, scored by
@@ -623,7 +623,97 @@ an oversight:
   behavior) are marked at reduced confidence in seat reports and were not
   load-bearing for any Tier 1 recommendation.
 
-## 10. Seat top-3 index
+## 10. Addendum — re-verification against `8a15f76` (#429, 2026-08-03)
+
+One commit landed after the reviewed baseline, scoped to the MCP server:
+`8a15f76 "(mcp) Close final hardening gaps (#429)"` (~350 lines: docs, two new
+test files, two CI jobs, four lines of engine code). The chair re-verified
+every finding whose evidence it touches; a council re-convene was not
+warranted for a diff this size. **22 of 29 findings are unchanged; 7 are
+partially addressed; none are fully closed.** No finding's impact/cost score
+changes; the partially-addressed items narrow in scope as noted below.
+
+What #429 delivered, mapped to findings:
+
+- **A first, real instance of the self-drift gate** (DEP-03/DEP-09 pattern,
+  scoped to the MCP guide): the new `rust/decided-mcp/tests/docs_contract.rs`
+  asserts `docs/mcp.md` names all six tools and no longer advertises the
+  retired `--telemetry` flag, then *executes* the documented stdio command
+  against `examples/guide/` (asserting six tools on the wire) and smoke-starts
+  the documented HTTP command under its mandatory-audit contract. It runs on
+  Linux, Windows, and macOS in CI. This is exactly the gate shape DEP-03/09
+  recommend — now extend it beyond `docs/mcp.md` to the recipes, quickstart,
+  and agent-guidance layer.
+- **MCP-side telemetry truth** (DEP-04, MCP half): `docs/mcp.md` §7 — the
+  Python-era ping documentation (`ping.py`, PostHog payload, `--telemetry`
+  flag) — is deleted; `docs/mcp.md` and `docs/security.md` now state the
+  native server "has no network side channel"; `mcp-stats` output and
+  `docs/cli.md` stop suggesting the rejected flag and honestly describe the
+  log as a compatibility read-back; the issue template drops `rac` commands.
+  The truthful claim is now also CI-pinned (test above).
+- **Tool-count unification across `docs/`** (DEP-09 subitem): four/five/six
+  drift fixed in `docs/index.md`, `docs/mcp.md` (both internal spots),
+  `docs/context-cost.md`, `docs/cli.md`; `retrieve_grounding` and
+  `find_decisions` now have when-to-call rows in the six-tool table —
+  their first reference documentation.
+- **Audit default path corrected** (DEP-17 headline subitem):
+  `docs/mcp.md` now says `$XDG_STATE_HOME/decided/audit.jsonl`, matching
+  `audit.rs`; the shared-server anchor link was updated with the renumbering.
+- **Real `decided-mcp` flag reference** (DEP-16/18 sliver): `docs/cli.md`'s
+  `mcp` section now documents the shipped flags (`--transport`, `--host`,
+  `--port`, `--path`, `--budget`, `--allowed-origin`, `--cache/--no-cache`)
+  and the phantom standalone `decided-mcp-stats` binary is corrected to
+  `decided mcp-stats`.
+- **Windows and macOS runtime smoke in CI** (DEP-22, matrix half): the
+  Windows job upgraded from `cargo check` to building release binaries and
+  running CLI, index-store, rename-transaction, and four MCP contract suites;
+  a new macOS job runs the same battery. Deliberately bounded (Linux keeps
+  the full suite) — a reasonable ADR-027-compatible answer to "test what you
+  ship." musl target and container hardening remain open.
+- Unprompted hardening: literal-hyphen argv handling in `find`/`resolve`
+  with cross-platform tests.
+
+What remains inside the partially-addressed findings:
+
+- **DEP-04 (now the CLI half):** the egress over-claim moved rather than
+  vanished — `docs/index.md` still advertises "one daily ping" and
+  `docs/cli.md`'s `telemetry` section now attributes it to "the native CLI,"
+  but no sender exists anywhere in the workspace (no Cargo.toml changed in
+  #429; the compiled-in PostHog key still has nothing able to use it). The
+  "Data flows and egress" page, the ADR-041 amendment, and the key's
+  disposition are still open. `decided telemetry status` remains the natural
+  citable proof point.
+- **DEP-09:** recipes and examples still carry the drift `docs/` just shed —
+  `examples/claude-code/README.md` says "five read-only tools,"
+  `examples/guide/demo.md` still verifies "four tools" and registers the
+  server as `lore`; `docs/quickstart.md` still pins the retired
+  `2026.6.1` CalVer image tag; engine error strings still recommend the
+  unimplemented `ingest`.
+- **DEP-16:** `docs/cli.md` still opens "RAC ships a single command, `rac`,
+  with twenty-two subcommands," retains the retired `explorer` and
+  unimplemented `ingest` sections, and `--help` still prints the stub.
+- **DEP-17:** rotation/retention guidance, the SIEM sidecar recipe, the audit
+  data sheet, and the enterprise-profile `audit:` stanza remain open.
+- **DEP-03:** `CLAUDE.md`'s broken `rac/prompts/` imports, the repo's own
+  `.mcp.json` (`rac` under `lore`), and the Python-era prompt artifacts are
+  untouched; the settled-decisions block still ends at ADR-120.
+- **DEP-14:** brand crumbs only (`main.rs` doc comment, Guide→MCP renames in
+  docs and the issue template); the corpus truth pass, ADR-085 ratification,
+  and rename-residue sweep remain.
+- **DEP-21 (still unchanged, now slightly larger):** `rust-spike.yml` gained
+  two jobs and still has no `permissions:` block; the new jobs repeat
+  `actions/checkout@v4` against the repo's v5 standard.
+
+Tier-1 guidance after #429: the list stands. DEP-04 narrows to the CLI-side
+claim, the egress page, and the key's disposition; DEP-09 narrows to the
+recipes/quickstart sweep plus extending the shipped docs-contract gate
+pattern; everything else in Tier 1 — verification pack, release test gate,
+vulnerability program, LLM01 guidance, bind interlock, buyer-path falsehoods
+(the "MIT license" footer and `tree/main/rac` link on the docs homepage are
+still live), dependency automation, sustainability statement — is untouched
+by #429.
+
+## 11. Seat top-3 index
 
 - **GTM:** define what a buyer can buy (DEP-29); restore SBOM/provenance and
   stop advertising deleted artifacts (DEP-01); market the zero-egress
