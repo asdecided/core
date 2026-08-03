@@ -383,7 +383,12 @@ decided rename ADR-001 ADR-099 decisions/ --json     # the plan as a stable dict
 the file, which is out of scope — so the rename refuses rather than leave `new-id`
 dangling. It also refuses an `old-id` that is unknown or ambiguous, and a `new-id`
 that is malformed or already names another artifact (which would create a duplicate
-identity). Every refusal leaves the corpus untouched and exits `1`.
+identity). The native engine additionally confines mutation to the canonical
+corpus root (ADR-129): a Markdown symlink, an unresolvable edit path, or a path
+that resolves outside the requested root is refused as `symlink-path` or
+`path-outside-root`. The human dry run identifies the offending path; the
+JSON plan carries it in `target_path`. Every refusal leaves the corpus
+untouched and exits `1`.
 
 **Guarantees.**
 
@@ -391,6 +396,11 @@ identity). Every refusal leaves the corpus untouched and exits `1`.
   ordered by path then line (ADR-002).
 - **Reversible** — applying `rename <new> <old>` after a rename restores the
   original bytes. No semantic inference happens anywhere.
+- **Transactional** — every affected file is preflighted and staged before
+  replacement. Same-directory backups allow reverse-order rollback when a
+  later replacement fails; the command reports `corpus restored` or an
+  explicit incomplete-recovery error rather than silently leaving a partial
+  rename (ADR-130).
 - **Clean afterwards** — after `--apply`, `decided relationships <dir> --validate` is
   clean: every inbound reference resolves to the renamed artifact.
 
@@ -399,7 +409,7 @@ identity_field, files_changed, reference_edits, identity_edits, edits[] }`, wher
 each edit is `{ path, line, old_line, new_line, kind }` (`kind` is `"reference"` or
 `"identity"`). On refusal, `ok` is `false` and `reason` is one of the stable codes
 `old-ref-not-found`, `old-ref-ambiguous`, `new-ref-invalid`, `new-ref-collides`,
-`old-ref-filename-only`. The `--apply` result is `{ applied, old_ref, new_ref,
+`old-ref-filename-only`, `symlink-path`, `path-outside-root`. The `--apply` result is `{ applied, old_ref, new_ref,
 target_path, files_changed, reference_edits, identity_edits }`.
 
 In the editor, **RAC: Rename artifact id** runs this dry run, shows the affected

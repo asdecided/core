@@ -3604,6 +3604,12 @@ fn rename_reason_phrase(reason: Option<&str>) -> String {
              rewrite, and renaming files is out of scope"
                 .to_string()
         }
+        Some(crate::rename::REASON_SYMLINK_PATH) => {
+            "one or more mutation paths are symlinks".to_string()
+        }
+        Some(crate::rename::REASON_PATH_OUTSIDE_ROOT) => {
+            "a mutation path is unresolved or outside the corpus root".to_string()
+        }
         Some(other) => other.to_string(),
         None => "unknown".to_string(),
     }
@@ -3615,7 +3621,19 @@ pub fn render_rename_human(plan: &crate::rename::RenamePlan) -> String {
     let header = format!("Rename {} -> {}", plan.old_ref, plan.new_ref);
     if !plan.ok {
         let reason = rename_reason_phrase(plan.reason);
-        return format!("{header}\n\n{}", red(&format!("\u{2717} Refused: {reason}.")));
+        let path = match plan.reason {
+            Some(crate::rename::REASON_SYMLINK_PATH)
+            | Some(crate::rename::REASON_PATH_OUTSIDE_ROOT) => plan
+                .target_path
+                .as_deref()
+                .map(|path| format!(" Path: {path}."))
+                .unwrap_or_default(),
+            _ => String::new(),
+        };
+        return format!(
+            "{header}\n\n{}",
+            red(&format!("\u{2717} Refused: {reason}.{path}"))
+        );
     }
     let mut lines = vec![header.clone(), "=".repeat(header.chars().count()), String::new()];
     lines.push(format!(
