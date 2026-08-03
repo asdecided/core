@@ -9,10 +9,9 @@
 //! naming a different alias of the same target is left untouched).
 
 use std::collections::HashSet;
-use std::fs;
-use std::path::Path;
-#[cfg(unix)]
-use std::{fs::OpenOptions, io::Write};
+use std::fs::{self, OpenOptions};
+use std::io::Write;
+use std::path::{Path, PathBuf};
 
 use crate::pycompat::{py_casefold, py_is_space, py_splitlines, py_strip};
 use crate::relationships::{
@@ -79,6 +78,7 @@ impl RenamePlan {
 }
 
 /// The outcome of applying a plan to disk.
+#[derive(Debug)]
 pub struct RenameResult {
     pub directory: String,
     pub old_ref: String,
@@ -95,6 +95,53 @@ struct PathIssue {
     reason: &'static str,
     path: String,
     detail: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FailurePoint {
+    Stage(usize),
+    Backup(usize),
+    Replace(usize),
+}
+
+#[derive(Debug, Clone, Copy)]
+struct FailureInjector(Option<FailurePoint>);
+
+impl FailureInjector {
+    fn none() -> Self {
+        Self(None)
+    }
+
+    #[cfg(test)]
+    fn at(point: FailurePoint) -> Self {
+        Self(Some(point))
+    }
+
+    fn should_fail(self, point: FailurePoint) -> bool {
+        self.0 == Some(point)
+    }
+}
+
+struct PreparedRenameFile {
+    path: String,
+    text: String,
+    permissions: fs::Permissions,
+}
+
+struct StagedRenameFile {
+    path: String,
+    staged: PathBuf,
+    backup: PathBuf,
+    backup_moved: bool,
+    installed: bool,
+}
+
+fn path_issue(reason: &'static str, path: &str, detail: impl Into<String>) -> PathIssue {
+    PathIssue {
+        reason,
+        path: path.to_string(),
+        detail: detail.into(),
+    }
 }
 
 /// Check one path that a rename may mutate. The canonical root is resolved
@@ -144,32 +191,84 @@ fn check_mutation_path(root: &Path, path: &str) -> Result<(), PathIssue> {
     Ok(())
 }
 
+/// Check the parent directory of a temporary sibling or replacement path.
+/// The final entry may not exist yet, so this is the root-boundary check that
+/// applies before staging or restoring a transaction file.
+fn check_sibling_parent(root: &Path, path: &Path) -> Result<(), PathIssue> {
+    let parent = path.parent().ok_or_else(|| {
+        path_issue(
+            REASON_PATH_OUTSIDE_ROOT,
+            &path.to_string_lossy(),
+            "path has no parent directory",
+        )
+    })?;
+    let metadata = fs::metadata(parent).map_err(|error| {
+        path_issue(
+            REASON_PATH_OUTSIDE_ROOT,
+            &path.to_string_lossy(),
+            format!("cannot inspect parent directory: {error}"),
+        )
+    })?;
+    if !metadata.is_dir() {
+        return Err(path_issue(
+            REASON_PATH_OUTSIDE_ROOT,
+            &path.to_string_lossy(),
+            "parent path is not a directory",
+        ));
+    }
+    let canonical = fs::canonicalize(parent).map_err(|error| {
+        path_issue(
+            REASON_PATH_OUTSIDE_ROOT,
+            &path.to_string_lossy(),
+            format!("cannot resolve parent directory: {error}"),
+        )
+    })?;
+    if !canonical.starts_with(root) {
+        return Err(path_issue(
+            REASON_PATH_OUTSIDE_ROOT,
+            &path.to_string_lossy(),
+            format!(
+                "parent directory {} is outside corpus root {}",
+                canonical.display(),
+                root.display()
+            ),
+        ));
+    }
+    Ok(())
+}
+
+/// After the original has been moved to its backup, the destination must be
+/// absent before the staged sibling is installed. A reappeared entry is
+/// rejected rather than silently overwritten.
+fn check_replacement_path(root: &Path, path: &str) -> Result<(), PathIssue> {
+    let candidate = Path::new(path);
+    match fs::symlink_metadata(candidate) {
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(path_issue(
+            REASON_SYMLINK_PATH,
+            path,
+            "destination became a symlink during rename",
+        )),
+        Ok(_) => Err(path_issue(
+            REASON_PATH_OUTSIDE_ROOT,
+            path,
+            "destination reappeared during rename",
+        )),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            check_sibling_parent(root, candidate)
+        }
+        Err(error) => Err(path_issue(
+            REASON_PATH_OUTSIDE_ROOT,
+            path,
+            format!("cannot inspect replacement path: {error}"),
+        )),
+    }
+}
+
 fn path_issue_message(phase: &str, issue: &PathIssue) -> String {
     format!(
         "rename: refusing to {phase} {}: {}",
         issue.path, issue.detail
     )
-}
-
-/// Write an already-validated mutation path without following a last-second
-/// final-component symlink on Unix. The preceding containment check still
-/// protects the root boundary and is repeated immediately before this call.
-fn write_mutation_file(path: &str, text: &str) -> Result<(), std::io::Error> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        let mut options = OpenOptions::new();
-        options
-            .write(true)
-            .truncate(true)
-            .custom_flags(libc::O_NOFOLLOW);
-        let mut file = options.open(path)?;
-        file.write_all(text.as_bytes())
-    }
-    #[cfg(not(unix))]
-    {
-        fs::write(path, text)
-    }
 }
 
 fn refused(
@@ -718,11 +817,202 @@ pub fn compute_rename(
     }
 }
 
-/// `apply_rename(plan)` — exact line replacements, original final-newline
-/// shape preserved. A stale plan (the file changed since it was computed)
-/// is the oracle's uncaught `ValueError` traceback (exit 1); surfaced here
-/// as `Err(message)` for the command to fail with the same code.
-pub fn apply_rename(plan: &RenamePlan) -> Result<RenameResult, String> {
+fn transaction_token() -> String {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    format!("{}-{nanos}", std::process::id())
+}
+
+fn temporary_sibling(
+    root: &Path,
+    path: &str,
+    token: &str,
+    index: usize,
+    kind: &str,
+) -> Result<PathBuf, String> {
+    let destination = Path::new(path);
+    check_sibling_parent(root, destination)
+        .map_err(|issue| path_issue_message("stage", &issue))?;
+    let parent = destination
+        .parent()
+        .ok_or_else(|| format!("rename: cannot stage {path}: path has no parent directory"))?;
+    for attempt in 0..100 {
+        let candidate = parent.join(format!(
+            ".asdecided-rename-{token}-{index}-{kind}-{attempt}.tmp"
+        ));
+        match fs::symlink_metadata(&candidate) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(candidate)
+            }
+            Ok(_) => continue,
+            Err(error) => {
+                return Err(format!(
+                    "rename: cannot reserve {kind} path for {path}: {error}"
+                ))
+            }
+        }
+    }
+    Err(format!(
+        "rename: cannot reserve a unique {kind} path for {path}"
+    ))
+}
+
+fn stage_text(
+    root: &Path,
+    prepared: &PreparedRenameFile,
+    token: &str,
+    index: usize,
+    injector: FailureInjector,
+) -> Result<PathBuf, String> {
+    if injector.should_fail(FailurePoint::Stage(index)) {
+        return Err(format!(
+            "injected staging failure for {}",
+            prepared.path
+        ));
+    }
+    let staged = temporary_sibling(root, &prepared.path, token, index, "stage")?;
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW).mode(0o600);
+    }
+    let mut file = match options.open(&staged) {
+        Ok(file) => file,
+        Err(error) => {
+            return Err(format!(
+                "rename: cannot create staging file for {}: {error}",
+                prepared.path
+            ))
+        }
+    };
+    if let Err(error) = file.write_all(prepared.text.as_bytes()) {
+        let _ = fs::remove_file(&staged);
+        return Err(format!(
+            "rename: cannot write staging file for {}: {error}",
+            prepared.path
+        ));
+    }
+    if let Err(error) = file.sync_all() {
+        let _ = fs::remove_file(&staged);
+        return Err(format!(
+            "rename: cannot flush staging file for {}: {error}",
+            prepared.path
+        ));
+    }
+    if let Err(error) = fs::set_permissions(&staged, prepared.permissions.clone()) {
+        let _ = fs::remove_file(&staged);
+        return Err(format!(
+            "rename: cannot preserve permissions for {}: {error}",
+            prepared.path
+        ));
+    }
+    Ok(staged)
+}
+
+fn remove_temp(path: &Path, errors: &mut Vec<String>) {
+    match fs::symlink_metadata(path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => errors.push(format!("{}: {error}", path.display())),
+        Ok(metadata) if metadata.file_type().is_file() || metadata.file_type().is_symlink() => {
+            if let Err(error) = fs::remove_file(path) {
+                errors.push(format!("{}: {error}", path.display()));
+            }
+        }
+        Ok(_) => errors.push(format!("{}: temporary path is not a file", path.display())),
+    }
+}
+
+fn remove_installed_path(root: &Path, path: &str) -> Result<(), String> {
+    match fs::symlink_metadata(path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("cannot inspect installed path {path}: {error}")),
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            fs::remove_file(path).map_err(|error| format!("cannot remove {path}: {error}"))
+        }
+        Ok(_) => {
+            check_mutation_path(root, path)
+                .map_err(|issue| path_issue_message("remove during rollback", &issue))?;
+            fs::remove_file(path).map_err(|error| format!("cannot remove {path}: {error}"))
+        }
+    }
+}
+
+fn restore_backup(root: &Path, entry: &StagedRenameFile) -> Result<(), String> {
+    match fs::symlink_metadata(&entry.path) {
+        Ok(_) => return Err(format!("destination {} is occupied during rollback", entry.path)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(format!(
+                "cannot inspect {} during rollback: {error}",
+                entry.path
+            ))
+        }
+    }
+    check_sibling_parent(root, Path::new(&entry.path))
+        .map_err(|issue| path_issue_message("restore", &issue))?;
+    fs::rename(&entry.backup, &entry.path)
+        .map_err(|error| format!("cannot restore {}: {error}", entry.path))
+}
+
+fn rollback_transaction(root: &Path, entries: &mut [StagedRenameFile]) -> Vec<String> {
+    let mut errors = Vec::new();
+    for entry in entries.iter_mut().rev() {
+        if entry.installed {
+            if let Err(error) = remove_installed_path(root, &entry.path) {
+                errors.push(error);
+            } else {
+                entry.installed = false;
+            }
+        }
+        if entry.backup_moved {
+            if let Err(error) = restore_backup(root, entry) {
+                errors.push(error);
+            } else {
+                entry.backup_moved = false;
+            }
+        }
+        remove_temp(&entry.staged, &mut errors);
+        if !entry.backup_moved {
+            remove_temp(&entry.backup, &mut errors);
+        }
+    }
+    errors
+}
+
+fn transaction_failure(
+    root: &Path,
+    entries: &mut [StagedRenameFile],
+    reason: impl Into<String>,
+) -> String {
+    let reason = reason.into();
+    let rollback_errors = rollback_transaction(root, entries);
+    if rollback_errors.is_empty() {
+        format!("rename: transaction aborted: {reason}; corpus restored")
+    } else {
+        format!(
+            "rename: transaction aborted: {reason}; rollback incomplete: {}",
+            rollback_errors.join("; ")
+        )
+    }
+}
+
+fn cleanup_staging(entries: &[StagedRenameFile]) -> Vec<String> {
+    let mut errors = Vec::new();
+    for entry in entries {
+        remove_temp(&entry.staged, &mut errors);
+        remove_temp(&entry.backup, &mut errors);
+    }
+    errors
+}
+
+fn apply_rename_transaction(
+    plan: &RenamePlan,
+    injector: FailureInjector,
+) -> Result<RenameResult, String> {
     if !plan.ok {
         return Ok(RenameResult {
             directory: plan.directory.clone(),
@@ -739,15 +1029,25 @@ pub fn apply_rename(plan: &RenamePlan) -> Result<RenameResult, String> {
     let root = fs::canonicalize(&plan.directory)
         .map_err(|e| format!("rename: cannot resolve corpus root {}: {e}", plan.directory))?;
 
-    // Group by path, first-seen order (Python dict setdefault).
+    // Group by path, first-seen order (Python dict setdefault), then complete
+    // the entire read/stale/render preflight before creating any replacement.
     let mut order: Vec<&str> = Vec::new();
     for edit in &plan.edits {
         if !order.contains(&edit.path.as_str()) {
             order.push(&edit.path);
         }
     }
+    let mut prepared = Vec::with_capacity(order.len());
     for path in order {
         check_mutation_path(&root, path).map_err(|issue| path_issue_message("read", &issue))?;
+        let permissions = fs::metadata(path)
+            .map_err(|error| format!("rename: cannot inspect {path}: {error}"))?
+            .permissions();
+        if permissions.readonly() {
+            return Err(format!(
+                "rename: cannot write {path}: file is read-only"
+            ));
+        }
         let original = std::fs::read_to_string(path)
             .map_err(|e| format!("rename: cannot read {path}: {e}"))?;
         let had_final_newline = original.ends_with('\n');
@@ -770,9 +1070,127 @@ pub fn apply_rename(plan: &RenamePlan) -> Result<RenameResult, String> {
         if had_final_newline {
             text.push('\n');
         }
-        check_mutation_path(&root, path).map_err(|issue| path_issue_message("replace", &issue))?;
-        write_mutation_file(path, &text)
-            .map_err(|e| format!("rename: cannot write {path}: {e}"))?;
+        prepared.push(PreparedRenameFile {
+            path: path.to_string(),
+            text,
+            permissions,
+        });
+    }
+
+    let token = transaction_token();
+    let mut entries = Vec::with_capacity(prepared.len());
+    for (index, prepared) in prepared.iter().enumerate() {
+        let staged = match stage_text(&root, prepared, &token, index, injector) {
+            Ok(staged) => staged,
+            Err(error) => {
+                let cleanup_errors = cleanup_staging(&entries);
+                return if cleanup_errors.is_empty() {
+                    Err(format!("rename: staging failed: {error}; no corpus files were replaced"))
+                } else {
+                    Err(format!(
+                        "rename: staging failed: {error}; temporary cleanup failed: {}",
+                        cleanup_errors.join("; ")
+                    ))
+                };
+            }
+        };
+        let backup = match temporary_sibling(&root, &prepared.path, &token, index, "backup") {
+            Ok(backup) => backup,
+            Err(error) => {
+                let mut cleanup_errors = Vec::new();
+                remove_temp(&staged, &mut cleanup_errors);
+                cleanup_errors.extend(cleanup_staging(&entries));
+                return if cleanup_errors.is_empty() {
+                    Err(format!("rename: staging failed: {error}; no corpus files were replaced"))
+                } else {
+                    Err(format!(
+                        "rename: staging failed: {error}; temporary cleanup failed: {}",
+                        cleanup_errors.join("; ")
+                    ))
+                };
+            }
+        };
+        entries.push(StagedRenameFile {
+            path: prepared.path.clone(),
+            staged,
+            backup,
+            backup_moved: false,
+            installed: false,
+        });
+    }
+
+    // Each replacement is a same-directory rename. Originals move to sibling
+    // backups first; any failure rolls committed entries back in reverse order.
+    for index in 0..entries.len() {
+        let path = entries[index].path.clone();
+        if let Err(issue) = check_mutation_path(&root, &path) {
+            return Err(transaction_failure(
+                &root,
+                &mut entries,
+                path_issue_message("replace", &issue),
+            ));
+        }
+        if let Err(issue) = check_sibling_parent(&root, &entries[index].backup) {
+            return Err(transaction_failure(
+                &root,
+                &mut entries,
+                path_issue_message("backup", &issue),
+            ));
+        }
+        if injector.should_fail(FailurePoint::Backup(index)) {
+            return Err(transaction_failure(
+                &root,
+                &mut entries,
+                format!("injected backup failure for {path}"),
+            ));
+        }
+        if let Err(error) = fs::rename(&path, &entries[index].backup) {
+            return Err(transaction_failure(
+                &root,
+                &mut entries,
+                format!("cannot move {path} to its transaction backup: {error}"),
+            ));
+        }
+        entries[index].backup_moved = true;
+
+        if injector.should_fail(FailurePoint::Replace(index)) {
+            return Err(transaction_failure(
+                &root,
+                &mut entries,
+                format!("injected replacement failure for {path}"),
+            ));
+        }
+        if let Err(issue) = check_replacement_path(&root, &path) {
+            return Err(transaction_failure(
+                &root,
+                &mut entries,
+                path_issue_message("replace", &issue),
+            ));
+        }
+        let staged_path = entries[index].staged.to_string_lossy().to_string();
+        if let Err(issue) = check_mutation_path(&root, &staged_path) {
+            return Err(transaction_failure(
+                &root,
+                &mut entries,
+                path_issue_message("replace", &issue),
+            ));
+        }
+        if let Err(error) = fs::rename(&entries[index].staged, &path) {
+            return Err(transaction_failure(
+                &root,
+                &mut entries,
+                format!("cannot install replacement for {path}: {error}"),
+            ));
+        }
+        entries[index].installed = true;
+    }
+
+    let cleanup_errors = cleanup_staging(&entries);
+    if !cleanup_errors.is_empty() {
+        return Err(format!(
+            "rename: transaction committed but temporary cleanup failed: {}",
+            cleanup_errors.join("; ")
+        ));
     }
 
     Ok(RenameResult {
@@ -787,9 +1205,81 @@ pub fn apply_rename(plan: &RenamePlan) -> Result<RenameResult, String> {
     })
 }
 
+/// `apply_rename(plan)` — exact line replacements, original final-newline
+/// shape preserved. All files are preflighted and staged before replacement;
+/// a later failure rolls earlier replacements back or reports incomplete
+/// recovery explicitly.
+pub fn apply_rename(plan: &RenamePlan) -> Result<RenameResult, String> {
+    apply_rename_transaction(plan, FailureInjector::none())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    static NEXT_TRANSACTION_ROOT: std::sync::atomic::AtomicU64 =
+        std::sync::atomic::AtomicU64::new(0);
+
+    fn transaction_root() -> PathBuf {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock after epoch")
+            .as_nanos();
+        let sequence = NEXT_TRANSACTION_ROOT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let root = std::env::temp_dir().join(format!(
+            "asdecided-rename-transaction-{}-{nonce}-{sequence}",
+            std::process::id(),
+        ));
+        fs::create_dir_all(&root).expect("create transaction root");
+        root
+    }
+
+    fn transaction_plan(root: &Path) -> RenamePlan {
+        let first = root.join("first.md");
+        let second = root.join("second.md");
+        fs::write(&first, "old\n").expect("write first transaction file");
+        fs::write(&second, "old\n").expect("write second transaction file");
+        RenamePlan {
+            directory: root.to_string_lossy().into_owned(),
+            recursive: true,
+            old_ref: "old".to_string(),
+            new_ref: "new".to_string(),
+            ok: true,
+            target_path: Some(first.to_string_lossy().into_owned()),
+            identity_field: Some(IDENTITY_FRONTMATTER),
+            reason: None,
+            edits: vec![
+                RenameEdit {
+                    path: first.to_string_lossy().into_owned(),
+                    line: 1,
+                    old_line: "old".to_string(),
+                    new_line: "new".to_string(),
+                    kind: KIND_IDENTITY,
+                },
+                RenameEdit {
+                    path: second.to_string_lossy().into_owned(),
+                    line: 1,
+                    old_line: "old".to_string(),
+                    new_line: "new".to_string(),
+                    kind: KIND_REFERENCE,
+                },
+            ],
+        }
+    }
+
+    fn assert_no_transaction_temps(root: &Path) {
+        for entry in fs::read_dir(root).expect("read transaction root") {
+            let name = entry
+                .expect("read transaction entry")
+                .file_name()
+                .to_string_lossy()
+                .into_owned();
+            assert!(
+                !name.starts_with(".asdecided-rename-"),
+                "transaction temporary remains: {name}"
+            );
+        }
+    }
 
     #[test]
     fn new_ref_grammar() {
@@ -828,5 +1318,104 @@ mod tests {
         // `\s*:` and finds 'e' — no match. Same for a missing colon.
         assert_eq!(frontmatter_id_line("ident: RAC-A"), None);
         assert_eq!(frontmatter_id_line("id RAC-A"), None);
+    }
+
+    #[test]
+    fn stale_plan_is_detected_before_any_replacement() {
+        let root = transaction_root();
+        let plan = transaction_plan(&root);
+        let second = root.join("second.md");
+        fs::write(&second, "changed\n").expect("make second file stale");
+
+        let error = apply_rename(&plan).expect_err("stale plan must fail");
+        assert!(error.contains("stale plan"), "{error}");
+        assert_eq!(fs::read_to_string(root.join("first.md")).unwrap(), "old\n");
+        assert_eq!(fs::read_to_string(second).unwrap(), "changed\n");
+        assert_no_transaction_temps(&root);
+        fs::remove_dir_all(root).expect("remove transaction root");
+    }
+
+    #[test]
+    fn replacement_failure_rolls_back_all_committed_files() {
+        let root = transaction_root();
+        let plan = transaction_plan(&root);
+
+        let error = apply_rename_transaction(
+            &plan,
+            FailureInjector::at(FailurePoint::Replace(1)),
+        )
+        .expect_err("injected replacement must fail");
+        assert!(error.contains("corpus restored"), "{error}");
+        assert_eq!(fs::read_to_string(root.join("first.md")).unwrap(), "old\n");
+        assert_eq!(fs::read_to_string(root.join("second.md")).unwrap(), "old\n");
+        assert_no_transaction_temps(&root);
+        fs::remove_dir_all(root).expect("remove transaction root");
+    }
+
+    #[test]
+    fn staging_failure_leaves_corpus_untouched() {
+        let root = transaction_root();
+        let plan = transaction_plan(&root);
+
+        let error = apply_rename_transaction(&plan, FailureInjector::at(FailurePoint::Stage(1)))
+            .expect_err("injected staging must fail");
+        assert!(error.contains("staging failed"), "{error}");
+        assert!(error.contains("no corpus files were replaced"), "{error}");
+        assert_eq!(fs::read_to_string(root.join("first.md")).unwrap(), "old\n");
+        assert_eq!(fs::read_to_string(root.join("second.md")).unwrap(), "old\n");
+        assert_no_transaction_temps(&root);
+        fs::remove_dir_all(root).expect("remove transaction root");
+    }
+
+    #[test]
+    fn backup_failure_rolls_back_prior_replacements() {
+        let root = transaction_root();
+        let plan = transaction_plan(&root);
+
+        let error = apply_rename_transaction(&plan, FailureInjector::at(FailurePoint::Backup(1)))
+            .expect_err("injected backup must fail");
+        assert!(error.contains("corpus restored"), "{error}");
+        assert_eq!(fs::read_to_string(root.join("first.md")).unwrap(), "old\n");
+        assert_eq!(fs::read_to_string(root.join("second.md")).unwrap(), "old\n");
+        assert_no_transaction_temps(&root);
+        fs::remove_dir_all(root).expect("remove transaction root");
+    }
+
+    #[test]
+    fn successful_transaction_replaces_all_files_and_cleans_backups() {
+        let root = transaction_root();
+        let plan = transaction_plan(&root);
+
+        let result = apply_rename(&plan).expect("transaction succeeds");
+        assert!(result.applied);
+        assert_eq!(result.files_changed, 2);
+        assert_eq!(fs::read_to_string(root.join("first.md")).unwrap(), "new\n");
+        assert_eq!(fs::read_to_string(root.join("second.md")).unwrap(), "new\n");
+        assert_no_transaction_temps(&root);
+        fs::remove_dir_all(root).expect("remove transaction root");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_only_file_fails_before_staging() {
+        if unsafe { libc::geteuid() } == 0 {
+            return;
+        }
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = transaction_root();
+        let plan = transaction_plan(&root);
+        let first = root.join("first.md");
+        fs::set_permissions(&first, fs::Permissions::from_mode(0o444))
+            .expect("make first file read-only");
+
+        let error = apply_rename(&plan).expect_err("read-only file must fail");
+        fs::set_permissions(&first, fs::Permissions::from_mode(0o644))
+            .expect("restore first file permissions");
+        assert!(error.contains("read-only"), "{error}");
+        assert_eq!(fs::read_to_string(first).unwrap(), "old\n");
+        assert_eq!(fs::read_to_string(root.join("second.md")).unwrap(), "old\n");
+        assert_no_transaction_temps(&root);
+        fs::remove_dir_all(root).expect("remove transaction root");
     }
 }

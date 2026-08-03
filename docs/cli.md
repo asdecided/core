@@ -396,6 +396,11 @@ untouched and exits `1`.
   ordered by path then line (ADR-002).
 - **Reversible** — applying `rename <new> <old>` after a rename restores the
   original bytes. No semantic inference happens anywhere.
+- **Transactional** — every affected file is preflighted and staged before
+  replacement. Same-directory backups allow reverse-order rollback when a
+  later replacement fails; the command reports `corpus restored` or an
+  explicit incomplete-recovery error rather than silently leaving a partial
+  rename (ADR-130).
 - **Clean afterwards** — after `--apply`, `decided relationships <dir> --validate` is
   clean: every inbound reference resolves to the renamed artifact.
 

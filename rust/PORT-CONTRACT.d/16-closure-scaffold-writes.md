@@ -210,9 +210,14 @@ under that root. A symlinked path or a path that cannot be resolved is a
 whole-plan refusal with reason `symlink-path` or `path-outside-root`; the
 human dry-run includes the offending path and JSON keeps it in
 `target_path`. Apply repeats the checks immediately before each read and
-replacement; Unix replacement also uses `O_NOFOLLOW` for the final path
-component. Read-only discovery still yields symlinked Markdown files for
-parity.
+replacement; Unix staging opens its final component with `O_NOFOLLOW` and
+same-directory replacement uses the staged file. All affected files are
+preflighted and staged before any replacement. Originals move to sibling
+backups and a later failure triggers reverse-order rollback; the engine reports
+`corpus restored` or an explicit `rollback incomplete` error. Successful
+commits remove staging and backups; cleanup failures are reported rather than
+silently ignored. Read-only discovery still yields symlinked Markdown files
+for parity.
 
 ## 7. `rac migrate {metadata} <directory> [--dry-run] [--top-level] [--recursive] [--json]`
 
