@@ -1,4 +1,7 @@
 *
 !rust/
 !rust/**
+!LICENSE
+!NOTICE
+!THIRD-PARTY-NOTICES
 rust/target/
