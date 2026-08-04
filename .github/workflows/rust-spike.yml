@@ -18,12 +18,16 @@ on:
     paths:
       - "rust/**"
       - "decisions/**"
+      - "deny.toml"
+      - ".github/dependabot.yml"
       - ".github/workflows/rust-spike.yml"
   push:
     branches: [main]
     paths:
       - "rust/**"
       - "decisions/**"
+      - "deny.toml"
+      - ".github/dependabot.yml"
       - ".github/workflows/rust-spike.yml"
 
 jobs:
@@ -169,3 +173,19 @@ jobs:
           python rust/tools/live_corpus_invariants.py \
             --engine rust/target/release/decided \
             --corpus decisions
+
+  dependency-policy:
+    name: dependency policy (cargo-deny)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      # deny.toml bans outbound HTTP/TLS/async stacks, restricts sources to
+      # crates.io, and checks the RustSec advisory and license databases.
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          manifest-path: rust/Cargo.toml
+          arguments: --all-features --locked

@@ -1,0 +1,76 @@
+# AsDecided dependency policy.
+#
+# The native engine is deliberately local-first: outbound HTTP, TLS, async
+# runtimes, and cryptographic client stacks are not part of the workspace.
+# Keep this file small and explicit so a dependency addition cannot silently
+# change that boundary.
+
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+# A direct serde_yaml dependency remains while the native YAML compatibility
+# layer is migrated. It is archived upstream but has no matching RustSec
+# advisory in the database used by this check; keep the migration visible in
+# review rather than silently treating it as healthy. `derivative` is
+# transitive; `workspace` keeps direct additions blocking while retaining
+# visibility for transitive maintenance notices.
+unmaintained = "workspace"
+ignore = [
+    { id = "RUSTSEC-2024-0421", reason = "idna 0.3 is pulled transitively by mdurl for local Markdown HTML rendering; AsDecided never resolves hosts, fetches URLs, or performs network authorization. Revisit if URL fetching is ever added." },
+]
+
+[licenses]
+version = 2
+confidence-threshold = 0.8
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "ISC",
+    "MIT",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+unused-allowed-license = "warn"
+
+[licenses.private]
+ignore = false
+
+[bans]
+# Existing duplicate versions are warnings while Dependabot works through the
+# graph. A newly introduced wildcard dependency is not acceptable.
+multiple-versions = "warn"
+wildcards = "deny"
+deny = [
+    # Outbound HTTP clients and transport stacks.
+    { crate = "reqwest", reason = "AsDecided core has no outbound network client; fronting infrastructure owns network egress." },
+    { crate = "ureq", reason = "AsDecided core has no outbound network client; fronting infrastructure owns network egress." },
+    { crate = "isahc", reason = "AsDecided core has no outbound network client; fronting infrastructure owns network egress." },
+    { crate = "curl", reason = "AsDecided core has no outbound network client; fronting infrastructure owns network egress." },
+    { crate = "curl-sys", reason = "AsDecided core has no outbound network client; fronting infrastructure owns network egress." },
+    { crate = "hyper", reason = "AsDecided core uses a bounded std::net listener rather than an async HTTP stack." },
+    { crate = "hyper-util", reason = "AsDecided core uses a bounded std::net listener rather than an async HTTP stack." },
+    { crate = "surf", reason = "AsDecided core has no outbound network client; fronting infrastructure owns network egress." },
+    { crate = "attohttpc", reason = "AsDecided core has no outbound network client; fronting infrastructure owns network egress." },
+    { crate = "awc", reason = "AsDecided core has no outbound network client; fronting infrastructure owns network egress." },
+    { crate = "http-client", reason = "AsDecided core has no outbound network client; fronting infrastructure owns network egress." },
+    # TLS/crypto and async runtime dependencies would create a new network
+    # boundary in a binary that is intentionally no-egress and proxy-terminated.
+    { crate = "native-tls", reason = "Transit encryption belongs to the fronting proxy, not the native engine." },
+    { crate = "openssl", reason = "The native workspace intentionally carries no cryptographic client stack." },
+    { crate = "openssl-sys", reason = "The native workspace intentionally carries no cryptographic client stack." },
+    { crate = "rustls", reason = "The native workspace intentionally carries no cryptographic client stack." },
+    { crate = "rustls-native-certs", reason = "The native workspace intentionally carries no cryptographic client stack." },
+    { crate = "rustls-pemfile", reason = "The native workspace intentionally carries no cryptographic client stack." },
+    { crate = "rustls-webpki", reason = "The native workspace intentionally carries no cryptographic client stack." },
+    { crate = "tokio", reason = "The native engine is synchronous and deliberately avoids an async runtime." },
+    { crate = "async-std", reason = "The native engine is synchronous and deliberately avoids an async runtime." },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
