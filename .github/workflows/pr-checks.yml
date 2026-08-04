@@ -122,6 +122,26 @@ jobs:
           fi
           echo "AsDecided Sentry passed."
 
+  # Keep public commands and generated agent guidance tied to the native
+  # distribution. This job runs for docs-only changes too; rust-spike's path
+  # filter is intentionally limited to engine/spec changes.
+  guidance-drift:
+    name: public docs and guidance drift
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build native AsDecided
+        working-directory: rust
+        run: cargo build --release --locked -p decided
+
+      - name: Check generated agent guidance
+        run: rust/target/release/decided export decisions/ --agent-rules --check
+
+      - name: Check public command and MCP contracts
+        working-directory: rust
+        run: cargo test -p decided-mcp --test docs_contract --release
+
   mcp-distribution:
     name: mcp distribution metadata
     runs-on: ubuntu-latest

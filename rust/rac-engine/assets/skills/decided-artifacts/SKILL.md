@@ -1,6 +1,6 @@
 ---
 name: decided-artifacts
-description: Author and maintain RAC (requirements-as-code) Markdown artifacts — requirements, decisions, roadmaps, prompts, designs — using the decided CLI. Use when asked to create, read, validate, update, or link AsDecided (RAC) artifacts in a project's decisions/ directory.
+description: Author and maintain AsDecided Markdown artifacts — requirements, decisions, roadmaps, prompts, designs — using the decided CLI. Use when asked to create, read, validate, update, or link artifacts in a project's decisions/ directory.
 ---
 
 # RAC artifacts

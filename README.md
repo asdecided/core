@@ -35,9 +35,10 @@ scoop install asdecided
 Native `decided` and `decided-mcp` archives are also published on
 [GitHub Releases](https://github.com/asdecided/core/releases).
 
-`rac-core` is no longer distributed through PyPI. Python API consumers should
-use [`asdecided/sdk`](https://github.com/asdecided/sdk), which is a
-client SDK rather than a second engine implementation.
+Python API consumers should use the
+[`asdecided/sdk`](https://github.com/asdecided/sdk) client SDK. It talks to the
+native engine; this repository does not ship a second Python engine or a PyPI
+package.
 
 ## Start a repository
 

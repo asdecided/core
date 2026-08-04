@@ -1,12 +1,13 @@
 # CLI Reference
 
-RAC ships a single command, `rac`, with twenty-two subcommands. This page documents each
-one: its purpose, inputs, outputs, and exit codes.
+AsDecided ships the native `decided` CLI and the separate `decided-mcp` server.
+This page documents the supported CLI commands, their inputs, outputs, and exit
+codes.
 
 ```bash
-rac <command> [arguments] [options]
+decided <command> [arguments] [options]
 decided --version
-rac <command> --help
+decided <command> --help
 ```
 
 ## Conventions
@@ -19,7 +20,7 @@ These apply across every command.
 - **Standard input** — `validate`, `inspect`, and `improve` accept `-` in place of a
   file to read Markdown from stdin (e.g. `cat file.md | decided validate -`).
 - **Recursion** — directory commands (`validate`, `stats`, `inspect`,
-  `relationships`, `review`, `portfolio`, `index`, `explorer`) recurse into
+  `relationships`, `review`, `portfolio`, and `index`) recurse into
   subdirectories by default. Pass `--top-level`
   to scan only the immediate directory. `--recursive` is accepted explicitly for
   clarity but is already the default.
@@ -130,7 +131,7 @@ Corpus references
 
 This is the engine seam the generated Claude Code pre-edit hook pipes proposed
 content into; see [Agent integration](governance.md#agent-integration-context-supply-and-enforcement).
-Validation stays in `rac` — the hook computes nothing
+Validation stays in `decided` — the hook computes nothing
 ([ADR-067](https://github.com/asdecided/core/blob/main/decisions/decisions/adr-067-agent-integration-boundary.md),
 [ADR-063](https://github.com/asdecided/core/blob/main/decisions/decisions/adr-063-non-python-clients-are-thin.md)).
 
@@ -190,68 +191,23 @@ sections, and a list of files that matched no schema (not errors — see
 
 ---
 
-## ingest
+## Ingestion boundary
 
-Convert a document (DOCX, PDF, HTML, PPTX, XLSX, or Markdown) into RAC-compatible
-Markdown.
+The native engine does not expose an `ingest` subcommand. Initial corpus
+creation from DOCX, PDF, HTML, PPTX, XLSX, or note-tool exports belongs in the
+ancillary Python connectors repository:
+[`asdecided/connectors`](https://github.com/asdecided/connectors).
 
-- **Input:** `decided ingest <file>` — the source document.
-- **Options:** `-o, --output <path>` (write to a file; errors if it exists unless
-  `--force`) · `--stdout` (explicit stdout, the default) · `--force` · `--json`
-- **Exit codes:** `0` success · `1` conversion failed · `2` unsupported type / file not found / output exists without `--force`
-
-```bash
-decided ingest spec.docx                 # preview Markdown on stdout
-decided ingest spec.docx -o spec.md      # write to a file
-decided ingest report.pdf -o report.md --force
-```
-
-Document ingestion is no longer shipped by `rac-core`. Use the ancillary
-Python ingestion connector when creating an initial corpus.
-
-### Note-tool exports (Obsidian, Logseq, Notion, Roam)
-
-Point `decided ingest` at a **note-tool export** and it normalises the whole graph —
-each note becomes a RAC-shaped draft, and the link graph you already drew is
-carried in as **candidate `## Related` references** rather than flattened to
-plain text. Obsidian, Logseq, Notion, and Roam are supported today; the
-converters need no extra to install.
-
-- **Input:** `decided ingest <dir>` — an export directory (an Obsidian vault, a
-  Logseq graph, or a Notion "Markdown & CSV" export) — or `decided ingest <graph>.json`
-  for a Roam JSON export. The tool is auto-detected; force a directory's with
-  `--from obsidian|logseq|notion|roam`. Logseq's `pages/` and `journals/` notes
-  are walked, its `[[page links]]` resolve like Obsidian's, and block references
-  (`((id))`) and `key:: value` properties are preserved verbatim. Notion pages
-  use standard Markdown links (resolved the same way); its database CSVs are
-  reported and skipped, since Notion exports each row as its own page. Roam's
-  single JSON graph is parsed and each page's block tree is flattened to outliner
-  Markdown, with `[[page links]]` resolved and block references left verbatim.
-- **Output:** `-o <dir>` writes one draft per note (mirroring the vault's
-  structure) and **never overwrites an existing file** — pass `--force` to
-  replace. Without `-o`, a summary previews what would convert and what needs
-  review. `--json` emits the full structured result.
+Those connectors produce reviewable Markdown drafts. Once the drafts are in
+your repository, use the native CLI to inspect and validate them:
 
 ```bash
-decided ingest ./my-vault                    # preview: notes, resolved links, ambiguities
-decided ingest ./my-vault -o drafts/         # write reviewable drafts
-decided ingest ./my-export --from obsidian -o drafts/
+decided inspect draft.md
+decided validate draft.md
 ```
 
-What the normaliser does, deterministically and offline (identical export →
-byte-identical drafts, nothing dropped):
-
-- **Wikilinks → candidates.** A resolved `[[Note]]` becomes an inline Markdown
-  link, and its target is added to a clearly-marked candidate `## Related`
-  section — a suggestion for you to promote, never an edge the tool asserts.
-  Ambiguous (`[[Name]]` matching two notes) and unresolved links are left inline
-  and listed for review, never guessed.
-- **Frontmatter and unmapped content are preserved verbatim**, so you review a
-  complete, faithful draft.
-
-The drafts are for **human review**: promote the candidate links and finalise the
-artifact frontmatter, then `decided validate`. This is an import step, not an
-auto-commit.
+Ingestion is deliberately outside the engine's normal runtime and CI surface;
+the native CLI remains the deterministic validator, index, and MCP server.
 
 ---
 
@@ -677,15 +633,15 @@ materialized read-only via `git archive` (ADR-043): nothing mutates your
 repository, and only the corpus subpath is extracted.
 
 ```bash
-decided watchkeeper rac --base main
+decided watchkeeper decisions/ --base main
 ```
 
 ```text
 RAC Watchkeeper
 ===============
 
-Directory:  rac
-Comparing:  main → rac
+Directory:  decisions/
+Comparing:  main → decisions/
 
 Changed Artifacts
 -----------------
@@ -776,7 +732,7 @@ which the runner turns into inline annotations. `--no-annotate` suppresses
 the stderr stream:
 
 ```bash
-decided watchkeeper rac --base "origin/$GITHUB_BASE_REF" --format github > "$GITHUB_STEP_SUMMARY"
+decided watchkeeper decisions/ --base "origin/$GITHUB_BASE_REF" --format github > "$GITHUB_STEP_SUMMARY"
 ```
 
 The `--json` form is a stable contract (`schema_version: "1"`) with `base`,
@@ -903,148 +859,21 @@ export; the canonical `id` is what makes the round-trip reliable.
 
 ---
 
-## explorer
+## Explorer (retired)
 
-Launch the interactive terminal Explorer — browse every artifact, read it in
-full, assess repository health, and reach anything through the `/` command
-palette, without memorizing RAC commands. One persistent workspace frame: a
-navigation sidebar of type-tagged artifacts on the left, a context panel
-that swaps views on the right, and a status line of key hints with the
-health chip — under the rac-lantern theme by default. Pressing `/` summons
-the palette (v0.8.8): an input with a live, navigable suggestion menu below
-it. The workspace is live (v0.8.9): Explorer watches the repository and
-reloads itself when artifacts change on disk.
+The former interactive Explorer was a presentation surface, not an engine
+capability. It is retired and is not shipped by the native distribution. Use
+these deterministic commands instead:
 
-Explorer is a presentation layer over the same services the CLI uses: everything
-it shows is also available through `decided portfolio`, `decided index`, `decided resolve`,
-`decided find`, and friends (ADR-015). It never edits artifacts (ADR-024).
+- `decided portfolio decisions/` for a corpus inventory.
+- `decided index decisions/` to inspect the derived index.
+- `decided find "topic" decisions/` for deterministic search.
+- `decided inspect <file>` and `decided review decisions/` for health and
+  completeness.
 
-- **Input:** `decided explorer [directory]` — defaults to `decisions/` when present
-  (ADR-018), else the current directory; scanned recursively for `*.md`.
-- **Options:** `--top-level` · `--recursive` (no `--json`: the surface is interactive)
-- **Keys:** `/` summons the command palette from anywhere · `↑ ↓` navigate ·
-  `Enter` select · `Tab` cycle panels · `Esc` back (palette → dismiss;
-  context → view history; otherwise → home) · `h` health · `r` reload ·
-  `f` filter results by type · `?` help · `q` quit. Single-letter shortcuts
-  are suspended while you type in the palette.
-- **Palette (`/`):** empty input offers the artifacts you opened most
-  recently in this repository (Enter reopens one) above the full command
-  list; a command prefix filters them (Enter completes argument-taking
-  commands into the input); any other text shows live artifact matches —
-  Enter quick-opens the highlighted one — plus a "search all results" row.
-  Commands: `open <ref>` · `find <query> [type]` · `browse [type]` ·
-  `list [type]` · `health` · `stats` · `recommendations` · `new <type> <path>` ·
-  `import <source> [target]` · `relationships <ref>` · `resume` ·
-  `schema [type]` · `settings` · `home` · `help` · `quit` — anything else is
-  a search, resolved with `decided resolve` / `decided find` semantics. Full results render in the context panel (the layout
-  never jumps), where `f` narrows artifact results by type — all → each type
-  present → all. `/browse <type>` lists that type in the results panel in
-  every grouping mode; bare `/browse` focuses the sidebar. `/schema` lists
-  the registered artifact types; `/schema decision` renders the type's
-  expected sections, the same facts `decided schema` reports.
-- **Sidebar:** every artifact under "Artifacts", mirroring the repository's
-  directory structure by default — directories as collapsible nodes (name
-  with a trailing `/` and an artifact count), nested exactly as on disk.
-  The `artifact_grouping` setting cycles `folders` | `type` | `flat`. Rows
-  carry a colour-coded type tag (`REQ` `ADR` `RMP` `PRM` `DSG`) beside the
-  title, invalid artifacts are marked `✗`, and the highlighted artifact's
-  status chip shows in the panel border. `e` opens the highlighted artifact
-  in your editor. Expansion and cursor survive reloads — nested directories
-  included — and opening an artifact reveals it along its filesystem path;
-  the sidebar hides below 80 columns.
-- **Artifact context:** opening an artifact shows four tabs — **Content**
-  (the document's rendered Markdown, read-only — the default; it takes the
-  keyboard, scrolls with `j`/`k`/PgUp/PgDn, and artifact references inside
-  the text open in place, so the corpus reads like a wiki), **Inspection**
-  (status, completeness, and the artifact's validation diagnostics — the
-  same issues `decided validate` reports), **Links** (the knowledge graph as
-  text — a dependency chain to what the artifact relates to, an Impact
-  Analysis block naming what a change may affect, and a lineage chain;
-  connected artifacts open on Enter, so the graph traverses one hop at a
-  time and `Esc` unwinds), and **Findings** (the artifact's
-  recommendations, plus an Improvement group from the improve service —
-  one suggestion per missing section, with the schema's guidance question
-  as the action). Inspection, Links, and Findings carry count badges; `g`
-  jumps to Links; `←`/`→` switch tabs.
-- **Health:** `h` or `/health` opens the health view — Core's score with a text
-  label, the Completeness / Relationships / Validation / Coverage areas, and a
-  prioritized attention list whose items open the affected artifact on its
-  Inspection tab, where the diagnostics explain the finding.
-- **Recommendations:** `/recommendations` (or `r` from the health view) presents
-  Core's review findings grouped by category (Validation, Relationships,
-  Repository Health, Quality), each with its impact, a suggested `rac` command,
-  and navigation to the affected artifact's Findings tab. Advisory only —
-  Explorer applies nothing. `x` exports them to a Markdown file (preview,
-  then confirm).
-- **Actions:** `e` opens the current artifact in your editor — the `editor`
-  setting, then `$VISUAL` / `$EDITOR`; terminal editors (vim, nvim, emacs,
-  nano, …) run with the Explorer suspended and resume it on exit; guidance
-  is shown when nothing is configured (Explorer never edits, ADR-024).
-  `/import <source> [target]` converts a document via the ingest service,
-  previews the Markdown, and writes it only after you confirm with `y`
-  (never overwriting). Long conversions report progress.
-  `/new <type> <path>` starts an artifact from its canonical template: the
-  preview shows the sections with the ID noted as assigned on write, `y`
-  confirms, and the write goes through the same Core service as `decided new` —
-  the ID is minted against the repository index, existing files refuse,
-  missing directories refuse, and an uninitialized repository points you at
-  `decided init`. On success the Explorer reloads and opens the new artifact,
-  ready for `e`; bare `/new` lists the creatable types.
-- **Stats:** `/stats` opens a portfolio dashboard — per-type counts with
-  validity, requirement/metric/risk totals, decision status and category
-  breakdowns, and relationship counts — the same facts `decided stats` reports,
-  collected off the UI thread on request.
-- **Portfolio list:** `/list` opens a sortable table of every artifact — type
-  tag, id, status, link count, recency, and title. `/list <type>` (for example
-  `/list decision`) scopes it to one artifact type, and `/list <text>` (anything
-  that is not a type) runs a fuzzy name search; `s` cycles the sort (type,
-  recency, links, status, id), `f` the status filter (all, invalid, valid), and
-  `ctrl+f` focuses the same name search live in the box. Enter opens the
-  highlighted artifact. The type scope, status filter, and name search compose,
-  and the header names whichever are active. Recency is git-derived (ADR-045),
-  so the column fills from a worker after the table is on screen.
-- **Live reload:** Explorer compares the corpus files on disk every two
-  seconds (paths and mtimes only — no parsing) and reloads when something
-  changed: the sidebar keeps its expansion and cursor, the open artifact
-  keeps its tab and scroll position, and the health chip updates. The
-  watcher holds while a terminal editor owns the screen and rescans the
-  moment Explorer resumes, so a saved edit shows immediately; an open
-  artifact that disappears falls back home. `r` still reloads on demand.
-- **First run:** onboarding derives from repository content (existing, empty, or
-  invalid repository) and is skipped for returning users; a lantern-carrying
-  mascot animates in the welcome, empty, and loading states (static with
-  `animations = off`, hidden with `mascot = off` — no information is lost).
-  Selecting the mascot (a click, or keyboard focus then Enter) returns a small
-  response inline — an acknowledgement, an occasional reminder, gentle guidance
-  toward existing commands, and one rare line — with no popup and nothing
-  hidden behind it; turn it off independently with `mascot_interaction = off`.
-  One optional editor step follows the welcome: Enter accepts (an empty
-  value keeps the `$VISUAL`/`$EDITOR` fallback), typing sets the `editor`
-  preference, Esc skips — `/settings` can change it any time.
-- **Settings & continuity:** `/settings` changes everything in place — theme
-  (three curated RAC themes ship: `rac-lantern`, the dark default;
-  `rac-parchment`, a light companion — warm paper, dark ink, the lantern amber
-  deepened to read on light; and `rac-high-contrast` — pure-white ink on true
-  black for maximum legibility. Enter cycles them and every other Textual theme
-  with live preview; all meaning survives any palette, and the artifact type
-  tags re-tune their hue to the active theme so they stay legible on light or
-  dark), mascot, animations, mascot interaction, artifact grouping
-  (`folders` default), workspace layout (`frame` default — the tree sidebar plus
-  a swapping context region — or `split`, a master-detail layout where the
-  portfolio list drives a persistent reading pane; switching applies live), and
-  the editor command —
-  persisted to `$XDG_CONFIG_HOME/decisions/explorer.json` (no login, cloud, or
-  sync). Explorer remembers recently opened repositories plus the last
-  artifact and view per repository (under `$XDG_STATE_HOME/decisions/`); `.` or
-  `/resume` takes you back to where you were.
-- **Exit codes:** `0` session quit · `2` not a directory, or the `explorer` extra is
-  not installed
+The native CLI and MCP server are the supported delivery surfaces.
 
-Explorer is retired and is not part of the native product.
-
----
-
-## mcp
+## decided-mcp
 
 Serve AsDecided repository knowledge to coding agents over MCP. The native
 server exposes six read-only tools; client configuration, response budgets,
@@ -1593,79 +1422,43 @@ decided migrate metadata decisions/ --json
 
 ## skill
 
-Install or list the bundled Claude Code agent skills. Three skills are
-bundled: `rac-artifacts` (author and maintain artifacts), `rac-review`
-(corpus review and triage), and `rac-ingest` (legacy document conversion).
-Skill content ships with the distribution as package resources, so
-installation works from an installed wheel without this repository, network
-access, or AI involvement.
+Install or list the four bundled Claude Code agent skills. They are embedded in
+the native distribution and require no Python runtime or network access.
 
 - **Input:** `decided skill install [name]` — with no name, every bundled skill;
-  with a name, exactly that skill. `decided skill list` — enumerate the bundle.
+  with a name, exactly that skill. `decided skill list` enumerates the bundle.
 - **Options:** `--dir PATH` (target project directory; default: current
   directory; install only) · `--json`
 - **Exit codes:** `0` installed / listed · `1` a target skill file already
-  exists (never overwritten), or a packaged skill resource is missing
-  (broken installation) · `2` `--dir` is not a directory, or an unknown
-  skill name (the available skills are listed)
+  exists (never overwritten), or a packaged resource is missing · `2`
+  `--dir` is not a directory, or the skill name is unknown.
 
-`decided skill install` writes each skill to
-`.claude/skills/<name>/SKILL.md` under the target directory — the documented
-Claude Code project-level discovery path — creating parent directories as
-needed. An existing skill file is never overwritten. The no-name form is
-all-or-nothing: every target path is checked first, and if any exists the
-command refuses with exit `1`, reports the existing path(s), and writes
-nothing. To add a single missing skill alongside ones already installed,
-name it: `decided skill install rac-review`.
+The current skills are:
+
+- `decided-artifacts` — author and maintain artifacts.
+- `decided-review` — review and triage a corpus.
+- `decided-import` — reformat one existing Markdown document with review.
+- `decided-capture` — capture one new decision or requirement by interview.
 
 ```bash
-decided skill install                       # all bundled skills, current project
-decided skill install rac-review            # one skill by name
-decided skill install --dir ../app --json   # into another project
-decided skill list                          # what is bundled
+decided skill install
+decided skill install decided-artifacts
+decided skill install --dir ../app --json
+decided skill list
 ```
 
-```text
-Bundled agent skills:
-
-- rac-artifacts  Author and maintain RAC Markdown artifacts with the rac CLI.
-- rac-review     Review a RAC corpus and work findings worst-first.
-- rac-ingest     Convert legacy documents into valid, linked RAC artifacts.
-```
-
-The install `--json` form reports one entry per installed skill:
-
-```json
-{
-  "schema_version": "1",
-  "installed": true,
-  "skills": [
-    {
-      "skill": "rac-artifacts",
-      "path": ".claude/skills/rac-artifacts/SKILL.md"
-    },
-    {
-      "skill": "rac-review",
-      "path": ".claude/skills/rac-review/SKILL.md"
-    },
-    {
-      "skill": "rac-ingest",
-      "path": ".claude/skills/rac-ingest/SKILL.md"
-    }
-  ]
-}
-```
-
----
+The installed files live at `.claude/skills/<name>/SKILL.md`. Existing files
+are never overwritten; the all-skills form checks every destination before it
+writes anything.
 
 ## hook
 
 Install or list the bundled git hooks. Two hooks are bundled: `post-commit`
 (an advisory write-cadence nudge that prints when the corpus has gone quiet and
 **never blocks** a commit) and `pre-commit` (validates staged Markdown
-artifacts and blocks the commit on errors). Hook scripts ship with the
-distribution as package resources, so installation works from an installed
-wheel without this repository.
+artifacts and blocks the commit on errors). Hook scripts ship with the native
+distribution as package resources, so installation works without this
+repository.
 
 - **Input:** `decided hook install` — install one hook. `decided hook list` —
   enumerate the bundle.

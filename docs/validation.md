@@ -122,11 +122,11 @@ A composite GitHub Action wraps `decided validate --sarif` and uploads the resul
 GitHub Code Scanning, so findings annotate the pull request inline. The decision
 behind it is
 [ADR-058](https://github.com/asdecided/core/blob/main/decisions/decisions/adr-058-validation-github-action.md);
-it is a thin wrapper — the `rac` CLI stays the source of truth.
+it is a thin wrapper — the `decided` CLI stays the source of truth.
 
 ```yaml
-# .github/workflows/rac.yml
-name: RAC
+# .github/workflows/asdecided.yml
+name: AsDecided
 on: [pull_request]
 permissions:
   contents: read
@@ -141,8 +141,8 @@ jobs:
           path: decisions/
 ```
 
-Inputs: `path` (default `rac`), `upload-sarif` (default `true`), `sarif-file`,
-`rac-version` (pin a release), and `install-from` (`pypi` or `source`). Errors
+Inputs: `path` (default `decisions`), `upload-sarif` (default `true`), and
+`sarif-file`. Errors
 fail the check; warnings — including findings downgraded in `.decided/config.yaml` —
 annotate without failing, so a legacy repo can adopt the gate green on day one and
 tighten over time.
@@ -159,15 +159,15 @@ surface — see [Watchkeeper](watchkeeper.md).)
 
 To carry the whole contract into one required check, `decided gate` composes
 validation, relationship integrity, and review into a single enforced verdict
-under the corpus **enforcement policy**, and emits one combined SARIF document
-(v0.21.14). The `pr-gate-action` runs it and uploads that single SARIF to Code
-Scanning under one category (`rac-gate`), failing when any finding is *blocking*.
+under the corpus **enforcement policy**, and emits one combined SARIF document.
+The `pr-gate-action` runs it and uploads that single SARIF to Code Scanning
+under one category (`decided-gate`), failing when any finding is *blocking*.
 It is the same thin wrapper — the engine decides what is blocking, the action
 computes nothing ([ADR-063](https://github.com/asdecided/core/blob/main/decisions/decisions/adr-063-non-python-clients-are-thin.md)):
 
 ```yaml
-# .github/workflows/rac.yml
-name: RAC
+# .github/workflows/asdecided.yml
+name: AsDecided
 on: [pull_request]
 permissions:
   contents: read
@@ -182,9 +182,9 @@ jobs:
           path: decisions/
 ```
 
-Inputs mirror `validate-action`: `path` (default `rac`), `upload-sarif` (default
-`true`), `sarif-dir` (default `rac-sarif`, now one `gate.sarif`), `rac-version`,
-and `install-from` (`pypi` or `source`).
+Inputs mirror `validate-action`: `path` (default `decisions`),
+`upload-sarif` (default `true`), and `sarif-dir` (default `decided-sarif`, with
+one `gate.sarif` output).
 
 `decided gate <dir>` is also runnable locally — `--json` and `--sarif` produce the
 machine contracts, the exit code is `0` when nothing is blocking and `1`
