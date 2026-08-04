@@ -124,6 +124,7 @@ fn guide_documents_the_native_surface_and_starts_the_example_server() {
         "provenance.status: Accepted",
         "decided doctor decisions/",
         "injection-style-content",
+        "--behind-proxy",
     ] {
         assert!(
             guide.contains(phrase),
@@ -247,6 +248,7 @@ fn public_docs_and_recipes_do_not_reintroduce_retired_surfaces() {
     let root = repo_root();
     let surfaces = [
         "docs/mcp.md",
+        "docs/deployment-hardening.md",
         "docs/cli.md",
         "docs/index.md",
         "docs/security.md",
@@ -347,6 +349,21 @@ fn public_docs_and_recipes_do_not_reintroduce_retired_surfaces() {
     let index = fs::read_to_string(root.join("docs/index.md")).expect("read docs index");
     assert!(index.contains("Apache-2.0 license"));
     assert!(index.contains("tree/main/decisions"));
+
+    let hardening = fs::read_to_string(root.join("docs/deployment-hardening.md"))
+        .expect("read deployment hardening checklist");
+    for phrase in [
+        "--behind-proxy",
+        "TLS at the edge",
+        "X-AsDecided-Principal",
+        "Read-only corpus",
+        "audit:",
+    ] {
+        assert!(
+            hardening.contains(phrase),
+            "deployment hardening checklist omits {phrase:?}"
+        );
+    }
 
     let mcp = fs::read_to_string(root.join(".mcp.json")).expect("read project MCP config");
     let mcp: Value = serde_json::from_str(&mcp).expect("project MCP config is JSON");

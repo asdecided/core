@@ -63,7 +63,7 @@ as an explicit affirmation.
 docker run --rm --entrypoint decided-mcp -p 8000:8000 -v "$PWD:/corpus:ro" \
   ghcr.io/asdecided/core:latest \
   --root /corpus --transport http \
-  --host 0.0.0.0 --port 8000
+  --host 0.0.0.0 --behind-proxy --port 8000
 ```
 
 HTTP serving is **mandatory audit-on**: the server refuses to start without a
@@ -78,8 +78,11 @@ audit:
 ```
 
 No secrets belong in this container: it holds no credentials, terminates no TLS,
-and authenticates nobody. Bind it to the proxy's network, never to the public
-internet.
+and authenticates nobody. `--behind-proxy` is an explicit acknowledgement of
+that deployment shape, not an authentication mechanism. Bind it to the proxy's
+private network, never to the public internet. Complete the
+[deployment hardening checklist](deployment-hardening.md) before putting the
+endpoint into service.
 
 ## 4. The authenticating proxy
 
