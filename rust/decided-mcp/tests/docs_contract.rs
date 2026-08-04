@@ -441,3 +441,37 @@ fn public_docs_and_recipes_do_not_reintroduce_retired_surfaces() {
         );
     }
 }
+
+#[test]
+fn project_governance_states_the_support_and_continuity_contract() {
+    let root = repo_root();
+    let governance =
+        fs::read_to_string(root.join("GOVERNANCE.md")).expect("read project governance");
+    let normalized = governance.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    for required in [
+        "solo-maintained",
+        "Support is best-effort",
+        "five business days",
+        "Only the current stable release is supported",
+        "demand-led rather than scheduled",
+        "Apache-2.0",
+        "asdecided/spec",
+        "no required account, hosted index, or outbound network service",
+        "not a formal source-escrow arrangement",
+    ] {
+        assert!(
+            normalized.contains(required),
+            "GOVERNANCE.md omits required public posture {required:?}"
+        );
+    }
+
+    let enforcement =
+        fs::read_to_string(root.join("docs/governance.md")).expect("read enforcement policy");
+    assert!(enforcement.starts_with("# Enforcement Policy"));
+    assert!(enforcement.contains("GOVERNANCE.md"));
+
+    let readme = fs::read_to_string(root.join("README.md")).expect("read README");
+    assert!(readme.contains("## Governance and continuity"));
+    assert!(readme.contains("[GOVERNANCE.md](GOVERNANCE.md)"));
+}

@@ -1,4 +1,9 @@
-# Governance: the enforcement policy & `decided gate`
+# Enforcement Policy and `decided gate`
+
+This page describes how a repository governs findings produced by AsDecided.
+It is not the governance policy for the AsDecided project itself; see
+[`GOVERNANCE.md`](https://github.com/asdecided/core/blob/main/GOVERNANCE.md)
+for project stewardship, support, release cadence, and continuity.
 
 `decided gate` is AsDecided's single enforcement entry point. It runs validation,
 relationship integrity, and review over a corpus, then classifies every finding

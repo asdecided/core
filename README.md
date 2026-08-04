@@ -112,3 +112,11 @@ tag; it is not maintained or run in normal CI.
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+
+## Governance and continuity
+
+AsDecided core is solo-maintained and supported on a best-effort basis. The
+project does not depend on a hosted service: adopters keep their Markdown
+corpus in their own git repository, while the Apache-2.0 implementation and
+language-neutral specification remain public. See [GOVERNANCE.md](GOVERNANCE.md)
+for the maintainer, release, support, and continuity posture.
