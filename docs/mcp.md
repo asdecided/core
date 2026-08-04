@@ -376,6 +376,10 @@ decided-mcp --root /path/to/your/repo --transport http --host 127.0.0.1 --port 8
 - **`--host` / `--port` / `--path`** — where the HTTP server binds and serves
   (defaults `127.0.0.1`, `8000`, `/mcp`). It binds to loopback by default;
   exposing it to a network is a deliberate deployment choice.
+- **`--behind-proxy`** — required when `--host` is non-loopback. This is an
+  explicit deployment acknowledgement, not authentication; put an
+  authenticating TLS proxy in front and follow the
+  [deployment hardening checklist](deployment-hardening.md).
 
 The HTTP transport is **serving-layer only**: the six tools are unchanged, the
 server re-reads the repository per call (no cache, no session state), and an
