@@ -49,7 +49,7 @@ nav:
   - Artifacts: artifacts.md
   - Relationships: relationships.md
   - Validation: validation.md
-  - Governance: governance.md
+  - Enforcement Policy: governance.md
   - Security: security.md
   - OKF Profile: okf-profile.md
   - Repository Workflow: repo-workflow.md
