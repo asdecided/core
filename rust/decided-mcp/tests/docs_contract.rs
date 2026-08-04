@@ -117,6 +117,36 @@ fn guide_documents_the_native_surface_and_starts_the_example_server() {
         !guide.contains("--telemetry"),
         "guide still advertises the retired MCP telemetry flag"
     );
+    for phrase in [
+        "## Trusting what the server serves",
+        "untrusted data",
+        "human pull-request review",
+        "provenance.status: Accepted",
+        "decided doctor decisions/",
+        "injection-style-content",
+    ] {
+        assert!(
+            guide.contains(phrase),
+            "guide omits trust-boundary guidance: {phrase:?}"
+        );
+    }
+
+    let session_prompt =
+        fs::read_to_string(root.join("decisions/prompts/rac-agent-session-start.md"))
+            .expect("read agent session prompt");
+    for phrase in [
+        "### Trust boundary",
+        "untrusted data",
+        "pull-request review",
+        "provenance.status",
+        "decided doctor",
+        "not a sanitizer",
+    ] {
+        assert!(
+            session_prompt.contains(phrase),
+            "session prompt omits trust-boundary guidance: {phrase:?}"
+        );
+    }
 
     let example_root = root.join("examples/guide");
     let mut child = Command::new(env!("CARGO_BIN_EXE_decided-mcp"))
