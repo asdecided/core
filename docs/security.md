@@ -39,6 +39,16 @@ CI also runs contract certification against `asdecided-spec` and live-corpus
 invariants. This is a self-attested open-source security posture, not a
 third-party certification.
 
+## Vulnerability handling
+
+Report suspected vulnerabilities through the private-advisory flow described
+in the repository's [`SECURITY.md`](https://github.com/asdecided/core/blob/main/SECURITY.md).
+We target acknowledgment within five business days, support the current
+stable release on a latest-release basis, and do not promise a fix-time SLA.
+Confirmed material issues may receive a GitHub Security Advisory and a CVE
+request when eligible. The policy also includes a good-faith research safe
+harbor and coordinated-disclosure guidance.
+
 ## Release verification
 
 Each native release carries a `SHA256SUMS` file, a CycloneDX SBOM, and GitHub
