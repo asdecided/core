@@ -13,11 +13,22 @@ permissions:
   id-token: write
 
 jobs:
+  verification:
+    name: Full native release battery
+    uses: ./.github/workflows/rust-spike.yml
+    with:
+      ref: v${{ inputs.version }}
+    permissions:
+      contents: read
+
   publish:
+    needs: verification
     runs-on: ubuntu-latest
     environment: crates.io
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: v${{ inputs.version }}
       - name: Install pinned Rust toolchain
         working-directory: rust
         run: rustup show
@@ -51,6 +62,7 @@ jobs:
           REQUESTED_VERSION: ${{ inputs.version }}
         run: |
           for attempt in {1..30}; do
+            : "$attempt"
             if cargo info "asdecided-core@$REQUESTED_VERSION" --registry crates-io >/dev/null 2>&1; then
               exit 0
             fi

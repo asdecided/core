@@ -13,7 +13,16 @@ permissions:
   id-token: write
 
 jobs:
+  verification:
+    name: Full native release battery
+    uses: ./.github/workflows/rust-spike.yml
+    with:
+      ref: v${{ inputs.version }}
+    permissions:
+      contents: read
+
   publish:
+    needs: verification
     runs-on: ubuntu-latest
     environment: mcp-registry
     steps:
@@ -36,6 +45,7 @@ jobs:
         run: |
           IMAGE="ghcr.io/asdecided/core:mcp-v$REQUESTED_VERSION"
           for attempt in {1..30}; do
+            : "$attempt"
             if docker manifest inspect "$IMAGE" >/dev/null 2>&1; then
               break
             fi

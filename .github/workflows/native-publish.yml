@@ -6,9 +6,39 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
+  verification:
+    name: Full native release battery
+    uses: ./.github/workflows/rust-spike.yml
+    with:
+      ref: ${{ github.event.release.tag_name }}
+    permissions:
+      contents: read
+
+  metadata:
+    name: Generate release notices
+    needs: verification
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - name: Install pinned Rust toolchain
+        working-directory: rust
+        run: rustup show
+      - name: Generate Cargo dependency notices
+        run: ./scripts/generate-third-party-notices.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: asdecided-third-party-notices
+          path: THIRD-PARTY-NOTICES
+          if-no-files-found: error
+
   binaries:
+    needs: [verification, metadata]
     strategy:
       fail-fast: false
       matrix:
@@ -31,6 +61,11 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: asdecided-third-party-notices
       - name: Install pinned Rust toolchain
         working-directory: rust
         run: rustup show
@@ -51,29 +86,97 @@ jobs:
           TARGET: ${{ matrix.target }}
         run: |
           mkdir -p dist
-          tar -C rust/target/release -czf "dist/asdecided-${TARGET}.tar.gz" decided decided-mcp
+          mkdir -p package
+          cp LICENSE NOTICE THIRD-PARTY-NOTICES package/
+          cp rust/target/release/decided rust/target/release/decided-mcp package/
+          tar -C package -czf "dist/asdecided-${TARGET}.tar.gz" .
       - name: Package Windows binaries
         if: matrix.archive == 'zip'
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force dist | Out-Null
-          Compress-Archive -Path rust/target/release/decided.exe,rust/target/release/decided-mcp.exe -DestinationPath dist/asdecided-${{ matrix.target }}.zip
+          New-Item -ItemType Directory -Force dist,package | Out-Null
+          Copy-Item LICENSE,NOTICE,THIRD-PARTY-NOTICES -Destination package
+          Copy-Item rust/target/release/decided.exe,rust/target/release/decided-mcp.exe -Destination package
+          Compress-Archive -Path package\* -DestinationPath dist/asdecided-${{ matrix.target }}.zip
+      - name: Attest release archive
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/asdecided-${{ matrix.target }}.${{ matrix.archive }}
       - name: Attach binaries to GitHub Release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "${{ github.event.release.tag_name }}" dist/* --clobber
 
+  evidence:
+    name: Publish release verification pack
+    needs: binaries
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - name: Download release archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          mkdir -p dist
+          gh release download "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --dir dist \
+            --pattern 'asdecided-*.tar.gz' \
+            --pattern 'asdecided-*.zip'
+      - name: Generate SHA256SUMS
+        working-directory: dist
+        run: sha256sum asdecided-*.tar.gz asdecided-*.zip > SHA256SUMS
+      - name: Attach SHA256SUMS
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$RELEASE_TAG" dist/SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber
+      - name: Generate CycloneDX SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: rust
+          format: cyclonedx-json
+          output-file: dist/asdecided-${{ github.event.release.tag_name }}-sbom.cdx.json
+          upload-artifact: false
+      - name: Attach CycloneDX SBOM
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$RELEASE_TAG" "dist/asdecided-${RELEASE_TAG}-sbom.cdx.json" --repo "$GITHUB_REPOSITORY" --clobber
+      - name: Attest SHA256SUMS
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/SHA256SUMS
+      - name: Attest CycloneDX SBOM
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/asdecided-${{ github.event.release.tag_name }}-sbom.cdx.json
+
   image:
+    needs: [verification, metadata]
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+      id-token: write
     env:
       IMAGE: ghcr.io/asdecided/core
       TAG: ${{ github.event.release.tag_name }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: asdecided-third-party-notices
       - name: Build and smoke-test CLI image
         run: |
           docker build --target asdecided-cli --build-arg DECIDED_VERSION="$TAG" -t "$IMAGE:$TAG" -t "$IMAGE:latest" .
@@ -92,3 +195,14 @@ jobs:
           docker push "$IMAGE:latest"
           docker push "$IMAGE:mcp-$TAG"
           docker push "$IMAGE:mcp-latest"
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+      - name: Sign published images with GitHub OIDC
+        run: |
+          for reference in \
+            "$IMAGE:$TAG" \
+            "$IMAGE:latest" \
+            "$IMAGE:mcp-$TAG" \
+            "$IMAGE:mcp-latest"; do
+            cosign sign --yes "$reference"
+          done
