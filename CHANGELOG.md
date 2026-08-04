@@ -6,6 +6,14 @@ details, release history over commit history.
 
 ## Unreleased
 
+- Release publishing now fails closed unless the exact SemVer has one unique
+  changelog entry. The same check runs on pull requests and before native,
+  crates.io, or MCP Registry publication.
+- Backfilled the native-release history from v0.24.0 through v0.26.0 from the
+  published GitHub release notes and folded the previously untagged
+  "warm by default" notes into the v0.23.0 release that ultimately shipped
+  them.
+
 ## v0.26.2 — 2026-08-01
 
 - Corrected official MCP Registry publishing to use its supported OCI package
@@ -39,6 +47,59 @@ details, release history over commit history.
   for a signed local Pilot App Store submission.
 - Documented direct Cargo installation for both native executables and the
   official Scoop installation path for Windows.
+
+## v0.26.0 — 2026-07-30
+
+- Made Sentry operational across the native engine and CI: `decided sentry`
+  checks accepted decisions' deterministic source constraints, while
+  `decided gate --code` composes those findings into the merge gate.
+- Added blocking SARIF reporting for required patterns, forbidden patterns,
+  and bounded import checks without embeddings, model calls, network judges,
+  or an LLM escape hatch.
+- Published separate corpus-adoption and eligible-enforcement coverage so
+  decisions that still require human review remain explicit rather than being
+  counted as machine-enforced.
+
+## v0.25.1 — 2026-07-29
+
+- Updated `decided export --okf` to Google OKF v0.2, including its versioned
+  bundle identity, lifecycle projection, deterministic generator metadata,
+  git-derived generation time, and structural relationship export.
+- Kept the old OKF v0.1 shape only as a bounded retirement fixture and removed
+  an unnecessary whole-corpus HTML render from Markdown bundle generation.
+- Preserved the trust boundary: governance links and accepted decisions are
+  not promoted into fabricated sources, verification actors, attestations, or
+  trust tiers.
+
+## v0.25.0 — 2026-07-29
+
+- Added MCP `2026-07-28` discovery and per-request protocol metadata while
+  retaining bounded compatibility with initialize-based `2025-11-25` clients.
+- Added standard MCP HTTP routing headers and errors, explicit result types,
+  cache hints, and JSON Schema 2020-12-compatible tool schemas.
+- Kept the same six read-only tools and preserved corpus freshness, response
+  budgets, mandatory HTTP auditing, and proxy-owned authentication.
+
+## v0.24.1 — 2026-07-28
+
+- Published the native CLI to crates.io so Rust users can install it with
+  `cargo install decided`; the internal implementation crate is published as
+  `asdecided-core` while `decided` remains the supported product interface.
+- Made Cargo package metadata authoritative for source builds, aligned package
+  licensing with Apache-2.0, and added tokenless trusted publishing for
+  subsequent crates.io releases.
+- Continued shipping `decided` and `decided-mcp` together in native Linux,
+  Apple Silicon macOS, and Windows archives.
+
+## v0.24.0 — 2026-07-27
+
+- Introduced Sentry, the deterministic code-side enforcement layer, through
+  `decided sentry` and `decided gate --code`.
+- Added decision-declared forbidden patterns, required patterns, and import
+  boundaries over pull-request diffs or full source trees, with deterministic
+  SARIF and explicit enforcement coverage.
+- Moved Herald rendering to native Rust and shipped native `decided` and
+  `decided-mcp` archives for Linux, Apple Silicon macOS, and Windows.
 
 ## v0.23.1 — 2026-07-24
 
@@ -100,7 +161,7 @@ of dying on one hostile file. Both engines converge on the identical finding:
 the native engine's former oracle-crash divergence marker for this class is
 retired, pinned by new mainline parity cases.
 
-## v0.23.0 — the "warm by default" release
+**Also included: the previously untagged "warm by default" work.**
 
 **The cache is on by default** (ADR-112, supersedes ADR-110). `rac find`,
 `rac validate`, and `rac mcp` now reuse the persistent derived-index and

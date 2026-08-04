@@ -13,6 +13,16 @@ permissions:
   id-token: write
 
 jobs:
+  changelog:
+    name: Verify release changelog
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: v${{ inputs.version }}
+      - name: Require one matching SemVer entry
+        run: ./scripts/verify-release-changelog.sh "${{ inputs.version }}"
+
   verification:
     name: Full native release battery
     uses: ./.github/workflows/rust-spike.yml
@@ -22,7 +32,7 @@ jobs:
       contents: read
 
   publish:
-    needs: verification
+    needs: [verification, changelog]
     runs-on: ubuntu-latest
     environment: mcp-registry
     steps:

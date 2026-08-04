@@ -12,6 +12,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  release-changelog:
+    name: release changelog contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Verify current version has one changelog entry
+        run: |
+          VERSION="$(cargo metadata --manifest-path rust/Cargo.toml --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "decided") | .version')"
+          ./scripts/verify-release-changelog.sh "$VERSION"
+
   # Watchkeeper dogfood (v0.12.3): every pull request here gets a product
   # knowledge review from the local action in source mode — which is also
   # the live end-to-end test of action.yml itself.

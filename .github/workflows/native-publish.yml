@@ -10,6 +10,18 @@ permissions:
   attestations: write
 
 jobs:
+  changelog:
+    name: Verify release changelog
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - name: Require one matching SemVer entry
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: ./scripts/verify-release-changelog.sh "$RELEASE_TAG"
+
   verification:
     name: Full native release battery
     uses: ./.github/workflows/rust-spike.yml
@@ -20,7 +32,7 @@ jobs:
 
   metadata:
     name: Generate release notices
-    needs: verification
+    needs: [verification, changelog]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -161,7 +173,7 @@ jobs:
           subject-path: dist/asdecided-${{ github.event.release.tag_name }}-sbom.cdx.json
 
   image:
-    needs: [verification, metadata]
+    needs: [verification, changelog, metadata]
     runs-on: ubuntu-latest
     permissions:
       contents: read
