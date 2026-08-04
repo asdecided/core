@@ -888,6 +888,9 @@ decided-mcp --root /path/to/repo \
 - **`--root PATH`** — repository root to serve (default: current directory)
 - **`--transport {stdio,http}`** — MCP transport (default: `stdio`)
 - **`--host HOST`** — HTTP bind host (default: `127.0.0.1`)
+- **`--behind-proxy`** — explicitly acknowledge a non-loopback HTTP bind;
+  required when `--host` is not loopback. This does not authenticate the
+  endpoint; put an authenticating TLS proxy in front ([deployment hardening](deployment-hardening.md)).
 - **`--port PORT`** — HTTP bind port (default: `8000`)
 - **`--path PATH`** — HTTP endpoint path (default: `/mcp`)
 - **`--budget N`** — maximum response size in characters (minimum `128`)

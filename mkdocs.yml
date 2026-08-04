@@ -40,6 +40,7 @@ nav:
   - Quickstart: quickstart.md
   - MCP Server: mcp.md
   - Shared Server: shared-server.md
+  - Deployment Hardening: deployment-hardening.md
   - Org Grounding: org-grounding.md
   - CLI Reference: cli.md
   - Context Cost: context-cost.md

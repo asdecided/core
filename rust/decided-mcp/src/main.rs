@@ -41,6 +41,25 @@ fn usage_error(msg: &str) -> ! {
     std::process::exit(2);
 }
 
+fn is_loopback_host(host: &str) -> bool {
+    host.eq_ignore_ascii_case("localhost")
+        || host
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|address| address.is_loopback())
+}
+
+fn non_loopback_bind_error(transport: &str, host: &str, behind_proxy: bool) -> Option<String> {
+    if transport == "http" && !behind_proxy && !is_loopback_host(host) {
+        Some(format!(
+            "non-loopback HTTP bind {host:?} requires explicit --behind-proxy acknowledgement; \
+             put an authenticating TLS proxy in front of the server and review \
+             docs/deployment-hardening.md before exposing it"
+        ))
+    } else {
+        None
+    }
+}
+
 fn main() {
     let mut argv = std::env::args().skip(1);
     let mut root = ".".to_string();
@@ -49,6 +68,7 @@ fn main() {
     // the streamable-HTTP transport (mandatory audit-on, loopback by default).
     let mut transport = "stdio".to_string();
     let mut host = "127.0.0.1".to_string();
+    let mut behind_proxy = false;
     let mut port: u16 = 8000;
     let mut path = "/mcp".to_string();
     let mut server_budget = budget::DEFAULT_BUDGET;
@@ -70,6 +90,7 @@ fn main() {
                 Some(v) => host = v,
                 None => usage_error("--host requires a value"),
             },
+            "--behind-proxy" => behind_proxy = true,
             "--port" => match argv.next() {
                 Some(v) => match v.parse::<u16>() {
                     Ok(p) => port = p,
@@ -105,6 +126,9 @@ fn main() {
             "--cache" => cache = true,
             other => usage_error(&format!("unrecognized argument: {other}")),
         }
+    }
+    if let Some(message) = non_loopback_bind_error(&transport, &host, behind_proxy) {
+        usage_error(&message);
     }
     if !std::path::Path::new(&root).is_dir() {
         usage_error(&format!("not a directory: {root}"));
@@ -598,6 +622,26 @@ fn dispatch(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn loopback_host_detection_is_conservative() {
+        assert!(is_loopback_host("127.0.0.1"));
+        assert!(is_loopback_host("::1"));
+        assert!(is_loopback_host("localhost"));
+        assert!(is_loopback_host("LOCALHOST"));
+        assert!(!is_loopback_host("0.0.0.0"));
+        assert!(!is_loopback_host("::"));
+        assert!(!is_loopback_host("knowledge.internal"));
+    }
+
+    #[test]
+    fn non_loopback_http_requires_explicit_proxy_acknowledgement() {
+        assert!(non_loopback_bind_error("http", "0.0.0.0", false).is_some());
+        assert!(non_loopback_bind_error("http", "::", false).is_some());
+        assert!(non_loopback_bind_error("http", "0.0.0.0", true).is_none());
+        assert!(non_loopback_bind_error("http", "127.0.0.1", false).is_none());
+        assert!(non_loopback_bind_error("stdio", "0.0.0.0", false).is_none());
+    }
 
     const DECISION: &str = "---\nschema_version: 1\nid: FIX-0DEC1GRAPH00\ntype: decision\n---\n# Graph Decision\n\n## Context\n\nGraph context.\n\n## Decision\n\nKeep the graph indexed.\n\n## Consequences\n\nFast reads.\n\n## Status\n\nAccepted\n";
 
