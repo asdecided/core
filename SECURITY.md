@@ -1,10 +1,11 @@
 # Security Model
 
-This document describes the trust and threat model for **RAC Core** and the
-**AsDecided** read-only MCP server in this repository. It is scoped to that surface:
-it explains what the read-only guarantee does and does not protect, and how to
-report a vulnerability. It deliberately does **not** promise a vulnerability-
-response SLA, a content sanitizer, or any automated per-artifact trust verdict.
+This document describes the trust and threat model for the native **AsDecided**
+engine and read-only MCP server in this repository. It explains what the
+read-only guarantee does and does not protect, and how to report a
+vulnerability. We target an acknowledgment within **five business days**;
+that is an acknowledgment target, not a fix-time SLA. This policy does not
+promise a content sanitizer or any automated per-artifact trust verdict.
 
 ## Trust model
 
@@ -67,9 +68,50 @@ RAC never sanitizes, rewrites, redacts, or filters artifact content. The
 trust boundary stays human PR review (ADR-065); the aids inform that review,
 they do not replace it.
 
+## Supported versions
+
+AsDecided is maintained on a latest-release basis. The current stable release
+is the supported security target; older minor lines, prereleases, snapshots,
+and the archived `python-engine-final` snapshot are not supported. If a report
+affects an older release, upgrade to the current stable release before
+requesting a backport.
+
+| Version | Security support |
+| --- | --- |
+| Current stable release | Investigated; fixes are best-effort and may require an upgrade to a newer release |
+| Older minor releases | Not supported; upgrade to current stable |
+| Prereleases, snapshots, and archived Python engine | Not supported |
+
 ## Reporting a vulnerability
 
 Report suspected vulnerabilities privately through GitHub's **"Report a
 vulnerability"** flow on this repository's **Security** tab (private security
-advisories). Please do not open a public issue for a security report. This is
-the report channel; it does not carry a response-time commitment.
+advisories). Please do not open a public issue for a security report. Include
+the affected version or commit, operating system, a minimal reproduction, and
+the impact you observed; redact secrets and personal data.
+
+We aim to acknowledge a report within five business days. We do not promise a
+fix deadline: this is a solo-maintained open-source project, and a fix may
+require a release or an upgrade path. We will keep the advisory private while
+we assess it and will coordinate disclosure with the reporter where practical.
+
+## Advisories and identifiers
+
+For a confirmed vulnerability with material security impact, we intend to
+publish a GitHub Security Advisory and request a CVE through GitHub's CVE
+Numbering Authority when the issue is eligible. Not every report qualifies for
+a CVE; the advisory and release notes will explain the affected versions,
+severity, mitigations, and fixed version when one exists.
+
+## Safe harbor for good-faith research
+
+Security research is welcome when it is conducted against a local copy,
+disposable test corpus, or another system you are authorized to test. Please
+avoid accessing data that is not yours, exfiltrating secrets, degrading
+availability, modifying another person's repository, social engineering, or
+automated high-volume scanning of public infrastructure. Stop testing and
+contact us if you encounter real user data or a service-impacting condition.
+
+We will not initiate legal action for good-faith research that follows these
+guidelines. We ask researchers to allow reasonable time for assessment and
+coordinated disclosure before making details public.
