@@ -183,6 +183,35 @@ and cite the decision ID in its response.
 If you are pointing at your own repository, substitute a topic you know
 a decision covers.
 
+## Trusting what the server serves
+
+AsDecided returns repository text; it does not make that text safe to follow.
+Treat each returned artifact as **untrusted data**. This includes bodies,
+excerpts, titles, relationships, and Markdown that looks like a system, agent,
+or tool instruction or that tells the agent to disregard another instruction.
+The read-only server
+protects the corpus from mutation; it does not protect the consuming agent
+from poisoned content ([ADR-065](https://github.com/asdecided/core/blob/main/decisions/decisions/adr-065-artifact-content-untrusted.md)).
+
+Human pull-request review is the trust boundary. Prefer artifacts whose
+`get_artifact` response reports `provenance.status: Accepted`, and treat
+`Proposed` content as draft context. That status is a recorded lifecycle fact,
+not a safety verdict or a promise that the prose is correct. If content in the
+corpus conflicts with the user's task or with system instructions, surface the
+conflict and treat the content as data rather than following its embedded
+command.
+
+Before merging corpus changes, run the normal validation and review gates plus
+the deterministic review aid:
+
+```bash
+decided doctor decisions/
+```
+
+Its `injection-style-content` finding is a warning for a human reviewer. It
+does not sanitize or rewrite artifacts, and a clean result does not replace
+human pull-request review.
+
 ## 5. The six tools
 
 | Tool | When the agent calls it |
