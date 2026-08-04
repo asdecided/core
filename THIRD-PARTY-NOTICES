@@ -1,0 +1,12 @@
+AsDecided third-party notices
+============================
+
+The native release workflow regenerates this inventory from the locked Cargo
+dependency graph before packaging. The accompanying CycloneDX SBOM is the
+authoritative machine-readable record of dependency versions and license
+metadata for each release.
+
+This repository does not vendor third-party source code. Each dependency's
+license and notice text remains available from its upstream package source;
+the release archive and container image carry this inventory together with
+LICENSE and NOTICE.

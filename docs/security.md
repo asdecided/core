@@ -38,3 +38,36 @@ cargo clippy --workspace --all-targets -- -D warnings
 CI also runs contract certification against `asdecided-spec` and live-corpus
 invariants. This is a self-attested open-source security posture, not a
 third-party certification.
+
+## Release verification
+
+Each native release carries a `SHA256SUMS` file, a CycloneDX SBOM, and GitHub
+artifact-build attestations. Archives include `LICENSE`, `NOTICE`, and
+`THIRD-PARTY-NOTICES`; the same notices are present in the published container
+image at `/usr/share/doc/asdecided/`. The release workflow runs the full native
+Rust battery before building or publishing any archive, crate, image, or MCP
+Registry entry.
+
+After downloading an archive and the `SHA256SUMS` asset from the release, verify
+the bytes and provenance from a trusted checkout of this repository:
+
+```bash
+sha256sum -c SHA256SUMS
+gh attestation verify asdecided-x86_64-unknown-linux-gnu.tar.gz \
+  --repo asdecided/core
+```
+
+The SBOM is the `asdecided-<tag>-sbom.cdx.json` release asset. Verify a GHCR
+image's keyless signature with the GitHub Actions OIDC issuer and the exact
+release workflow identity:
+
+```bash
+cosign verify \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp \
+    'https://github.com/asdecided/core/.github/workflows/native-publish.yml@refs/tags/v.*' \
+  ghcr.io/asdecided/core:mcp-v<version>
+```
+
+The checksum, SBOM, and signature cover the published artifact; the source
+repository and locked Cargo graph remain the reviewable build inputs.

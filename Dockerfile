@@ -27,6 +27,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /src/rust/target/release/decided /usr/local/bin/decided
 COPY --from=builder /src/rust/target/release/decided-mcp /usr/local/bin/decided-mcp
+COPY LICENSE NOTICE THIRD-PARTY-NOTICES /usr/share/doc/asdecided/
 
 WORKDIR /work
 
