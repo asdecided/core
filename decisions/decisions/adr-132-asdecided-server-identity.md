@@ -54,4 +54,4 @@ does not alter MCP wire semantics or the read-only serving boundary.
 
 ## Related Requirements
 
-- RAC-KXS19RDVX4DJ (Org Endpoint Wiring)
+- rac-org-endpoint-wiring
