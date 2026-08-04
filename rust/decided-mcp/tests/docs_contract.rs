@@ -19,6 +19,82 @@ fn repo_root() -> PathBuf {
         .to_path_buf()
 }
 
+const SUPPORTED_DECIDED_COMMANDS: &[&str] = &[
+    "validate",
+    "diff",
+    "stats",
+    "inspect",
+    "improve",
+    "schema",
+    "relationships",
+    "rename",
+    "review",
+    "doctor",
+    "coverage",
+    "gate",
+    "watchkeeper",
+    "portfolio",
+    "index",
+    "export",
+    "mcp-stats",
+    "telemetry",
+    "usage",
+    "new",
+    "templates",
+    "init",
+    "quickstart",
+    "resolve",
+    "find",
+    "decisions-for",
+    "eval",
+    "migrate",
+    "skill",
+    "hook",
+    "retrieve",
+    "sentry",
+    "herald",
+];
+
+fn documented_decided_command(line: &str) -> Option<&str> {
+    let line = line.trim();
+    let line = line
+        .strip_prefix("$ ")
+        .or_else(|| line.strip_prefix("> "))
+        .unwrap_or(line);
+    let mut words = line.split_whitespace();
+    if words.next()? != "decided" {
+        return None;
+    }
+    let command = words.next()?;
+    if command.starts_with('<') || command.starts_with('-') {
+        return None;
+    }
+    Some(command.trim_matches('`'))
+}
+
+fn assert_fenced_commands_are_supported(root: &Path, relative: &str) {
+    let path = root.join(relative);
+    let text = fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("read command contract surface {relative}: {error}"));
+    let mut in_fence = false;
+    for (line_number, line) in text.lines().enumerate() {
+        if line.trim_start().starts_with("```") {
+            in_fence = !in_fence;
+            continue;
+        }
+        if !in_fence {
+            continue;
+        }
+        let Some(command) = documented_decided_command(line) else {
+            continue;
+        };
+        assert!(
+            SUPPORTED_DECIDED_COMMANDS.contains(&command),
+            "{relative}:{line_number}: documented unsupported decided subcommand {command:?}"
+        );
+    }
+}
+
 #[test]
 fn guide_documents_the_native_surface_and_starts_the_example_server() {
     let root = repo_root();
@@ -149,6 +225,9 @@ fn public_docs_and_recipes_do_not_reintroduce_retired_surfaces() {
         "docs/ecosystem.md",
         "docs/governance.md",
         "docs/relationships.md",
+        "docs/org-grounding.md",
+        "docs/validation.md",
+        "docs/watchkeeper.md",
         "examples/_recipe-template/README.md",
         "examples/amp/README.md",
         "examples/claude-code/README.md",
@@ -162,6 +241,10 @@ fn public_docs_and_recipes_do_not_reintroduce_retired_surfaces() {
         "examples/opencode/README.md",
         "examples/windsurf/README.md",
         "examples/zed/README.md",
+        "rust/rac-engine/assets/skills/decided-artifacts/SKILL.md",
+        "rust/rac-engine/assets/skills/decided-capture/SKILL.md",
+        "rust/rac-engine/assets/skills/decided-import/SKILL.md",
+        "rust/rac-engine/assets/skills/decided-review/SKILL.md",
     ];
     let banned = [
         "--telemetry",
@@ -173,6 +256,16 @@ fn public_docs_and_recipes_do_not_reintroduce_retired_surfaces() {
         "mcpServers.lore",
         "examples/guide/rac",
         ".rac/",
+        "decided ingest ",
+        "decided-ingest",
+        "decided explorer ",
+        "rac-artifacts",
+        "rac-review",
+        "rac-import",
+        "rac-ingest",
+        "rac-core",
+        "pip install",
+        "`rac` CLI",
     ];
     for relative in surfaces {
         let path = root.join(relative);
@@ -184,6 +277,41 @@ fn public_docs_and_recipes_do_not_reintroduce_retired_surfaces() {
                 "{relative} reintroduces retired surface {needle:?}"
             );
         }
+    }
+
+    for relative in [
+        "README.md",
+        "CONTRIBUTING.md",
+        "docs/artifacts.md",
+        "docs/cli.md",
+        "docs/context-cost.md",
+        "docs/governance.md",
+        "docs/index.md",
+        "docs/integration-recipes.md",
+        "docs/mcp.md",
+        "docs/okf-profile.md",
+        "docs/org-grounding.md",
+        "docs/quickstart.md",
+        "docs/repo-workflow.md",
+        "docs/relationships.md",
+        "docs/security.md",
+        "docs/validation.md",
+        "docs/watchkeeper.md",
+        "examples/_recipe-template/README.md",
+        "examples/amp/README.md",
+        "examples/claude-code/README.md",
+        "examples/cline/README.md",
+        "examples/codex/README.md",
+        "examples/copilot/README.md",
+        "examples/cursor/README.md",
+        "examples/guide/demo.md",
+        "examples/obey-demo/README.md",
+        "examples/omnigent/README.md",
+        "examples/opencode/README.md",
+        "examples/windsurf/README.md",
+        "examples/zed/README.md",
+    ] {
+        assert_fenced_commands_are_supported(&root, relative);
     }
 
     let index = fs::read_to_string(root.join("docs/index.md")).expect("read docs index");

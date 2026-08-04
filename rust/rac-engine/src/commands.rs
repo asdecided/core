@@ -603,7 +603,7 @@ fn read_markdown_input(target: &str, command: &str) -> Result<String, i32> {
     let suffix = py_suffix_lower(target);
     if suffix != ".md" && suffix != ".markdown" {
         return Err(usage_error(&format!(
-            "{command} expects a Markdown file; convert it first with: decided ingest {target}"
+            "{command} expects a Markdown file; convert {target} first with an AsDecided ingestion connector"
         )));
     }
     match std::fs::read(target) {
@@ -716,8 +716,8 @@ pub fn cmd_relationships(args: &RelationshipsArgs) -> i32 {
             .unwrap_or_default();
         if suffix != ".md" && suffix != ".markdown" {
             return usage_error(&format!(
-                "relationships expects a Markdown file or directory; \
-                 convert it first with: decided ingest {}",
+                "relationships expects a Markdown file or directory: {}; \
+                 convert it first with an AsDecided ingestion connector",
                 args.path
             ));
         }

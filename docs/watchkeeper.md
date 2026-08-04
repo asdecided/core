@@ -14,7 +14,7 @@ only network use in CI is installing the package.
 ## The command
 
 ```bash
-decided watchkeeper rac --base main
+decided watchkeeper decisions/ --base main
 ```
 
 See the [CLI reference](cli.md#watchkeeper) for every flag, the finding
@@ -59,7 +59,7 @@ On every pull request that touches your corpus you get:
 
 | Input | Default | Meaning |
 | --- | --- | --- |
-| `path` | `rac` | Corpus directory to compare |
+| `path` | `decisions` | Corpus directory to compare |
 | `base` | `''` | Base revision; empty resolves to `origin/<PR base branch>` |
 | `fail-on` | `error` | `error` · `warning` · `none` (report, never fail) |
 | `annotate` | `true` | Emit inline annotations |
@@ -77,7 +77,7 @@ jobs:
   watchkeeper:
     uses: asdecided/core/.github/workflows/watchkeeper.yml@<release-tag>
     with:
-      path: rac
+      path: decisions
 ```
 
 It wires up the full-history checkout and passes every input through to

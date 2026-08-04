@@ -1,6 +1,6 @@
 ---
 name: decided-import
-description: Reformat ONE existing document (a decision, requirement, design, roadmap, or prompt) into ONE valid RAC (requirements-as-code) artifact, with a mandatory human-review step before any file is written and `decided validate` as the deterministic close. Use when a user wants to add or import a single existing decision or document into AsDecided (a project's decisions/ directory). Single-document only — for multi-format or bulk conversion use the decided-ingest skill.
+description: Reformat ONE existing Markdown document (a decision, requirement, design, roadmap, or prompt) into ONE valid AsDecided artifact, with a mandatory human-review step before any file is written and `decided validate` as the deterministic close. Use when a user wants to add or import a single existing document into AsDecided (a project's decisions/ directory). Single-document only — for rich documents or bulk conversion use an external AsDecided ingestion connector.
 ---
 
 # RAC single-document import
@@ -13,8 +13,9 @@ adds AI to the AsDecided core — it runs in the coding agent and uses the `deci
 
 - **One document in, one artifact out.** If asked to import a directory, a
   whole wiki, or several documents at once, stop and explain that this skill
-  handles exactly one document → one artifact by design. For multi-format or
-  bulk conversion, point the user to the `decided-ingest` skill.
+  handles exactly one Markdown document → one artifact by design. For rich
+  documents or bulk conversion, point the user to an external AsDecided
+  ingestion connector.
 - **The schema is not yours to invent.** Read the real shape with
   `decided schema <type>` (and `decided schema` for the list of recognised types).
   Use the real section names, the real five artifact types, and the real
@@ -41,17 +42,12 @@ not obvious, what kind of decision or requirement it represents. If they offer
 more than one document or a directory, apply the single-document constraint
 above before going further.
 
-## 2. Convert (only if not already Markdown)
+## 2. Get Markdown (if the source is rich text)
 
-```bash
-decided ingest decision.docx          # preview Markdown on stdout
-```
-
-`decided ingest <file>` converts DOCX / PDF / HTML / PPTX / XLSX / Markdown to
-Markdown text, preserving structure — it does not judge whether the result is a
-valid artifact. Pasted Markdown needs no conversion. Rich formats need the
-optional extras (`pip install 'decided-core[ingest]'`, `[ingest-pdf]`,
-`[ingest-office]`); the command names the missing extra when one is needed.
+The native engine does not ingest DOCX, PDF, HTML, PPTX, or XLSX. Ask the user
+to run an external AsDecided ingestion connector and provide the resulting
+Markdown for review. Pasted Markdown needs no conversion. This skill never
+installs Python packages or silently changes the source document.
 
 ## 3. Choose the type and read its real schema
 
@@ -133,7 +129,8 @@ fill a missing recommended section. If the artifact links to others, finish with
 ## Out of scope
 
 - Bulk or batch import, directory crawling, or "migrate my whole wiki" (one
-  document → one artifact only; use `decided-ingest` for broader conversion).
+  Markdown document → one artifact only; use an external ingestion connector
+  for broader conversion).
 - Inferring relationships by scanning the repository — only the links the source
   document itself names, each confirmed by the user.
 - Auto-committing the new artifact without the human-review step.

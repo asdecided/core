@@ -1,4 +1,4 @@
-# RAC with Claude Code
+# AsDecided with Claude Code
 
 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) is AsDecided's most
 integrated client — it gets the two surfaces every client gets (a generated
@@ -12,7 +12,7 @@ bundled authoring **skill** and the only platform seam that allows a real
 brew install asdecided/tap/asdecided-core   # the `decided` CLI and the `decided-mcp` server
 ```
 
-A repository with a RAC corpus under `decisions/` (run `decided quickstart`, or use this
+A repository with an AsDecided corpus under `decisions/` (run `decided quickstart`, or use this
 repository's own `decisions/`).
 
 ## 1. `CLAUDE.md` — context every session (the push)
@@ -49,30 +49,30 @@ on every call and never writes to the repo.
 ## 3. The authoring skill (Claude-Code-specific)
 
 ```bash
-decided skill install rac-artifacts
+decided skill install decided-artifacts
 ```
 
 Installs a project skill that teaches Claude Code to create, validate, and
-update RAC artifacts with the `rac` CLI (it only touches the `decisions/` subtree).
-`decided skill list` shows the bundled skills (`rac-artifacts`, `rac-import`,
-`rac-ingest`, `rac-review`).
+update AsDecided artifacts with the `decided` CLI (it only touches the
+`decisions/` subtree). `decided skill list` shows the bundled skills
+(`decided-artifacts`, `decided-capture`, `decided-import`, `decided-review`).
 
 ## 4. Enforcement — two seams
 
-RAC supplies context and enforces *after* the edit (ADR-067); it does not rewrite
+AsDecided supplies context and enforces *after* the edit (ADR-067); it does not rewrite
 Claude Code's loop. Two optional guards:
 
 - **Git hook (any client).** `decided hook install --style pre-commit` validates
   staged artifacts on commit (`--style post-commit` is an advisory cadence
   nudge that never blocks). This is a *git* hook, not a Claude Code hook.
 - **Pre-edit veto (Claude-Code-only).** Claude Code's `PreToolUse` hook is the
-  one platform seam that can block an edit *before* it lands. The RAC VS Code /
+  one platform seam that can block an edit *before* it lands. The AsDecided VS Code /
   Cursor extension generates it ("RAC: Enable Claude Code pre-edit hook"), or you
   can register it by hand in `.claude/settings.json` under `hooks.PreToolUse`:
   it pipes the proposed content to `decided validate - --corpus decisions/` and **blocks
   (exit 2)** only on a structural finding — a reference to a retired or missing
   decision, or a malformed artifact — and **fails open** on any internal error.
-  All validation stays in `rac`; the hook computes nothing (ADR-063, ADR-067).
+  All validation stays in `decided`; the hook computes nothing (ADR-063, ADR-067).
 
 Either way, the CI / PR gate (`decided validate`, `decided relationships --validate`)
 remains the backstop, regardless of which agent edited.
@@ -89,6 +89,6 @@ unconnected run violates: [`examples/guide/`](../guide/demo.md).
 | --- | --- | --- |
 | `CLAUDE.md` | `decided export decisions/ --agent-rules` | Reads it every session |
 | `asdecided` MCP | `claude mcp add asdecided -- decided-mcp --root .` | Calls `find_decisions` / `get_related` on demand |
-| Skill | `decided skill install rac-artifacts` | Authors artifacts with the `rac` CLI |
+| Skill | `decided skill install decided-artifacts` | Authors artifacts with the `decided` CLI |
 | Pre-edit veto | `.claude/settings.json` → `PreToolUse` → `decided validate - --corpus decisions/` | Blocks an edit that contradicts a decision |
 | CI gate | `decided validate` · `decided relationships --validate` | Enforces on every PR |

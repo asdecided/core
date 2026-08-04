@@ -1,6 +1,6 @@
 ---
 name: decided-capture
-description: Capture a NEW decision or requirement from a conversation (an interview) into ONE valid RAC (requirements-as-code) artifact — you interview and propose, the human ratifies, `decided validate` closes, and promotion into the trusted corpus is by pull request reviewed by someone other than the author. Use when a user wants to record a fresh decision or requirement into AsDecided (a project's decisions/ directory) by talking it through rather than importing a document. For an existing document use decided-import; for bulk conversion use decided-ingest.
+description: Capture a NEW decision or requirement from a conversation (an interview) into ONE valid AsDecided artifact — you interview and propose, the human ratifies, `decided validate` closes, and promotion into the trusted corpus is by pull request reviewed by someone other than the author. Use when a user wants to record a fresh decision or requirement into AsDecided (a project's decisions/ directory) by talking it through rather than importing a document. For an existing document use decided-import; for bulk conversion use an external ingestion connector.
 ---
 
 # RAC interview capture
@@ -153,7 +153,7 @@ Never open-and-self-approve, and never merge the author's own capture for them.
 
 - Reformatting an **existing document** into an artifact — use `decided-import`.
 - Bulk or batch conversion, directory crawling, or "migrate my whole wiki" — use
-  `decided-ingest`.
+  an external AsDecided ingestion connector.
 - Inferring relationships by scanning the repository — only the links the author
   names, each confirmed.
 - Inventing context, consequences, rationale, or requirements the author did not

@@ -6,7 +6,7 @@ The toolchain is pinned by `rust/rust-toolchain.toml`.
 
 ```bash
 git clone https://github.com/asdecided/core.git
-cd rac-core/rust
+cd core/rust
 rustup show
 cargo build --workspace --locked
 ```
@@ -50,7 +50,7 @@ Follow `decisions/prompts/rac-agent-commit-guidelines.md`:
 
 ## License and sign-off
 
-RAC is licensed under Apache-2.0. Contributions must carry a
+AsDecided is licensed under Apache-2.0. Contributions must carry a
 [Developer Certificate of Origin](https://developercertificate.org/) sign-off:
 
 ```bash

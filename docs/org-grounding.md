@@ -52,7 +52,8 @@ Nothing about it is special to the engine. What makes it work is editorial:
 
 - **Curate the live constraints, not the archive.** A few hundred binding,
   current decisions ground agents better than ten thousand imported pages.
-  Seed it with [`decided ingest`](cli.md#ingest) from what already exists, and
+  Seed it with an ingestion connector from
+  [`asdecided/connectors`](https://github.com/asdecided/connectors), then
   promote only what an owner ratifies as live.
 - **Govern it like code.** Changes land by pull request behind required
   review; use `CODEOWNERS` on `decisions/decisions/` so every standard has an

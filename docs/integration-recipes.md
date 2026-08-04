@@ -1,6 +1,6 @@
-# Integration recipes — authoring guide
+# AsDecided integration recipes — authoring guide
 
-RAC meets a coding agent on two surfaces it does not own: a generated
+AsDecided meets a coding agent on two surfaces it does not own: a generated
 agent-instructions file the agent reads (the **push**), and the `asdecided` MCP server
 the agent connects to for live retrieval (the **pull**). Because both are standard
 surfaces, connecting a new harness is **documentation, not engine work** — a worked
@@ -28,7 +28,7 @@ template (ADR-021).
 
 A recipe README has these parts, in this order:
 
-1. **Title and framing** — `# RAC with <Client>`, then one line naming the two
+1. **Title and framing** — `# AsDecided with <Client>`, then one line naming the two
    surfaces (the context file the client reads, and the `asdecided` MCP server).
 2. **Prerequisites** — `brew install asdecided/tap/asdecided-core` and a corpus under `decisions/`.
 3. **Context file (the push)** — `decided export decisions/ --agent-rules`, and which
