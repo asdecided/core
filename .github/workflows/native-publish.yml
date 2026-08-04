@@ -23,7 +23,7 @@ jobs:
     needs: verification
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.release.tag_name }}
       - name: Install pinned Rust toolchain
@@ -31,7 +31,7 @@ jobs:
         run: rustup show
       - name: Generate Cargo dependency notices
         run: ./scripts/generate-third-party-notices.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: asdecided-third-party-notices
           path: THIRD-PARTY-NOTICES
@@ -60,10 +60,10 @@ jobs:
             archive: zip
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.release.tag_name }}
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: asdecided-third-party-notices
       - name: Install pinned Rust toolchain
@@ -99,7 +99,7 @@ jobs:
           Copy-Item rust/target/release/decided.exe,rust/target/release/decided-mcp.exe -Destination package
           Compress-Archive -Path package\* -DestinationPath dist/asdecided-${{ matrix.target }}.zip
       - name: Attest release archive
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: dist/asdecided-${{ matrix.target }}.${{ matrix.archive }}
       - name: Attach binaries to GitHub Release
@@ -117,7 +117,7 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.release.tag_name }}
       - name: Download release archives
@@ -152,11 +152,11 @@ jobs:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: gh release upload "$RELEASE_TAG" "dist/asdecided-${RELEASE_TAG}-sbom.cdx.json" --repo "$GITHUB_REPOSITORY" --clobber
       - name: Attest SHA256SUMS
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: dist/SHA256SUMS
       - name: Attest CycloneDX SBOM
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: dist/asdecided-${{ github.event.release.tag_name }}-sbom.cdx.json
 
@@ -171,10 +171,10 @@ jobs:
       IMAGE: ghcr.io/asdecided/core
       TAG: ${{ github.event.release.tag_name }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.release.tag_name }}
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: asdecided-third-party-notices
       - name: Build and smoke-test CLI image
