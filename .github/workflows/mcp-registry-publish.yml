@@ -17,7 +17,7 @@ jobs:
     name: Verify release changelog
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: v${{ inputs.version }}
       - name: Require one matching SemVer entry
@@ -36,7 +36,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: mcp-registry
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: v${{ inputs.version }}
       - name: Verify requested version and OCI metadata
