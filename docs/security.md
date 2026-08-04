@@ -26,6 +26,9 @@ The shipped implementation is the Cargo workspace under `rust/`. Review
 `rust/Cargo.lock` for its resolved dependency graph. The Python package,
 Python dependency manifest, and Python engine were retired from this
 repository; the final snapshot is preserved at `python-engine-final`.
+CI enforces [`deny.toml`](https://github.com/asdecided/core/blob/main/deny.toml)
+with `cargo-deny` for RustSec advisories, accepted licenses, crates.io-only
+sources, and the no-egress dependency ban list.
 
 ## Verification
 
