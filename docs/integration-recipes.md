@@ -1,13 +1,13 @@
 # Integration recipes — authoring guide
 
 RAC meets a coding agent on two surfaces it does not own: a generated
-agent-instructions file the agent reads (the **push**), and the `lore` MCP server
+agent-instructions file the agent reads (the **push**), and the `asdecided` MCP server
 the agent connects to for live retrieval (the **pull**). Because both are standard
 surfaces, connecting a new harness is **documentation, not engine work** — a worked
 `examples/<client>/` setup plus a row in [`docs/ecosystem.md`](ecosystem.md).
 
 This guide is the authoring contract for those recipes. The shapes recur — the same
-`lore` invocation in three config dialects, the same push/pull/enforcement README
+`asdecided` invocation in three config dialects, the same push/pull/enforcement README
 structure, the same "verify with the grounding demo" close — so a new recipe is
 filling a template, not reverse-engineering an existing one. Every recipe adds
 **zero `asdecided-core` engine diff**: it consumes only the two stable surfaces (the
@@ -17,7 +17,7 @@ stores and serves nothing new (ADR-024).
 ## The template
 
 Copy [`examples/_recipe-template/`](../examples/_recipe-template/) to
-`examples/<client>/` and fill it in. It carries the README skeleton and the `lore`
+`examples/<client>/` and fill it in. It carries the README skeleton and the `asdecided`
 invocation in all three config dialects; the inline HTML comments tell you what to
 replace and what to leave alone. You should be able to produce a complete,
 structurally consistent recipe from the template and this checklist **without
@@ -29,20 +29,22 @@ template (ADR-021).
 A recipe README has these parts, in this order:
 
 1. **Title and framing** — `# RAC with <Client>`, then one line naming the two
-   surfaces (the context file the client reads, and the `lore` MCP server).
+   surfaces (the context file the client reads, and the `asdecided` MCP server).
 2. **Prerequisites** — `brew install asdecided/tap/asdecided-core` and a corpus under `decisions/`.
 3. **Context file (the push)** — `decided export decisions/ --agent-rules`, and which
    generated file this client reads (`AGENTS.md` is the glob-free default;
    `CLAUDE.md` and `.github/copilot-instructions.md` are the other targets).
-4. **The `lore` MCP server (the pull)** — the config path for this client and the
-   server invocation in the client's dialect (below). Name the five read-only
-   tools and note the server re-reads the corpus per call and never writes.
+4. **The `asdecided` MCP server (the pull)** — the config path for this client and the
+   server invocation in the client's dialect (below). Name the six read-only
+   tools (`get_artifact`, `search_artifacts`, `retrieve_grounding`,
+   `find_decisions`, `get_related`, `get_summary`) and note the server re-reads
+   the corpus per call and never writes.
 5. **Enforcement is separate** — the fixed ADR-067 paragraph (below). Do not
    reword it.
 6. **Verify it** — the grounding demo, [`examples/guide/`](../examples/guide/demo.md).
-7. **Summary** — the three-row table (context file, `lore` MCP, CI gate).
+7. **Summary** — the three-row table (context file, `asdecided` MCP, CI gate).
 
-### The `lore` invocation, in three dialects
+### The `asdecided` invocation, in three dialects
 
 Every recipe runs the same server — `decided-mcp --root .` — expressed in whichever
 config dialect the harness uses. Keep only the one your harness reads.
@@ -52,14 +54,14 @@ config dialect the harness uses. Keep only the one your harness reads.
 ```
 
 ```toml
-[mcp_servers.lore]
+[mcp_servers.asdecided]
 command = "decided-mcp"
 args = ["--root", "."]
 ```
 
 ```yaml
 mcpServers:
-  lore:
+  asdecided:
     command: decided-mcp
     args: [--root, .]
 ```
@@ -73,7 +75,7 @@ Every recipe's enforcement section describes **context-supply plus post-edit CI
 only** — never a pre-edit interception hook — restated identically so the boundary
 never drifts. Copy this paragraph verbatim, swapping only the client name:
 
-> RAC supplies context and enforces *after* the edit (ADR-067). There is no
+> AsDecided supplies context and enforces *after* the edit (ADR-067). There is no
 > platform API to veto a `<Client>` agent edit before it lands, so `<Client>`
 > relies on the post-edit guard: `decided validate` / `decided relationships --validate`
 > and the GitHub Action / pre-merge gate, the same as any contributor.
@@ -90,7 +92,7 @@ every other recipe points readers there rather than describing a hook of its own
 - [ ] Section 1 names `decided export decisions/ --agent-rules` and the exact context file
       this client reads.
 - [ ] Section 2 shows the one config dialect and path this client uses, and names
-      the five read-only tools.
+      the six read-only tools.
 - [ ] Section 3 is the fixed ADR-067 paragraph, client name swapped, nothing else
       changed — no pre-edit hook described.
 - [ ] The "Verify it" close points at [`examples/guide/`](../examples/guide/demo.md).

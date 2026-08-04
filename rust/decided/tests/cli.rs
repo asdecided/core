@@ -73,3 +73,16 @@ fn resolve_accepts_a_literal_hyphen_id_and_reaches_resolution() {
 
     fs::remove_dir_all(root).expect("remove CLI smoke corpus");
 }
+
+#[test]
+fn generated_agent_rules_are_in_sync_with_the_decision_corpus() {
+    let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../decisions");
+    let corpus = corpus.to_string_lossy().into_owned();
+    let output = run(&["export", &corpus, "--agent-rules", "--check"]);
+    assert!(
+        output.status.success(),
+        "agent-rules drifted: stdout={}, stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

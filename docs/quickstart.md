@@ -1,6 +1,6 @@
 # Quickstart
 
-Try RAC in about five minutes. You will install the tool, scaffold your first
+Try AsDecided in about five minutes. You will install the tool, scaffold your first
 artifact, and run the three commands you'll use most: `validate`, `inspect`, and
 `improve`.
 
@@ -30,7 +30,7 @@ In CI, pin a release tag rather than `latest`, or pin by digest for
 immutable builds (the release run prints the pushed digest in its summary):
 
 ```bash
-docker pull ghcr.io/asdecided/core:2026.6.1
+docker pull ghcr.io/asdecided/core:v0.26.2
 docker pull ghcr.io/asdecided/core@sha256:<digest>
 ```
 
@@ -41,7 +41,7 @@ can run script steps):
 ```yaml
 rac-gate:
   image:
-    name: ghcr.io/asdecided/core:2026.6.1
+    name: ghcr.io/asdecided/core:v0.26.2
     entrypoint: [""]
   script:
     - decided gate decisions/
@@ -55,7 +55,7 @@ pipelines:
     '**':
       - step:
           name: decided gate
-          image: ghcr.io/asdecided/core:2026.6.1
+          image: ghcr.io/asdecided/core:v0.26.2
           script:
             - decided gate decisions/
 ```
@@ -64,7 +64,7 @@ Jenkins (declarative pipeline, docker agent):
 
 ```groovy
 pipeline {
-  agent { docker { image 'ghcr.io/asdecided/core:2026.6.1' } }
+  agent { docker { image 'ghcr.io/asdecided/core:v0.26.2' } }
   stages {
     stage('decided gate') {
       steps { sh 'decided gate decisions/' }
@@ -124,7 +124,7 @@ first-class authentication flow, so access control is inconsistent across the ap
 - Authentication-related support tickets drop by half within one quarter.
 ```
 
-> RAC classifies artifacts by their `##` section headings — no front matter to
+> AsDecided classifies artifacts by their `##` section headings — no front matter to
 > memorize. (Identity ids in frontmatter are assigned for you by `decided new` and
 > `decided quickstart`.) See [artifacts.md](artifacts.md).
 

@@ -9,8 +9,9 @@ Python runtime.
 
 Validation, relationships, review, gate, search, and export operate on the
 local filesystem. The native MCP server emits no usage telemetry and has no
-network side channel. Optional product sharing is configured separately
-through the CLI; regulated installations can hard-disable it with:
+network side channel. `decided telemetry` records a local compatibility
+preference only; the native build has no outbound sender (ADR-131). Regulated
+installations can also record an explicit hard-lock with:
 
 ```bash
 decided telemetry off --enterprise

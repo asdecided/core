@@ -11,7 +11,7 @@ Generate a pull request description that acts as durable repository memory
 after implementation conversations, AI sessions, and local context
 disappear.
 
-RAC development follows a roadmap-contract workflow: features are planned
+AsDecided development follows a roadmap-contract workflow: features are planned
 through explicit Roadmap artifacts, architectural decisions are captured
 through ADRs, and implementation happens through small scoped changes. A PR
 should preserve what changed, why decisions were made, what was
@@ -32,7 +32,7 @@ for the RAC change being documented.
 
 ## Instructions
 
-Generate a pull request description for a RAC change. Use the implementation
+Generate a pull request description for an AsDecided change. Use the implementation
 details, roadmap item, ADRs, commits, and code changes provided. Structure
 the PR as a release-contract record, using the format in Output.
 
@@ -68,10 +68,10 @@ Adds:
 # Roadmap / ADR Trace
 
 Roadmap:
-- `rac/roadmaps/vX.Y.Z-<name>.md`
+- `decisions/roadmaps/<codename>.md`
 
 Relevant ADRs:
-- `rac/decisions/<adr-file>.md`
+- `decisions/decisions/<adr-file>.md`
 
 # Scope
 
@@ -110,8 +110,8 @@ Fields or shape changes.
 # Verification
 
 ## Ran
-Exact verification commands (for example: pytest, rac <command>,
-rac <command> --json).
+Exact verification commands (for example: `cargo test --workspace --release`,
+`decided <command>`, `decided <command> --json`).
 
 ## Covered
 Tested scenarios: positive, negative, boundary. Avoid "tests pass";

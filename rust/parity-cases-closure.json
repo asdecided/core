@@ -1308,21 +1308,21 @@
   {"id": "init-org-endpoint-fresh-json",
    "sandbox": {"setup": [{"step": "mkdir", "path": "repo"}]},
    "cwd": "{SANDBOX}",
-   "argv": ["init", "repo", "--org-endpoint", "https://lore.example.com/mcp", "--json"],
+   "argv": ["init", "repo", "--org-endpoint", "https://asdecided.example.com/mcp", "--json"],
    "expect_exit": 0,
    "capture": ["repo/**"]},
 
   {"id": "init-org-endpoint-with-profile-human",
    "sandbox": {"setup": [{"step": "mkdir", "path": "repo"}]},
    "cwd": "{SANDBOX}",
-   "argv": ["init", "repo", "--profile", "enterprise", "--org-endpoint", "https://lore.example.com/mcp"],
+   "argv": ["init", "repo", "--profile", "enterprise", "--org-endpoint", "https://asdecided.example.com/mcp"],
    "expect_exit": 0,
    "capture": ["repo/**"]},
 
   {"id": "init-org-endpoint-already-init-human",
    "sandbox": {"fixture": "rust/fixtures/closure/mini-repo"},
    "cwd": "{SANDBOX}",
-   "argv": ["init", "--org-endpoint", "https://lore.example.com/mcp"],
+   "argv": ["init", "--org-endpoint", "https://asdecided.example.com/mcp"],
    "expect_exit": 0,
    "capture": [".mcp.json", ".cursor/**", ".decided/**"]},
 
@@ -1333,7 +1333,7 @@
       "content": "{\n  \"mcpServers\": {\n    \"mine\": {\n      \"command\": \"other\"\n    }\n  },\n  \"custom\": {\n    \"kept\": true\n  }\n}\n"}
    ]},
    "cwd": "{SANDBOX}",
-   "argv": ["init", "repo", "--org-endpoint", "https://lore.example.com/mcp", "--json"],
+   "argv": ["init", "repo", "--org-endpoint", "https://asdecided.example.com/mcp", "--json"],
    "expect_exit": 0,
    "capture": ["repo/**"]},
 
@@ -1341,19 +1341,19 @@
    "sandbox": {"setup": [
      {"step": "write", "path": "repo/.decided/config.yaml", "content": "repository_key: RAC\n"},
      {"step": "write", "path": "repo/.mcp.json",
-      "content": "{\n  \"mcpServers\": {\n    \"lore-org\": {\n      \"type\": \"http\",\n      \"url\": \"https://lore.example.com/mcp\"\n    }\n  }\n}\n"},
+      "content": "{\n  \"mcpServers\": {\n    \"asdecided-org\": {\n      \"type\": \"http\",\n      \"url\": \"https://asdecided.example.com/mcp\"\n    }\n  }\n}\n"},
      {"step": "write", "path": "repo/.cursor/mcp.json",
-      "content": "{\n  \"mcpServers\": {\n    \"lore-org\": {\n      \"type\": \"http\",\n      \"url\": \"https://lore.example.com/mcp\"\n    }\n  }\n}\n"}
+      "content": "{\n  \"mcpServers\": {\n    \"asdecided-org\": {\n      \"type\": \"http\",\n      \"url\": \"https://asdecided.example.com/mcp\"\n    }\n  }\n}\n"}
    ]},
    "cwd": "{SANDBOX}",
-   "argv": ["init", "repo", "--org-endpoint", "https://lore.example.com/mcp"],
+   "argv": ["init", "repo", "--org-endpoint", "https://asdecided.example.com/mcp"],
    "expect_exit": 0,
    "capture": ["repo/**"]},
 
   {"id": "init-org-endpoint-err-bad-scheme",
    "sandbox": {"setup": [{"step": "mkdir", "path": "repo"}]},
    "cwd": "{SANDBOX}",
-   "argv": ["init", "repo", "--org-endpoint", "lore.example.com/mcp"],
+   "argv": ["init", "repo", "--org-endpoint", "asdecided.example.com/mcp"],
    "expect_exit": 2,
    "expect_nonzero_ok": true,
    "compare_stderr": true,
@@ -1365,7 +1365,7 @@
      {"step": "write", "path": "repo/.mcp.json", "content": "{not json"}
    ]},
    "cwd": "{SANDBOX}",
-   "argv": ["init", "repo", "--org-endpoint", "https://lore.example.com/mcp"],
+   "argv": ["init", "repo", "--org-endpoint", "https://asdecided.example.com/mcp"],
    "expect_exit": 1,
    "expect_nonzero_ok": true,
    "compare_stderr": true,

@@ -1,7 +1,7 @@
 # RAC with Zed
 
 [Zed](https://zed.dev) consumes RAC on two surfaces — a generated context file Zed
-reads, and the `lore` MCP server it connects to. A stranger can reproduce this from
+reads, and the `asdecided` MCP server it connects to. A stranger can reproduce this from
 the file alone.
 
 ## Prerequisites
@@ -25,7 +25,7 @@ include a project `AGENTS.md`). No extra step — the recorded decisions reach Z
 Agent Panel as instructions. The managed block keeps your own content intact;
 re-run on change (`decided export decisions/ --agent-rules --check` fails CI on drift).
 
-## 2. The `lore` MCP server (the pull)
+## 2. The `asdecided` MCP server (the pull)
 
 Zed keys MCP servers under **`context_servers`** (not `mcpServers`), added at the
 top level of `settings.json` (a sample is in
@@ -48,9 +48,9 @@ top level of `settings.json` (a sample is in
   team).
 - **Global:** your user `settings.json` — use an absolute `--root` path.
 
-Zed restarts the server process on save (no editor restart). It exposes the five
-read-only `lore` tools (`get_summary`, `search_artifacts`, `get_artifact`,
-`get_related`, `find_decisions`); the server re-reads the corpus on every call and
+Zed restarts the server process on save (no editor restart). It exposes the six
+read-only `asdecided` tools (`get_summary`, `search_artifacts`, `retrieve_grounding`,
+`get_artifact`, `get_related`, `find_decisions`); the server re-reads the corpus on every call and
 never writes to the repo.
 
 ## 3. Enforcement is separate, and Zed-agnostic
@@ -64,7 +64,7 @@ gate, the same as any contributor. (A pre-edit veto is Claude-Code-specific — 
 ## Verify it
 
 Run the bundled grounding demo — same task twice, once unconnected and once with
-`lore` connected — and watch the connected run respect a recorded decision the
+`asdecided` connected — and watch the connected run respect a recorded decision the
 unconnected run violates: [`examples/guide/`](../guide/demo.md).
 
 ## Summary
@@ -72,15 +72,15 @@ unconnected run violates: [`examples/guide/`](../guide/demo.md).
 | Surface | Command | What Zed does with it |
 | --- | --- | --- |
 | `AGENTS.md` | `decided export decisions/ --agent-rules` | Reads it as agent Instructions |
-| `lore` MCP | `settings.json` → `context_servers.lore` | Calls `find_decisions` / `get_related` on demand |
+| `asdecided` MCP | `settings.json` → `context_servers.asdecided` | Calls `find_decisions` / `get_related` on demand |
 | CI gate | `decided validate` · `decided relationships --validate` | Enforces on every PR |
 
 ## Verification status
 
 - **Engine half — mechanically verified (2026-07-04).** The `decided-mcp` invocation
   this recipe prescribes was smoke-tested over stdio against `examples/guide/`: the
-  five `lore` tools respond and `search_artifacts` / `get_artifact` / `get_related`
-  return the grounding decision. This is the RAC-owned half every recipe shares.
+  six `asdecided` tools respond and `search_artifacts` / `get_artifact` / `get_related`
+  return the grounding decision. This is the AsDecided-owned half every recipe shares.
 - **Harness half — not yet verified.** Running the grounding demo *through Zed
   itself* (config parsing plus a live agent) needs the released app and an API key
   — a human/CI step. Until it is done, this recipe keeps the `verify against`

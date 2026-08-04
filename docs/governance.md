@@ -1,6 +1,6 @@
 # Governance: the enforcement policy & `decided gate`
 
-`decided gate` is RAC's single enforcement entry point. It runs validation,
+`decided gate` is AsDecided's single enforcement entry point. It runs validation,
 relationship integrity, and review over a corpus, then classifies every finding
 as **blocking** or **advisory** under the corpus *enforcement policy*. One
 command, one exit code, one SARIF document — so a pull-request gate carries the
@@ -162,7 +162,7 @@ and the explicitly declared machine-checkable subset of code constraints —
 
 - **Context supply.** `decided export --agent-rules` generates committed,
   drift-guarded rules files (`CLAUDE.md`, `AGENTS.md`, `.cursor/rules`,
-  `.github/copilot-instructions.md`) plus the `lore` MCP read tools. This reaches
+  `.github/copilot-instructions.md`) plus the `asdecided` MCP read tools. This reaches
   *every* agent — including Copilot — with zero per-developer setup.
 - **Post-edit enforcement.** The same structural diagnostics fire on
   agent-written artifacts exactly as on human edits. `decided sentry` and

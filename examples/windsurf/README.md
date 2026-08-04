@@ -1,7 +1,7 @@
 # RAC with Windsurf
 
 [Windsurf](https://windsurf.com) consumes RAC on two surfaces — a rules file
-Cascade reads, and the `lore` MCP server it connects to. A stranger can reproduce
+Cascade reads, and the `asdecided` MCP server it connects to. A stranger can reproduce
 this from the file alone.
 
 ## Prerequisites
@@ -21,26 +21,26 @@ decided export decisions/ --agent-rules
 
 This writes `AGENTS.md` and friends — but Windsurf reads its own rules format
 (`.windsurf/rules/*.md`), not `AGENTS.md`, so the durable grounding for Windsurf
-comes through the `lore` MCP server in section 2. Add a short rule that points
+comes through the `asdecided` MCP server in section 2. Add a short rule that points
 Cascade at it — create **`.windsurf/rules/rac.md`**:
 
 ```md
 # Recorded decisions (RAC)
 
 This repository records product decisions as RAC artifacts under `decisions/`. Before
-designing or changing anything a decision might cover, query the `lore` MCP tools
+designing or changing anything a decision might cover, query the `asdecided` MCP tools
 (`search_artifacts`, `find_decisions`, `get_related`) and follow what they return;
 cite decisions by ID. Recorded decisions take precedence over conventions inferred
 from the code.
 ```
 
-The rule is a pointer; the substance is served live by `lore` (section 2), so it
+The rule is a pointer; the substance is served live by `asdecided` (section 2), so it
 never drifts out of date. (`decided export decisions/ --agent-rules --check` still keeps the
 generated `AGENTS.md` honest for any tool that does read it.)
 
-## 2. The `lore` MCP server (the pull)
+## 2. The `asdecided` MCP server (the pull)
 
-Add the `lore` server to Windsurf's MCP config at
+Add the `asdecided` server to Windsurf's MCP config at
 **`~/.codeium/windsurf/mcp_config.json`** (a sample is in
 [`mcp_config.example.json`](mcp_config.example.json)):
 
@@ -54,8 +54,8 @@ Add the `lore` server to Windsurf's MCP config at
 
 The config is global, so use an absolute `--root` path (the directory you would
 pass to `decided validate`). Refresh servers in Cascade's MCP panel after saving. It
-exposes the five read-only `lore` tools (`get_summary`, `search_artifacts`,
-`get_artifact`, `get_related`, `find_decisions`); the server re-reads the corpus on
+exposes the six read-only `asdecided` tools (`get_summary`, `search_artifacts`,
+`retrieve_grounding`, `get_artifact`, `get_related`, `find_decisions`); the server re-reads the corpus on
 every call and never writes to the repo.
 
 ## 3. Enforcement is separate, and Windsurf-agnostic
@@ -69,7 +69,7 @@ Claude-Code-specific — see [`examples/claude-code/`](../claude-code/README.md)
 ## Verify it
 
 Run the bundled grounding demo — same task twice, once unconnected and once with
-`lore` connected — and watch the connected run respect a recorded decision the
+`asdecided` connected — and watch the connected run respect a recorded decision the
 unconnected run violates: [`examples/guide/`](../guide/demo.md).
 
 ## Summary
@@ -77,15 +77,15 @@ unconnected run violates: [`examples/guide/`](../guide/demo.md).
 | Surface | Command | What Windsurf does with it |
 | --- | --- | --- |
 | `.windsurf/rules/rac.md` | (hand-written pointer) | Reads it as an always-on rule |
-| `lore` MCP | `~/.codeium/windsurf/mcp_config.json` → `decided-mcp --root <abs>` | Calls `find_decisions` / `get_related` on demand |
+| `asdecided` MCP | `~/.codeium/windsurf/mcp_config.json` → `decided-mcp --root <abs>` | Calls `find_decisions` / `get_related` on demand |
 | CI gate | `decided validate` · `decided relationships --validate` | Enforces on every PR |
 
 ## Verification status
 
 - **Engine half — mechanically verified (2026-07-04).** The `decided-mcp` invocation
   this recipe prescribes was smoke-tested over stdio against `examples/guide/`: the
-  five `lore` tools respond and `search_artifacts` / `get_artifact` / `get_related`
-  return the grounding decision. This is the RAC-owned half every recipe shares.
+  six `asdecided` tools respond and `search_artifacts` / `get_artifact` / `get_related`
+  return the grounding decision. This is the AsDecided-owned half every recipe shares.
 - **Harness half — not yet verified.** Running the grounding demo *through Windsurf
   itself* (config parsing plus a live agent) needs the released app and an API key
   — a human/CI step. Until it is done, this recipe keeps the `verify against`

@@ -79,7 +79,7 @@ the provider is named in config, shape-identical keys across trackers (Linear's
 engine validates against exactly one format.
 
 The engine **never contacts the tracker**: checking that a ticket exists or is in
-an allowed state needs a token and lives in a satellite (`lore-atlassian` for Jira,
+an allowed state needs a token and lives in a satellite (`asdecided-atlassian` for Jira,
 ADR-090), not the engine (ADR-002).
 
 In `decided export --graph` an external edge carries `"external": true`,

@@ -1,8 +1,8 @@
 # RAC with Claude Code
 
-[Claude Code](https://docs.anthropic.com/en/docs/claude-code) is RAC's most
+[Claude Code](https://docs.anthropic.com/en/docs/claude-code) is AsDecided's most
 integrated client — it gets the two surfaces every client gets (a generated
-context file + the `lore` MCP server), plus two Claude-Code-specific extras: a
+context file + the `asdecided` MCP server), plus two Claude-Code-specific extras: a
 bundled authoring **skill** and the only platform seam that allows a real
 **pre-edit veto**. A stranger can reproduce this from the file alone.
 
@@ -26,10 +26,10 @@ root (your own content outside the block is preserved). Claude Code reads
 `CLAUDE.md` automatically. Re-run on change; `decided export decisions/ --agent-rules
 --check` fails CI if it drifts.
 
-## 2. The `lore` MCP server — query on demand (the pull)
+## 2. The `asdecided` MCP server — query on demand (the pull)
 
 ```bash
-claude mcp add lore -- decided-mcp --root .
+claude mcp add asdecided -- decided-mcp --root .
 ```
 
 …or commit a project-level `.mcp.json` so the team shares it:
@@ -42,8 +42,8 @@ claude mcp add lore -- decided-mcp --root .
 }
 ```
 
-Exposes the five read-only tools `get_summary`, `search_artifacts`,
-`get_artifact`, `get_related`, `find_decisions`. The server re-reads the corpus
+Exposes the six read-only tools `get_summary`, `search_artifacts`,
+`retrieve_grounding`, `get_artifact`, `get_related`, `find_decisions`. The server re-reads the corpus
 on every call and never writes to the repo.
 
 ## 3. The authoring skill (Claude-Code-specific)
@@ -80,7 +80,7 @@ remains the backstop, regardless of which agent edited.
 ## Verify it
 
 Run the bundled grounding demo — same task twice, once unconnected and once with
-`lore` connected — and watch the connected run respect a recorded decision the
+`asdecided` connected — and watch the connected run respect a recorded decision the
 unconnected run violates: [`examples/guide/`](../guide/demo.md).
 
 ## Summary
@@ -88,7 +88,7 @@ unconnected run violates: [`examples/guide/`](../guide/demo.md).
 | Surface | Command | What Claude Code does with it |
 | --- | --- | --- |
 | `CLAUDE.md` | `decided export decisions/ --agent-rules` | Reads it every session |
-| `lore` MCP | `claude mcp add lore -- decided-mcp --root .` | Calls `find_decisions` / `get_related` on demand |
+| `asdecided` MCP | `claude mcp add asdecided -- decided-mcp --root .` | Calls `find_decisions` / `get_related` on demand |
 | Skill | `decided skill install rac-artifacts` | Authors artifacts with the `rac` CLI |
 | Pre-edit veto | `.claude/settings.json` → `PreToolUse` → `decided validate - --corpus decisions/` | Blocks an edit that contradicts a decision |
 | CI gate | `decided validate` · `decided relationships --validate` | Enforces on every PR |

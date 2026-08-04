@@ -27,7 +27,7 @@ Nothing here uses AI or approximation: retrieval stays deterministic and lexical
 
 ## Supported scale envelope
 
-RAC's current recommended production envelope is **up to 5,000 artifacts** on
+AsDecided's current recommended production envelope is **up to 5,000 artifacts** on
 a single node. At that S1 tier, the Rust delta engine targets warm freshness at
 or below 25 ms p95 and one-file mutation publication at or below 150 ms p95.
 

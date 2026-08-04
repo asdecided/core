@@ -668,7 +668,7 @@ pub fn validation_from_rows(
             duplicates.push((display, paths));
         }
     }
-    duplicates.sort_by(|a, b| py_casefold(&a.0).cmp(&py_casefold(&b.0)));
+    duplicates.sort_by_cached_key(|a| py_casefold(&a.0));
     for (display, dup_paths) in duplicates {
         issues.push(RelationshipIssue {
             code: ISSUE_DUPLICATE_IDENTIFIER.to_string(),

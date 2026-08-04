@@ -12,7 +12,7 @@ go; a finished recipe carries none of them.
 # RAC with <Client>
 
 [<Client>](<client-url>) consumes RAC on two surfaces — a generated context file
-<Client> reads, and the `lore` MCP server it connects to. A stranger can reproduce
+<Client> reads, and the `asdecided` MCP server it connects to. A stranger can reproduce
 this from the file alone.
 
 ## Prerequisites
@@ -35,10 +35,10 @@ This writes several agent-context files; <Client> reads **`<CONTEXT-FILE>`**
 as plain instructions. The managed block keeps your own content intact; re-run on
 change (`decided export decisions/ --agent-rules --check` fails CI on drift).
 
-## 2. The `lore` MCP server (the pull)
+## 2. The `asdecided` MCP server (the pull)
 
 Add **`<CONFIG-PATH>`** <!-- e.g. .cursor/mcp.json, ~/.codex/config.toml --> with the
-`lore` server invocation (a sample is in [`<SAMPLE-FILE>`](<SAMPLE-FILE>)):
+`asdecided` server invocation (a sample is in [`<SAMPLE-FILE>`](<SAMPLE-FILE>)):
 
 <!-- Keep only the dialect your harness uses; delete the others. -->
 ```json
@@ -50,14 +50,14 @@ Add **`<CONFIG-PATH>`** <!-- e.g. .cursor/mcp.json, ~/.codex/config.toml --> wit
 ```
 
 ```toml
-[mcp_servers.lore]
+[mcp_servers.asdecided]
 command = "decided-mcp"
 args = ["--root", "."]
 ```
 
 ```yaml
 mcpServers:
-  lore:
+  asdecided:
     command: decided-mcp
     args: [--root, .]
 ```
@@ -65,8 +65,8 @@ mcpServers:
 - **Project:** commit `<CONFIG-PATH>` to share it with the team.
 - **Global:** `<GLOBAL-CONFIG-PATH>` — use an absolute `--root` path.
 
-It exposes the five read-only `lore` tools (`get_summary`, `search_artifacts`,
-`get_artifact`, `get_related`, `find_decisions`); the server re-reads the corpus on
+It exposes the six read-only `asdecided` tools (`get_summary`, `search_artifacts`,
+`retrieve_grounding`, `get_artifact`, `get_related`, `find_decisions`); the server re-reads the corpus on
 every call and never writes to the repo.
 
 ## 3. Enforcement is separate, and <Client>-agnostic
@@ -82,7 +82,7 @@ Claude-Code-specific — see [`examples/claude-code/`](../claude-code/README.md)
 ## Verify it
 
 Run the bundled grounding demo — same task twice, once unconnected and once with
-`lore` connected — and watch the connected run respect a recorded decision the
+`asdecided` connected — and watch the connected run respect a recorded decision the
 unconnected run violates: [`examples/guide/`](../guide/demo.md).
 
 ## Summary
@@ -90,7 +90,7 @@ unconnected run violates: [`examples/guide/`](../guide/demo.md).
 | Surface | Command | What <Client> does with it |
 | --- | --- | --- |
 | `<CONTEXT-FILE>` | `decided export decisions/ --agent-rules` | Reads it as project instructions |
-| `lore` MCP | `<CONFIG-PATH>` → `decided-mcp --root .` | Calls `find_decisions` / `get_related` on demand |
+| `asdecided` MCP | `<CONFIG-PATH>` → `decided-mcp --root .` | Calls `find_decisions` / `get_related` on demand |
 | CI gate | `decided validate` · `decided relationships --validate` | Enforces on every PR |
 
 <!-- Before this recipe is listed in docs/ecosystem.md it MUST be smoke-tested against

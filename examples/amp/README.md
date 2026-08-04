@@ -6,7 +6,7 @@ stranger can reproduce the setup from this file alone.
 
 RAC meets Amp on two surfaces Amp already supports natively, so there is no
 Amp-specific RAC code: a generated **`AGENTS.md`** (context Amp reads every
-session) and the **`lore` MCP server** (tools Amp queries on demand). They are
+session) and the **`asdecided` MCP server** (tools Amp queries on demand). They are
 complementary — one pushes the decisions into context, the other lets Amp pull
 the full text and relationships when it needs them.
 
@@ -39,7 +39,7 @@ falls out of sync.
 > Amp falls back to `CLAUDE.md` when no `AGENTS.md` is present — RAC generates
 > that target too, so either way Amp sees the decisions.
 
-## 2. Add the `lore` MCP server (the pull)
+## 2. Add the `asdecided` MCP server (the pull)
 
 Amp configures MCP servers under the `amp.mcpServers` key. Add a project-level
 `.amp/settings.json` at the repository root (a sample is in
@@ -61,8 +61,8 @@ Amp configures MCP servers under the `amp.mcpServers` key. Add a project-level
 - **User config:** `~/.config/amp/settings.json` — use an absolute `--root`
   path there.
 
-This exposes RAC's five read-only `lore` tools to Amp: `get_summary`,
-`search_artifacts`, `get_artifact`, `get_related`, and `find_decisions`. The
+This exposes AsDecided's six read-only tools to Amp: `get_summary`,
+`search_artifacts`, `retrieve_grounding`, `get_artifact`, `get_related`, and `find_decisions`. The
 server re-reads the corpus from disk on every call, returns structured JSON
 errors rather than exceptions, and never writes to the repository.
 
@@ -70,7 +70,7 @@ errors rather than exceptions, and never writes to the repository.
 
 Use the bundled grounding demo to see the difference a connection makes. The
 [`examples/guide/`](../guide/demo.md) demo runs the same coding task twice —
-once with no MCP server and once with `lore` connected — and shows the
+once with no MCP server and once with `asdecided` connected — and shows the
 unconnected agent violating a recorded decision that the connected one respects.
 Point Amp at it the same way (its prompt and corpus are client-agnostic), or run
 `decided-mcp --root examples/guide` and ask Amp to implement the task in
@@ -91,5 +91,5 @@ adds no latency.
 | Surface | Command | What Amp does with it |
 | --- | --- | --- |
 | `AGENTS.md` | `decided export decisions/ --agent-rules` | Reads it every session — decisions are always in context |
-| `lore` MCP | `.amp/settings.json` → `decided-mcp --root .` | Calls `find_decisions` / `get_related` to consult the full corpus on demand |
+| `asdecided` MCP | `.amp/settings.json` → `decided-mcp --root .` | Calls `find_decisions` / `get_related` to consult the full corpus on demand |
 | CI gate | `decided validate` · `decided relationships --validate` | Enforces the corpus on every PR, regardless of which agent edited |
