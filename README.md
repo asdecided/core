@@ -10,6 +10,8 @@ read-only to agents over MCP.
 No embeddings, model call, hosted index, or Python runtime is required. The
 same repository state produces the same answer.
 
+[Product site](https://asdecided.com/) · [Documentation](https://docs.asdecided.com/start-here/) · [Canonical sources](https://asdecided.com/sources) · [Changelog](https://asdecided.com/changelog)
+
 ## Install
 
 Install the native engine and MCP server through Homebrew:
