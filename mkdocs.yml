@@ -2,7 +2,7 @@ site_name: AsDecided
 site_description: >-
   Give your coding agent the decisions your team already made — typed
   Markdown artifacts in your repo, served over MCP.
-site_url: https://asdecided.github.io/core/
+site_url: https://asdecided.com/docs/vendor/core/
 repo_url: https://github.com/asdecided/core
 repo_name: asdecided/core
 

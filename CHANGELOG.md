@@ -134,7 +134,7 @@ forks the comment degrades to the step summary. A thin client over
 ships in the CI delivery repo as
 `asdecided/ci/herald/github` beside Watchkeeper, Gatekeeper, and
 Registrar, and is documented on the new
-[Decisions on PRs](https://asdecided.github.io/core/decisions-on-pr/)
+[Decisions on PRs](https://asdecided.com/docs/vendor/core/decisions-on-pr/)
 page.
 
 **The org grounding plane** (ADR-117). One org-standards corpus behind the
@@ -144,7 +144,7 @@ wires a repository to it: the `lore-org` streamable-HTTP entry is ensured in
 `.mcp.json` and `.cursor/mcp.json`, on fresh **and** already-initialized
 repositories, merging into existing files (only the `lore-org` key is
 touched, nothing you wrote is removed) and writing nothing on an unchanged
-re-run. The new [Org Grounding](https://asdecided.github.io/core/org-grounding/)
+re-run. The new [Org Grounding](https://asdecided.com/docs/vendor/core/org-grounding/)
 page is the operator runbook: the org corpus, the shared-server recipe, fleet
 wiring, boundaries, and the federation handoff (ADR-089 stays untouched — no
 cross-corpus resolution enters the engine). The `rac init --json` contract
@@ -273,7 +273,7 @@ as candidate relationships.
   shared HTTP serving blocks a call if the audit sink write fails
   (ADR-098). stdio behaviour is unchanged.
 - **Operator guide for the shared server.** A new
-  [Shared Server](https://asdecided.github.io/core/shared-server/) doc
+  [Shared Server](https://asdecided.com/docs/vendor/core/shared-server/) doc
   covers when to run one, the container and authenticating-proxy recipe, keeping
   the checkout current with `main`, and where observability lives — the whole
   topology is deployment wrapper around an unchanged, database-free engine.
