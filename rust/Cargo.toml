@@ -8,6 +8,7 @@ edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/asdecided/core"
 homepage = "https://asdecided.com"
+documentation = "https://asdecided.com/docs/vendor/core/quickstart/"
 
 [profile.release]
 lto = "thin"

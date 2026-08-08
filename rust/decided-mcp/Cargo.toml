@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
+documentation.workspace = true
 description = "Read-only MCP access to deterministic engineering decisions"
 readme = "README.md"
 keywords = ["mcp", "decisions", "architecture", "agents", "offline"]

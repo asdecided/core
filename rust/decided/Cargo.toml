@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
+documentation.workspace = true
 description = "Engineering decisions your agents can follow"
 readme = "README.md"
 keywords = ["decisions", "architecture", "agents", "cli", "offline"]
