@@ -6,13 +6,61 @@ details, release history over commit history.
 
 ## Unreleased
 
+## v0.27.0 — 2026-08-08
+
+### Hardened shared MCP serving
+
+- Hardened the HTTP transport against stalled and oversized requests, invalid
+  origins, conflicting protocol versions, malformed JSON-RPC envelopes, and
+  responses that exceed the engine's deterministic byte budgets.
+- Restored complete attributable audit records and made shared HTTP startup
+  fail closed when its mandatory audit sink is unavailable. The proxy remains
+  responsible for authenticating the asserted principal.
+- **Breaking for non-loopback HTTP deployments:** binding `decided-mcp` to a
+  public interface now requires the explicit `--behind-proxy` acknowledgement.
+  Loopback serving is unchanged. The deployment guide now specifies proxy TLS,
+  authentication, principal-header replacement, rate limits, network policy,
+  request bounds, and a read-only corpus mount.
+- Moved MCP compatibility to shared language-neutral vectors, added current
+  protocol discovery and request validation, and pinned the six-tool public
+  surface and documented launch commands to executable contract tests.
+- Confined rename staging and recovery to the corpus root, rejected symlinked
+  transaction paths, and made multi-file rename application transactional.
+
+### Verifiable release and dependency chain
+
+- Release publication now runs the complete native contract and live-corpus
+  battery at the release tag before any archive, image, crate, or Registry
+  record can publish.
+- Native releases now attach SHA256 checksums, GitHub build-provenance
+  attestations, an attested CycloneDX SBOM, and Apache-2.0 license and
+  third-party notices. Published container images are signed keylessly with
+  cosign through GitHub OIDC.
+- Added Dependabot coverage and a blocking `cargo-deny` policy for advisories,
+  licenses, sources, and banned outbound-network dependency families. This
+  turns the native engine's no-egress posture into a CI-enforced invariant.
 - Release publishing now fails closed unless the exact SemVer has one unique
-  changelog entry. The same check runs on pull requests and before native,
-  crates.io, or MCP Registry publication.
-- Backfilled the native-release history from v0.24.0 through v0.26.0 from the
-  published GitHub release notes and folded the previously untagged
-  "warm by default" notes into the v0.23.0 release that ultimately shipped
-  them.
+  changelog entry. The same contract runs on pull requests and before native,
+  crates.io, or MCP Registry publication. Historical entries from v0.24.0
+  through v0.26.0 were restored from their published releases.
+
+### Honest operating and trust posture
+
+- Replaced retired Python-era CLI, telemetry, tool-count, server-name, and
+  repository-layout guidance across public docs, recipes, generated agent
+  rules, examples, and the repository's own MCP configuration. Native
+  telemetry is now explicitly local-only with no sender or network side
+  channel.
+- Documented the artifact-content trust boundary for agents and operators:
+  records are treated as data, human pull-request review remains authoritative,
+  `decided doctor` and provenance are review aids rather than trust verdicts,
+  and the read-only server does not sanitize content.
+- Added a coordinated vulnerability-handling policy with a five-business-day
+  acknowledgement target, supported-version boundaries, GHSA/CVE handling, and
+  safe-harbor language.
+- Published the project's actual solo-maintainer, best-effort support,
+  demand-led release, and continuity posture without implying a foundation,
+  board, formal source escrow, or commercial SLA.
 
 ## v0.26.2 — 2026-08-01
 
