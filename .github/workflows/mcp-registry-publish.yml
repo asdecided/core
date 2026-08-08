@@ -1,10 +1,16 @@
 name: Publish to MCP Registry
 
 on:
+  workflow_call:
+    inputs:
+      version:
+        description: Exact released version to register (X.Y.Z or vX.Y.Z)
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
       version:
-        description: Exact released version to register
+        description: Exact released version to register (X.Y.Z or vX.Y.Z)
         required: true
         type: string
 
@@ -13,35 +19,64 @@ permissions:
   id-token: write
 
 jobs:
+  version:
+    name: Resolve release version
+    runs-on: ubuntu-latest
+    outputs:
+      number: ${{ steps.normalize.outputs.number }}
+      tag: ${{ steps.normalize.outputs.tag }}
+    steps:
+      - name: Normalize and validate version
+        id: normalize
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          VERSION="$REQUESTED_VERSION"
+          case "$VERSION" in
+            v*|V*) VERSION="${VERSION:1}" ;;
+          esac
+          SEMVER_COMPONENT='(0|[1-9][0-9]*)'
+          if [[ ! "$VERSION" =~ ^${SEMVER_COMPONENT}\.${SEMVER_COMPONENT}\.${SEMVER_COMPONENT}$ ]]; then
+            echo "::error::release version must be SemVer X.Y.Z or vX.Y.Z, got: $REQUESTED_VERSION"
+            exit 1
+          fi
+          echo "number=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
   changelog:
     name: Verify release changelog
+    needs: version
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: v${{ inputs.version }}
+          ref: ${{ needs.version.outputs.tag }}
       - name: Require one matching SemVer entry
-        run: ./scripts/verify-release-changelog.sh "${{ inputs.version }}"
+        run: ./scripts/verify-release-changelog.sh "${{ needs.version.outputs.number }}"
 
   verification:
     name: Full native release battery
+    needs: version
     uses: ./.github/workflows/rust-spike.yml
     with:
-      ref: v${{ inputs.version }}
+      ref: ${{ needs.version.outputs.tag }}
     permissions:
       contents: read
 
   publish:
-    needs: [verification, changelog]
+    needs: [version, verification, changelog]
     runs-on: ubuntu-latest
     environment: mcp-registry
+    concurrency:
+      group: mcp-registry-publish-${{ needs.version.outputs.number }}
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: v${{ inputs.version }}
+          ref: ${{ needs.version.outputs.tag }}
       - name: Verify requested version and OCI metadata
         env:
-          REQUESTED_VERSION: ${{ inputs.version }}
+          REQUESTED_VERSION: ${{ needs.version.outputs.number }}
         run: |
           WORKSPACE_VERSION="$(cargo metadata --manifest-path rust/Cargo.toml --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "decided-mcp") | .version')"
           SERVER_VERSION="$(jq -r '.version' server.json)"
@@ -51,7 +86,7 @@ jobs:
           test "$PACKAGE_IDENTIFIER" = "ghcr.io/asdecided/core:mcp-v$REQUESTED_VERSION"
       - name: Verify MCP image is available and canonical
         env:
-          REQUESTED_VERSION: ${{ inputs.version }}
+          REQUESTED_VERSION: ${{ needs.version.outputs.number }}
         run: |
           IMAGE="ghcr.io/asdecided/core:mcp-v$REQUESTED_VERSION"
           for attempt in {1..30}; do
