@@ -1,10 +1,16 @@
 name: Publish crates.io packages
 
 on:
+  workflow_call:
+    inputs:
+      version:
+        description: Exact workspace version to publish (X.Y.Z or vX.Y.Z)
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
       version:
-        description: Exact workspace version to publish
+        description: Exact workspace version to publish (X.Y.Z or vX.Y.Z)
         required: true
         type: string
 
@@ -13,39 +19,68 @@ permissions:
   id-token: write
 
 jobs:
+  version:
+    name: Resolve release version
+    runs-on: ubuntu-latest
+    outputs:
+      number: ${{ steps.normalize.outputs.number }}
+      tag: ${{ steps.normalize.outputs.tag }}
+    steps:
+      - name: Normalize and validate version
+        id: normalize
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          VERSION="$REQUESTED_VERSION"
+          case "$VERSION" in
+            v*|V*) VERSION="${VERSION:1}" ;;
+          esac
+          SEMVER_COMPONENT='(0|[1-9][0-9]*)'
+          if [[ ! "$VERSION" =~ ^${SEMVER_COMPONENT}\.${SEMVER_COMPONENT}\.${SEMVER_COMPONENT}$ ]]; then
+            echo "::error::release version must be SemVer X.Y.Z or vX.Y.Z, got: $REQUESTED_VERSION"
+            exit 1
+          fi
+          echo "number=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
   changelog:
     name: Verify release changelog
+    needs: version
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: v${{ inputs.version }}
+          ref: ${{ needs.version.outputs.tag }}
       - name: Require one matching SemVer entry
-        run: ./scripts/verify-release-changelog.sh "${{ inputs.version }}"
+        run: ./scripts/verify-release-changelog.sh "${{ needs.version.outputs.number }}"
 
   verification:
     name: Full native release battery
+    needs: version
     uses: ./.github/workflows/rust-spike.yml
     with:
-      ref: v${{ inputs.version }}
+      ref: ${{ needs.version.outputs.tag }}
     permissions:
       contents: read
 
   publish:
-    needs: [verification, changelog]
+    needs: [version, verification, changelog]
     runs-on: ubuntu-latest
     environment: crates.io
+    concurrency:
+      group: crates-publish-${{ needs.version.outputs.number }}
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: v${{ inputs.version }}
+          ref: ${{ needs.version.outputs.tag }}
       - name: Install pinned Rust toolchain
         working-directory: rust
         run: rustup show
       - name: Verify requested version
         working-directory: rust
         env:
-          REQUESTED_VERSION: ${{ inputs.version }}
+          REQUESTED_VERSION: ${{ needs.version.outputs.number }}
         run: |
           PACKAGE_VERSION="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "decided") | .version')"
           test "$REQUESTED_VERSION" = "$PACKAGE_VERSION"
@@ -59,7 +94,7 @@ jobs:
         working-directory: rust
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.cargo-auth.outputs.token }}
-          REQUESTED_VERSION: ${{ inputs.version }}
+          REQUESTED_VERSION: ${{ needs.version.outputs.number }}
         run: |
           if cargo info "asdecided-core@$REQUESTED_VERSION" --registry crates-io >/dev/null 2>&1; then
             echo "asdecided-core $REQUESTED_VERSION is already published; skipping"
@@ -69,7 +104,7 @@ jobs:
       - name: Wait for engine crate to reach the index
         working-directory: rust
         env:
-          REQUESTED_VERSION: ${{ inputs.version }}
+          REQUESTED_VERSION: ${{ needs.version.outputs.number }}
         run: |
           for attempt in {1..30}; do
             : "$attempt"
@@ -90,7 +125,7 @@ jobs:
         working-directory: rust
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.cargo-auth.outputs.token }}
-          REQUESTED_VERSION: ${{ inputs.version }}
+          REQUESTED_VERSION: ${{ needs.version.outputs.number }}
         run: |
           if cargo info "decided@$REQUESTED_VERSION" --registry crates-io >/dev/null 2>&1; then
             echo "decided $REQUESTED_VERSION is already published; skipping"
@@ -101,7 +136,7 @@ jobs:
         working-directory: rust
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.cargo-auth.outputs.token }}
-          REQUESTED_VERSION: ${{ inputs.version }}
+          REQUESTED_VERSION: ${{ needs.version.outputs.number }}
         run: |
           if cargo info "decided-mcp@$REQUESTED_VERSION" --registry crates-io >/dev/null 2>&1; then
             echo "decided-mcp $REQUESTED_VERSION is already published; skipping"
