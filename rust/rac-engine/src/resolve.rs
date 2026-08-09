@@ -19,12 +19,13 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::corpus::{ArtifactKey, ArtifactOrigin, ArtifactPath};
 use crate::identity::{artifact_identifier, artifact_identifiers};
 use crate::markdown::SearchSection;
 use crate::parse::Artifact;
 use crate::pycompat::{first_nonempty_line, py_casefold, py_round, py_strip};
 use crate::relationships::{
-    corpus_items, edge_spec, resolution_index_from_rows, validation_row, CorpusItem,
+    corpus_items, edge_spec, resolution_index_from_rows, validation_row_from_item, CorpusItem,
 };
 use crate::spec::spec_for;
 
@@ -116,6 +117,11 @@ fn tf(term: &str, tokens: &[String]) -> i64 {
 /// One searchable row of the repository index.
 #[derive(Debug, Clone)]
 pub struct IndexEntry {
+    /// Source-aware identity is present for in-memory rows. The frozen v1
+    /// store reconstructs `None` until the versioned v2 codec cutover.
+    pub key: Option<ArtifactKey>,
+    pub artifact_path: Option<ArtifactPath>,
+    pub origin: Option<ArtifactOrigin>,
     pub id: String,
     pub artifact_type: String,
     pub title: Option<String>,
@@ -139,6 +145,9 @@ pub(crate) fn identity_entry_from_item(item: &CorpusItem) -> IndexEntry {
         .map(|s| s.name.clone())
         .unwrap_or_else(|| "unknown".to_string());
     IndexEntry {
+        key: Some(item.key.clone()),
+        artifact_path: Some(item.artifact_path.clone()),
+        origin: Some(item.origin.clone()),
         id: artifact_identifier(&item.artifact, item.spec, &item.path),
         artifact_type,
         title: item.artifact.product.title.clone(),
@@ -170,7 +179,7 @@ pub(crate) fn entry_from_item(item: &CorpusItem, inbound: i64) -> IndexEntry {
 fn inbound_counts(items: &[CorpusItem]) -> HashMap<String, i64> {
     let rows: Vec<_> = items
         .iter()
-        .map(|item| validation_row(&item.path, &item.artifact, item.spec))
+        .map(validation_row_from_item)
         .collect();
     let index = resolution_index_from_rows(&rows);
     let mut counts: HashMap<String, i64> = HashMap::new();
@@ -212,6 +221,9 @@ pub fn index_from_items(items: &[CorpusItem]) -> Vec<IndexEntry> {
 /// One resolved artifact / search match (`ResolvedArtifact`).
 #[derive(Debug, Clone)]
 pub struct ResolvedArtifact {
+    pub key: Option<ArtifactKey>,
+    pub artifact_path: Option<ArtifactPath>,
+    pub origin: Option<ArtifactOrigin>,
     pub id: String,
     pub artifact_type: String,
     pub title: Option<String>,
@@ -270,6 +282,9 @@ pub struct ResolutionResult {
 
 pub(crate) fn resolved_from_entry(entry: &IndexEntry) -> ResolvedArtifact {
     ResolvedArtifact {
+        key: entry.key.clone(),
+        artifact_path: entry.artifact_path.clone(),
+        origin: entry.origin.clone(),
         id: entry.id.clone(),
         artifact_type: entry.artifact_type.clone(),
         title: entry.title.clone(),
@@ -1036,6 +1051,9 @@ pub(crate) fn rank_and_build(
             let fused_raw = fused[index];
             let bm25_raw = bm25_scores[index];
             ResolvedArtifact {
+                key: entry.key.clone(),
+                artifact_path: entry.artifact_path.clone(),
+                origin: entry.origin.clone(),
                 id: entry.id.clone(),
                 artifact_type: entry.artifact_type.clone(),
                 title: entry.title.clone(),
@@ -1145,6 +1163,9 @@ mod tests {
 
     fn test_entry(id: &str, title: &str, path: &str, body: &str, inbound: i64) -> IndexEntry {
         IndexEntry {
+            key: None,
+            artifact_path: None,
+            origin: None,
             id: id.to_string(),
             artifact_type: "decision".to_string(),
             title: Some(title.to_string()),
@@ -1322,6 +1343,9 @@ mod tests {
     #[test]
     fn persisted_field_matching_preserves_tiers_and_snippets() {
         let entry = IndexEntry {
+            key: None,
+            artifact_path: None,
+            origin: None,
             id: "RAC-EXAMPLE1234".to_string(),
             artifact_type: "requirement".to_string(),
             title: Some("Search latency".to_string()),

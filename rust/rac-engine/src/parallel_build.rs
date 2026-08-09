@@ -16,6 +16,9 @@
 
 use std::path::PathBuf;
 
+use crate::corpus::{
+    compatible_local_layer, ArtifactOrigin, PhysicalArtifactLocator, PhysicalCorpusLocator,
+};
 use crate::derived::{build_derived_index_from_items, DerivedIndex, DECISION_TYPE};
 use crate::relationships::{relationships_from_corpus, CorpusItem};
 use crate::resolve::{entry_from_item, field_tokens_of, is_live_decision, IndexEntry};
@@ -80,17 +83,24 @@ struct DocFragment {
     scope_row: Option<ScopeRow>,
 }
 
-fn fragment_for(path_display: &str) -> DocFragment {
+fn fragment_for(
+    entry: &crate::walk::WalkEntry,
+    origin: &ArtifactOrigin,
+    physical_corpus: &PhysicalCorpusLocator,
+) -> DocFragment {
     if std::env::var_os(FAULT_ENV).is_some() {
         panic!("parallel-build worker fault (injected)");
     }
-    let artifact = crate::parse::parse_file(path_display);
+    let artifact = crate::parse::parse_file(&entry.display);
     let spec = crate::spec::spec_for(&crate::classify::classify(&artifact).artifact_type);
-    let item = CorpusItem {
-        path: path_display.to_string(),
+    let item = CorpusItem::new(
+        entry.display.clone(),
+        entry.rel(),
         artifact,
         spec,
-    };
+        origin.clone(),
+        PhysicalArtifactLocator::new(physical_corpus.clone(), entry.abs.clone()),
+    );
     let index_entry = entry_from_item(&item, 0);
     let field_tokens = field_tokens_of(&index_entry);
     let live = item.spec.map(|s| s.name == DECISION_TYPE).unwrap_or(false)
@@ -106,7 +116,12 @@ fn fragment_for(path_display: &str) -> DocFragment {
 }
 
 /// Fan the parse + per-doc derive across `n_workers`, or None on any fault.
-fn fragments_parallel(paths: &[String], n_workers: usize) -> Option<Vec<DocFragment>> {
+fn fragments_parallel(
+    entries: &[crate::walk::WalkEntry],
+    n_workers: usize,
+    origin: &ArtifactOrigin,
+    physical_corpus: &PhysicalCorpusLocator,
+) -> Option<Vec<DocFragment>> {
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(n_workers)
         .build()
@@ -114,9 +129,9 @@ fn fragments_parallel(paths: &[String], n_workers: usize) -> Option<Vec<DocFragm
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         pool.install(|| {
             use rayon::prelude::*;
-            paths
+            entries
                 .par_iter()
-                .map(|path| fragment_for(path))
+                .map(|entry| fragment_for(entry, origin, physical_corpus))
                 .collect::<Vec<DocFragment>>()
         })
     }));
@@ -130,6 +145,7 @@ fn fragments_parallel(paths: &[String], n_workers: usize) -> Option<Vec<DocFragm
 fn reproduce(fragments: Vec<DocFragment>, directory: &str, recursive: bool) -> DerivedIndex {
     let mut items = Vec::with_capacity(fragments.len());
     let mut index_entries = Vec::with_capacity(fragments.len());
+    let mut source_artifacts = Vec::with_capacity(fragments.len());
     let mut field_tokens = Vec::with_capacity(fragments.len());
     let mut live_decision_paths = Vec::new();
     let mut scope_rows = Vec::new();
@@ -140,6 +156,12 @@ fn reproduce(fragments: Vec<DocFragment>, directory: &str, recursive: bool) -> D
         if let Some(row) = fragment.scope_row {
             scope_rows.push(row);
         }
+        source_artifacts.push(crate::derived::SourceAwareArtifact {
+            key: fragment.item.key.clone(),
+            path: fragment.item.artifact_path.clone(),
+            origin: fragment.item.origin.clone(),
+            display_path: fragment.item.path.clone(),
+        });
         items.push(fragment.item);
         index_entries.push(fragment.index_entry);
         field_tokens.push(fragment.field_tokens);
@@ -156,7 +178,18 @@ fn reproduce(fragments: Vec<DocFragment>, directory: &str, recursive: bool) -> D
         entry.inbound_count = inbound.get(entry.path.as_str()).copied().unwrap_or(0);
     }
     let summary = crate::portfolio::portfolio_from_corpus(directory, &items, recursive);
+    let mut layers: Vec<crate::corpus::CorpusLayer> = items
+        .iter()
+        .map(|item| crate::corpus::CorpusLayer::from(&item.origin))
+        .collect();
+    layers.sort();
+    layers.dedup();
+    if layers.is_empty() {
+        layers.push(crate::corpus::compatible_local_layer(directory));
+    }
     DerivedIndex {
+        layers,
+        source_artifacts,
         index_entries,
         field_tokens,
         relationships,
@@ -174,13 +207,12 @@ pub fn build_derived_index_parallel(
     workers: Option<usize>,
 ) -> (DerivedIndex, BuildStats) {
     let t0 = std::time::Instant::now();
-    let paths: Vec<String> = crate::walk::find_markdown_files(directory, recursive)
-        .into_iter()
-        .map(|e| e.display)
-        .collect();
-    let n_workers = resolve_workers(workers, paths.len());
+    let entries = crate::walk::find_markdown_files(directory, recursive);
+    let n_workers = resolve_workers(workers, entries.len());
+    let origin = compatible_local_layer(directory).origin();
+    let physical_corpus = PhysicalCorpusLocator::local(directory);
     let fragments = if n_workers > 1 {
-        fragments_parallel(&paths, n_workers)
+        fragments_parallel(&entries, n_workers, &origin, &physical_corpus)
     } else {
         None
     };
@@ -233,7 +265,10 @@ pub fn emit_build_timing(stats: &BuildStats) {
 /// The paths type alias for the freshness tracker's explicit-list parse
 /// (INDEX-PLAN B6): parse a known path list through the one true per-file
 /// path, parallel when it pays; entries in list order.
-pub fn parallel_parse_paths(paths: &[PathBuf]) -> (Vec<CorpusItem>, usize) {
+pub fn parallel_parse_paths(root: &str, paths: &[PathBuf]) -> (Vec<CorpusItem>, usize) {
+    let corpus_root = PathBuf::from(root);
+    let origin = compatible_local_layer(root).origin();
+    let physical_corpus = PhysicalCorpusLocator::local(&corpus_root);
     let displays: Vec<String> = paths
         .iter()
         .map(|p| p.to_string_lossy().into_owned())
@@ -245,11 +280,21 @@ pub fn parallel_parse_paths(paths: &[PathBuf]) -> (Vec<CorpusItem>, usize) {
             let artifact = crate::parse::parse_file(path);
             let spec =
                 crate::spec::spec_for(&crate::classify::classify(&artifact).artifact_type);
-            CorpusItem {
-                path: path.clone(),
+            let relative_path = PathBuf::from(path)
+                .strip_prefix(&corpus_root)
+                .unwrap_or_else(|_| std::path::Path::new(path))
+                .iter()
+                .map(|part| part.to_string_lossy())
+                .collect::<Vec<_>>()
+                .join("/");
+            CorpusItem::new(
+                path.clone(),
+                relative_path,
                 artifact,
                 spec,
-            }
+                origin.clone(),
+                PhysicalArtifactLocator::new(physical_corpus.clone(), path),
+            )
         })
         .collect();
     let workers = std::thread::available_parallelism()

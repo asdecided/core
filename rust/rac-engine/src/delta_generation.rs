@@ -37,6 +37,8 @@ use crate::retrieve::{scope_rows_from_items, ScopeRow};
 #[derive(Clone)]
 pub struct IdentityRow {
     pub entry: IndexEntry,
+    pub artifact_path: crate::corpus::ArtifactPath,
+    pub origin: crate::corpus::ArtifactOrigin,
     pub status: String,
 }
 
@@ -44,6 +46,8 @@ impl IdentityRow {
     fn from_item(item: &CorpusItem) -> Self {
         Self {
             entry: identity_entry_from_item(item),
+            artifact_path: item.artifact_path.clone(),
+            origin: item.origin.clone(),
             status: artifact_status(&item.artifact),
         }
     }
@@ -169,6 +173,26 @@ impl IdentityGeneration {
             return None;
         }
         self.base.get(path).map(|row| row.status.as_str())
+    }
+
+    pub fn artifact_path_for_path(&self, path: &str) -> Option<&crate::corpus::ArtifactPath> {
+        if let Some(row) = self.upserts.get(path) {
+            return Some(&row.artifact_path);
+        }
+        if self.tombstones.contains(path) {
+            return None;
+        }
+        self.base.get(path).map(|row| &row.artifact_path)
+    }
+
+    pub fn origin_for_path(&self, path: &str) -> Option<&crate::corpus::ArtifactOrigin> {
+        if let Some(row) = self.upserts.get(path) {
+            return Some(&row.origin);
+        }
+        if self.tombstones.contains(path) {
+            return None;
+        }
+        self.base.get(path).map(|row| &row.origin)
     }
 
     pub fn entries(&self) -> Vec<IndexEntry> {
@@ -444,31 +468,38 @@ fn resolve_graph_row(row: &ValidationRow, identity: &IdentityGeneration) -> Vec<
     for (section, targets) in &row.edges {
         let external = edge_spec(section).is_some_and(|spec| spec.external);
         for target in targets {
-            let (resolved_path, issue) = if external {
-                (None, None)
+            let (resolved_path, resolved_artifact, issue) = if external {
+                (None, None, None)
             } else {
                 let result = identity.resolve(target);
                 match result.outcome {
-                    OUTCOME_NOT_FOUND => (None, Some(ISSUE_TARGET_NOT_FOUND.to_string())),
-                    OUTCOME_DUPLICATE => (None, Some(ISSUE_TARGET_AMBIGUOUS.to_string())),
+                    OUTCOME_NOT_FOUND => {
+                        (None, None, Some(ISSUE_TARGET_NOT_FOUND.to_string()))
+                    }
+                    OUTCOME_DUPLICATE => {
+                        (None, None, Some(ISSUE_TARGET_AMBIGUOUS.to_string()))
+                    }
                     OUTCOME_RESOLVED => {
                         let path = result
                             .artifact
                             .expect("resolved identity has artifact")
                             .path;
                         if path == row.path {
-                            (None, Some(ISSUE_SELF_REFERENCE.to_string()))
+                            (None, None, Some(ISSUE_SELF_REFERENCE.to_string()))
                         } else {
-                            (Some(path), None)
+                            let artifact_path = identity.artifact_path_for_path(&path).cloned();
+                            (Some(path), artifact_path, None)
                         }
                     }
                     _ => unreachable!("identity resolution outcome"),
                 }
             };
             edges.push(Relationship {
+                source_artifact: Some(row.artifact_path.clone()),
                 source_path: row.path.clone(),
                 relationship: section.clone(),
                 target: target.clone(),
+                resolved_artifact,
                 resolved_path,
                 issue,
             });
@@ -1196,7 +1227,45 @@ impl DeltaGeneration {
     /// validation and is therefore suitable for durable compaction.
     pub fn materialize_derived(&self, directory: &str, recursive: bool) -> DerivedIndex {
         let (index_entries, field_tokens) = self.search.entries_and_fields(&self.graph);
+        let compatibility_layer = crate::corpus::compatible_local_layer(directory);
+        let source_artifacts: Vec<crate::derived::SourceAwareArtifact> = index_entries
+            .iter()
+            .map(|entry| {
+                let path = self
+                    .identity
+                    .artifact_path_for_path(&entry.path)
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        crate::corpus::ArtifactPath::new(
+                            compatibility_layer.source.clone(),
+                            entry.path.clone(),
+                        )
+                    });
+                let origin = self
+                    .identity
+                    .origin_for_path(&entry.path)
+                    .cloned()
+                    .unwrap_or_else(|| compatibility_layer.origin());
+                crate::derived::SourceAwareArtifact {
+                    key: origin.key(entry.id.clone()),
+                    path,
+                    origin,
+                    display_path: entry.path.clone(),
+                }
+            })
+            .collect();
+        let mut layers: Vec<crate::corpus::CorpusLayer> = source_artifacts
+            .iter()
+            .map(|artifact| crate::corpus::CorpusLayer::from(&artifact.origin))
+            .collect();
+        layers.sort();
+        layers.dedup();
+        if layers.is_empty() {
+            layers.push(compatibility_layer);
+        }
         DerivedIndex {
+            layers,
+            source_artifacts,
             index_entries,
             field_tokens,
             relationships: self.graph.relationships(),
@@ -1219,11 +1288,7 @@ mod tests {
         let text = DOC.replace("ADR-1", id).replace("Accepted", status);
         let artifact = crate::parse::parse_text(&text, path);
         let spec = crate::spec::spec_for(&crate::classify::classify(&artifact).artifact_type);
-        CorpusItem {
-            path: path.to_string(),
-            artifact,
-            spec,
-        }
+        CorpusItem::compatible_local_file(path, artifact, spec)
     }
 
     fn tagged_item(path: &str, id: &str, status: &str, tag: &str) -> CorpusItem {
@@ -1237,11 +1302,7 @@ mod tests {
             );
         let artifact = crate::parse::parse_text(&text, path);
         let spec = crate::spec::spec_for(&crate::classify::classify(&artifact).artifact_type);
-        CorpusItem {
-            path: path.to_string(),
-            artifact,
-            spec,
-        }
+        CorpusItem::compatible_local_file(path, artifact, spec)
     }
 
     fn related_item(path: &str, id: &str, target: &str) -> CorpusItem {
@@ -1250,11 +1311,7 @@ mod tests {
         );
         let artifact = crate::parse::parse_text(&text, path);
         let spec = crate::spec::spec_for(&crate::classify::classify(&artifact).artifact_type);
-        CorpusItem {
-            path: path.to_string(),
-            artifact,
-            spec,
-        }
+        CorpusItem::compatible_local_file(path, artifact, spec)
     }
 
     fn scoped_item(path: &str, id: &str, status: &str, scope: Option<&str>) -> CorpusItem {
@@ -1267,11 +1324,7 @@ mod tests {
             .replace("\n## Status", &format!("{scope}\n\n## Status"));
         let artifact = crate::parse::parse_text(&text, path);
         let spec = crate::spec::spec_for(&crate::classify::classify(&artifact).artifact_type);
-        CorpusItem {
-            path: path.to_string(),
-            artifact,
-            spec,
-        }
+        CorpusItem::compatible_local_file(path, artifact, spec)
     }
 
     fn scope_signature(rows: Vec<ScopeRow>) -> Vec<(String, String, String, String, Vec<String>)> {
