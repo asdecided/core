@@ -131,6 +131,12 @@ jobs:
         working-directory: rust
         run: cargo build --release --locked
 
+      - name: Install export-schema test dependency
+        run: python -m pip install --disable-pip-version-check -r rust/tools/export-schema-requirements.txt
+
+      - name: Export-schema contracts
+        run: python rust/tools/export_schema_contracts.py --engine rust/target/release/decided
+
       # Keep the Linux-only event-watch correctness gate independently visible
       # before the broader workspace suite.
       - name: Freshness tracker (Linux inotify + stat fallback)

@@ -122,3 +122,29 @@ fn generated_agent_rules_are_in_sync_with_the_decision_corpus() {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+#[test]
+fn export_schema_prints_the_packaged_resource_exactly() {
+    let output = run(&["export", "--schema", "documents"]);
+    assert!(
+        output.status.success(),
+        "stdout={}, stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        output.stdout,
+        include_bytes!("../../rac-engine/assets/schemas/export-documents-v1.schema.json")
+    );
+}
+
+#[test]
+fn export_schema_rejects_an_unknown_projection() {
+    let output = run(&["export", "--schema", "unknown"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("invalid choice: 'unknown'"),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

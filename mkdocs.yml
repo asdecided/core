@@ -43,6 +43,7 @@ nav:
   - Deployment Hardening: deployment-hardening.md
   - Org Grounding: org-grounding.md
   - CLI Reference: cli.md
+  - Export Contracts: export-contracts.md
   - Context Cost: context-cost.md
   - Scale & Performance: scale.md
   - Watchkeeper: watchkeeper.md
