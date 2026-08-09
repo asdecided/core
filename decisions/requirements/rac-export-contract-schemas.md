@@ -7,7 +7,7 @@ type: requirement
 
 ## Status
 
-Proposed
+Accepted
 
 Classification: `[internal]` — make the export contracts machine-checkable.
 Feature A of the `corpus-sync` programme: published JSON Schema files for
