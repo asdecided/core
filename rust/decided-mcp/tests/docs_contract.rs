@@ -54,6 +54,7 @@ const SUPPORTED_DECIDED_COMMANDS: &[&str] = &[
     "retrieve",
     "sentry",
     "herald",
+    "corpus",
 ];
 
 fn documented_decided_command(line: &str) -> Option<&str> {
