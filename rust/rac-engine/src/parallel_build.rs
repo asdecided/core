@@ -147,10 +147,12 @@ fn reproduce(fragments: Vec<DocFragment>, directory: &str, recursive: bool) -> D
     let mut index_entries = Vec::with_capacity(fragments.len());
     let mut source_artifacts = Vec::with_capacity(fragments.len());
     let mut field_tokens = Vec::with_capacity(fragments.len());
+    let mut live_decision_keys = Vec::new();
     let mut live_decision_paths = Vec::new();
     let mut scope_rows = Vec::new();
     for fragment in fragments {
         if fragment.is_live_decision {
+            live_decision_keys.push(fragment.item.key.clone());
             live_decision_paths.push(fragment.index_entry.path.clone());
         }
         if let Some(row) = fragment.scope_row {
@@ -168,14 +170,20 @@ fn reproduce(fragments: Vec<DocFragment>, directory: &str, recursive: bool) -> D
     }
     // The cross-document steps: graph resolution, inbound fill, portfolio.
     let relationships = relationships_from_corpus(&items);
-    let mut inbound: std::collections::HashMap<&str, i64> = std::collections::HashMap::new();
+    let mut inbound: std::collections::HashMap<&crate::corpus::ArtifactPath, i64> =
+        std::collections::HashMap::new();
     for rel in &relationships {
-        if let Some(resolved) = &rel.resolved_path {
-            *inbound.entry(resolved.as_str()).or_insert(0) += 1;
+        if let Some(resolved) = &rel.resolved_artifact {
+            *inbound.entry(resolved).or_insert(0) += 1;
         }
     }
     for entry in &mut index_entries {
-        entry.inbound_count = inbound.get(entry.path.as_str()).copied().unwrap_or(0);
+        entry.inbound_count = entry
+            .artifact_path
+            .as_ref()
+            .and_then(|path| inbound.get(path))
+            .copied()
+            .unwrap_or(0);
     }
     let summary = crate::portfolio::portfolio_from_corpus(directory, &items, recursive);
     let mut layers: Vec<crate::corpus::CorpusLayer> = items
@@ -187,12 +195,26 @@ fn reproduce(fragments: Vec<DocFragment>, directory: &str, recursive: bool) -> D
     if layers.is_empty() {
         layers.push(crate::corpus::compatible_local_layer(directory));
     }
+    let identity_entries = index_entries
+        .iter()
+        .cloned()
+        .map(|mut entry| {
+            entry.search_sections.clear();
+            entry.inbound_count = 0;
+            entry
+        })
+        .collect();
     DerivedIndex {
         layers,
         source_artifacts,
+        resolution: Box::new(crate::derived::ResolutionProjection {
+            entries: identity_entries,
+            canonical_redirects: Vec::new(),
+        }),
         index_entries,
         field_tokens,
         relationships,
+        live_decision_keys,
         live_decision_paths,
         portfolio_summary: crate::output::portfolio_summary_value(&summary),
         scope_rows,

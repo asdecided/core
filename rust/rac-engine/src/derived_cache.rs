@@ -7,6 +7,7 @@
 //! change latency, never an answer or an exit code (ADR-080).
 
 use std::collections::BTreeSet;
+use std::fmt;
 use std::path::{Path, PathBuf};
 use rayon::prelude::*;
 
@@ -235,7 +236,58 @@ fn write_marker(cache_dir: &Path, corpus_hash: &str, store_written: bool) -> boo
 /// reopened (ADR-080 — never a failure).
 pub enum ReadModel {
     View(MmapIndexReader),
-    Fresh(DerivedIndex),
+    Fresh(Box<DerivedIndex>),
+}
+
+impl ReadModel {
+    /// Exact point resolution through the central identity projection. The
+    /// mapped and fresh arms therefore preserve qualified parent aliases and
+    /// canonical override redirects identically.
+    pub fn resolve(&self, reference: &str) -> crate::resolve::ResolutionResult {
+        match self {
+            Self::View(reader) => crate::read_model::store_resolve(reader, reference),
+            Self::Fresh(derived) => {
+                crate::resolve::resolve_in_index(&derived.resolution.entries, reference)
+            }
+        }
+    }
+
+    /// Catalog identity rows matching one stable `(source, canonical_id)`.
+    pub fn identity_entries_for_key(
+        &self,
+        key: &crate::corpus::ArtifactKey,
+    ) -> Result<Vec<crate::resolve::IndexEntry>, crate::index_format::IndexFormatError> {
+        match self {
+            Self::View(reader) => reader
+                .docids_for_key(key)?
+                .into_iter()
+                .map(|docid| reader.identity_entry(docid))
+                .collect(),
+            Self::Fresh(derived) => Ok(derived
+                .resolution
+                .entries
+                .iter()
+                .filter(|entry| entry.key.as_ref() == Some(key))
+                .cloned()
+                .collect()),
+        }
+    }
+
+    pub fn canonical_redirect(
+        &self,
+        parent: &crate::corpus::ArtifactKey,
+    ) -> Result<Option<crate::derived::CanonicalRedirect>, crate::index_format::IndexFormatError>
+    {
+        match self {
+            Self::View(reader) => reader.canonical_redirect(parent),
+            Self::Fresh(derived) => Ok(derived
+                .resolution
+                .canonical_redirects
+                .iter()
+                .find(|redirect| &redirect.parent == parent)
+                .cloned()),
+        }
+    }
 }
 
 pub struct DerivedIndexCache {
@@ -336,13 +388,705 @@ impl DerivedIndexCache {
                 return ReadModel::View(view);
             }
         }
-        ReadModel::Fresh(derived)
+        ReadModel::Fresh(Box::new(derived))
     }
 
     /// Whether a store directory currently exists for `corpus_hash`.
     pub fn store_present(&self, corpus_hash: &str) -> bool {
         store_dir(&self.cache_dir, corpus_hash).is_dir()
     }
+}
+
+// ---------------------------------------------------------------------------
+// Federated logical generations and request-boundary freshness (ADR-143).
+// ---------------------------------------------------------------------------
+
+/// Domain for the logical composed-generation key. This is independent from
+/// the parent pin domain: it identifies all child + declaration + verified
+/// parent inputs which can alter the effective read model.
+pub const FEDERATED_GENERATION_DOMAIN: &[u8] = b"asdecided-federated-generation-v1\0";
+
+fn generation_frame(hasher: &mut crate::sha256::Sha256, tag: u8, bytes: &[u8]) {
+    hasher.update(&[tag]);
+    hasher.update(&(bytes.len() as u64).to_be_bytes());
+    hasher.update(bytes);
+}
+
+fn legacy_child_corpus_hash(
+    directory: &str,
+    recursive: bool,
+) -> String {
+    let mut hasher = crate::sha256::Sha256::new();
+    for entry in find_markdown_files(directory, recursive) {
+        let rel = entry.components.join("/");
+        hasher.update(rel.as_bytes());
+        hasher.update(b"\0");
+        hasher.update(crate::index_store::content_hash(&entry.abs).as_bytes());
+        hasher.update(b"\0");
+    }
+    hasher.hexdigest()
+}
+
+fn child_snapshot_hash(files: &[crate::federation::SnapshotFile]) -> String {
+    let mut hasher = crate::sha256::Sha256::new();
+    for file in files {
+        hasher.update(file.relative_path.as_bytes());
+        hasher.update(b"\0");
+        hasher.update(crate::sha256::hexdigest(&file.bytes).as_bytes());
+        hasher.update(b"\0");
+    }
+    hasher.hexdigest()
+}
+
+fn stable_child_corpus_path(
+    repository_root: &Path,
+    corpus_root: &Path,
+) -> Result<String, FederatedCacheError> {
+    let repository_root = std::fs::canonicalize(repository_root).map_err(|error| {
+        FederatedCacheError::ChildSnapshot {
+            logical_path: "child repository".to_string(),
+            message: error.to_string(),
+        }
+    })?;
+    let corpus_root = std::fs::canonicalize(corpus_root).map_err(|error| {
+        FederatedCacheError::ChildSnapshot {
+            logical_path: "child corpus".to_string(),
+            message: error.to_string(),
+        }
+    })?;
+    let relative = corpus_root.strip_prefix(&repository_root).map_err(|_| {
+        FederatedCacheError::ChildSnapshot {
+            logical_path: "child corpus".to_string(),
+            message: "child corpus is outside the child repository".to_string(),
+        }
+    })?;
+    let path = relative
+        .components()
+        .map(|component| component.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/");
+    Ok(if path.is_empty() { ".".to_string() } else { path })
+}
+
+fn capture_child_snapshot(
+    directory: &str,
+    recursive: bool,
+    parent: &crate::federation::VerifiedParent,
+) -> Result<Vec<crate::federation::SnapshotFile>, FederatedCacheError> {
+    find_markdown_files(directory, recursive)
+        .into_iter()
+        .filter(|entry| !parent.contains_materialised_path(&entry.abs))
+        .map(|entry| {
+            let bytes = std::fs::read(&entry.abs).map_err(|error| {
+                FederatedCacheError::ChildSnapshot {
+                    logical_path: entry.rel(),
+                    message: error.to_string(),
+                }
+            })?;
+            Ok(crate::federation::SnapshotFile {
+                relative_path: entry.rel(),
+                absolute_path: entry.abs,
+                bytes,
+            })
+        })
+        .collect()
+}
+
+/// Stable, typed failures at the verified generation/build boundary.
+#[derive(Debug)]
+pub enum FederatedCacheError {
+    Parent(crate::federation::ParentCorpusError),
+    ChildSnapshot {
+        logical_path: String,
+        message: String,
+    },
+    Composition { code: String, message: String },
+    InvalidModel { message: String },
+}
+
+impl FederatedCacheError {
+    pub fn stable_code(&self) -> &str {
+        match self {
+            Self::Parent(error) => error.stable_code(),
+            Self::ChildSnapshot { .. } => "federated-child-snapshot-failed",
+            Self::Composition { code, .. } => code,
+            Self::InvalidModel { .. } => "federated-cache-invalid-model",
+        }
+    }
+
+    /// Adapt the central composition layer's stable finding into the cache
+    /// boundary without erasing its code.
+    pub fn composition(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self::Composition {
+            code: code.into(),
+            message: message.into(),
+        }
+    }
+}
+
+impl From<crate::federation::ParentCorpusError> for FederatedCacheError {
+    fn from(error: crate::federation::ParentCorpusError) -> Self {
+        Self::Parent(error)
+    }
+}
+
+impl fmt::Display for FederatedCacheError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Parent(error) => {
+                let mut message = error.message.clone();
+                if let Some(path) = &error.path {
+                    let logical_path = if path.ends_with(crate::federation::MANIFEST_RELATIVE_PATH)
+                    {
+                        crate::federation::MANIFEST_RELATIVE_PATH
+                    } else if path.ends_with(crate::federation::CONFIG_RELATIVE_PATH) {
+                        crate::federation::CONFIG_RELATIVE_PATH
+                    } else {
+                        "federation input"
+                    };
+                    message = message.replace(&path.display().to_string(), logical_path);
+                }
+                write!(formatter, "{}: {message}", error.stable_code())
+            }
+            Self::ChildSnapshot {
+                logical_path,
+                message,
+                ..
+            } => {
+                write!(formatter, "{}: {logical_path}: {message}", self.stable_code())
+            }
+            Self::Composition { code, message } => write!(formatter, "{code}: {message}"),
+            Self::InvalidModel { message } => {
+                write!(formatter, "federated-cache-invalid-model: {message}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for FederatedCacheError {}
+
+/// Explicit inputs and stable identities for one verified composed
+/// generation. Filesystem locations are observability inputs only and do not
+/// enter `cache_key` except through their exact bytes or relative identities.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FederatedGenerationIdentity {
+    pub cache_key: String,
+    pub child_corpus_hash: String,
+    /// Child-repository-relative corpus root; never a checkout path.
+    pub child_corpus_path: String,
+    pub recursive: bool,
+    pub layers: Vec<crate::corpus::CorpusLayer>,
+    pub watched_roots: Vec<PathBuf>,
+    pub watched_files: Vec<PathBuf>,
+}
+
+/// A logical cache generation. The legacy variant deliberately preserves the
+/// released single-corpus key when `.decided/corpus.md` is absent.
+#[derive(Debug, Clone, PartialEq)]
+pub enum LogicalGeneration {
+    Legacy { corpus_hash: String },
+    Federated {
+        identity: FederatedGenerationIdentity,
+        parent: Box<crate::federation::VerifiedParent>,
+        child_files: Vec<crate::federation::SnapshotFile>,
+    },
+}
+
+impl LogicalGeneration {
+    pub fn cache_key(&self) -> &str {
+        match self {
+            Self::Legacy { corpus_hash } => corpus_hash,
+            Self::Federated { identity, .. } => &identity.cache_key,
+        }
+    }
+
+    pub fn verified_parent(&self) -> Option<&crate::federation::VerifiedParent> {
+        match self {
+            Self::Legacy { .. } => None,
+            Self::Federated { parent, .. } => Some(parent),
+        }
+    }
+
+    pub fn identity(&self) -> Option<&FederatedGenerationIdentity> {
+        match self {
+            Self::Legacy { .. } => None,
+            Self::Federated { identity, .. } => Some(identity),
+        }
+    }
+
+    /// Exact local bytes which produced this federated generation key. The
+    /// central composer must consume these rows rather than walking again.
+    pub fn child_files(&self) -> Option<&[crate::federation::SnapshotFile]> {
+        match self {
+            Self::Legacy { .. } => None,
+            Self::Federated { child_files, .. } => Some(child_files),
+        }
+    }
+}
+
+/// Verify the optional parent before constructing a cache key. A federated
+/// key cannot be obtained from declaration bytes alone: the loader must first
+/// prove that the materialised parent still matches its source and pin.
+pub fn capture_logical_generation(
+    child_repository_root: impl AsRef<Path>,
+    child_corpus: &str,
+    recursive: bool,
+) -> Result<LogicalGeneration, FederatedCacheError> {
+    let verified = crate::federation::verify_parent(child_repository_root)?;
+    let Some(parent) = verified else {
+        return Ok(LogicalGeneration::Legacy {
+            corpus_hash: legacy_child_corpus_hash(child_corpus, recursive),
+        });
+    };
+
+    capture_federated_generation(parent, child_corpus, recursive)
+}
+
+fn capture_federated_generation(
+    parent: crate::federation::VerifiedParent,
+    child_corpus: &str,
+    recursive: bool,
+) -> Result<LogicalGeneration, FederatedCacheError> {
+    let child_files = capture_child_snapshot(child_corpus, recursive, &parent)?;
+    let child_hash = child_snapshot_hash(&child_files);
+    let child_corpus_path = stable_child_corpus_path(
+        &parent.child_repository_root,
+        Path::new(child_corpus),
+    )?;
+
+    let local_layer = crate::corpus::CorpusLayer::local(parent.child_source.clone());
+    let inherited_layer = crate::corpus::CorpusLayer::inherited(
+        parent.declaration.source.clone(),
+        parent.declaration.alias.clone(),
+        parent.digest.clone(),
+    );
+    let override_payload = match &parent.override_mapping_bytes {
+        Some(bytes) => {
+            let mut payload = Vec::with_capacity(bytes.len() + 1);
+            payload.push(1);
+            payload.extend_from_slice(bytes);
+            payload
+        }
+        None => vec![0],
+    };
+    let mut hasher = crate::sha256::Sha256::new();
+    hasher.update(FEDERATED_GENERATION_DOMAIN);
+    generation_frame(&mut hasher, 0x01, child_hash.as_bytes());
+    generation_frame(&mut hasher, 0x02, parent.child_source.as_bytes());
+    generation_frame(&mut hasher, 0x03, &parent.child_config_bytes);
+    generation_frame(&mut hasher, 0x04, &parent.manifest_bytes);
+    generation_frame(&mut hasher, 0x05, parent.declaration.source.as_bytes());
+    generation_frame(&mut hasher, 0x06, parent.digest.as_bytes());
+    generation_frame(&mut hasher, 0x07, &parent.config_bytes);
+    generation_frame(&mut hasher, 0x08, parent.declaration.alias.as_bytes());
+    generation_frame(&mut hasher, 0x09, &override_payload);
+    generation_frame(&mut hasher, 0x0a, local_layer.layer.as_str().as_bytes());
+    generation_frame(
+        &mut hasher,
+        0x0b,
+        inherited_layer.layer.as_str().as_bytes(),
+    );
+    generation_frame(&mut hasher, 0x0c, &[u8::from(recursive)]);
+    generation_frame(&mut hasher, 0x0d, child_corpus_path.as_bytes());
+    let cache_key = hasher.hexdigest();
+
+    let mut watched_files = Vec::with_capacity(parent.files.len() + child_files.len() + 3);
+    watched_files.push(parent.child_config_path.clone());
+    watched_files.push(parent.manifest_path.clone());
+    watched_files.push(parent.config_path.clone());
+    watched_files.extend(child_files.iter().map(|file| file.absolute_path.clone()));
+    watched_files.extend(parent.files.iter().map(|file| file.absolute_path.clone()));
+    let watched_roots = vec![PathBuf::from(child_corpus), parent.corpus_root.clone()];
+
+    Ok(LogicalGeneration::Federated {
+        identity: FederatedGenerationIdentity {
+            cache_key,
+            child_corpus_hash: child_hash,
+            child_corpus_path,
+            recursive,
+            layers: vec![local_layer, inherited_layer],
+            watched_roots,
+            watched_files,
+        },
+        parent: Box::new(parent),
+        child_files,
+    })
+}
+
+/// Why a request produced the returned model. A relevant input change is
+/// always a complete recomposition; delta mutation is intentionally not used
+/// across a federation boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FederatedCacheRefresh {
+    WarmReuse,
+    StoreHit,
+    Recomposed,
+}
+
+/// One central composition plus its persistable projection. A cache miss may
+/// persist `model`; every first read (including a store hit) retains
+/// `composed` so downstream consumers never reconstruct an overlay.
+pub struct FederatedCacheBuild<C> {
+    pub composed: C,
+    pub model: DerivedIndex,
+}
+
+impl<C> FederatedCacheBuild<C> {
+    pub fn new(composed: C, model: DerivedIndex) -> Self {
+        Self { composed, model }
+    }
+}
+
+/// One successfully verified read session. The model and exact logical inputs
+/// are borrowed together, preventing callers from serving a retained model
+/// after a later parent-verification failure.
+pub struct FederatedCacheRead<'a, C = ()> {
+    pub refresh: FederatedCacheRefresh,
+    pub model: &'a ReadModel,
+    pub generation: &'a LogicalGeneration,
+    /// The authoritative central composition built from this generation's
+    /// captured bytes. MCP and other consumers borrow this directly.
+    pub composed: &'a C,
+}
+
+impl<C> FederatedCacheRead<'_, C> {
+    /// Captured inherited bytes addressed by stable source-relative path.
+    pub fn inherited_bytes(&self, path: &crate::corpus::ArtifactPath) -> Option<&[u8]> {
+        self.generation
+            .verified_parent()?
+            .artifact_bytes(path)
+    }
+
+    /// Existing `get_artifact` decoding over captured bytes, without a second
+    /// filesystem read through the public source-relative `path` field.
+    pub fn inherited_text(&self, path: &crate::corpus::ArtifactPath) -> Option<String> {
+        self.generation.verified_parent()?.artifact_text(path)
+    }
+
+    pub fn override_mapping(&self) -> Option<&serde_yaml::Value> {
+        self.generation.verified_parent()?.overrides.as_ref()
+    }
+}
+
+/// Server-lifetime cache gate for a composed corpus. Every request captures a
+/// fresh verified generation before it can return the resident model. A
+/// verification error leaves the old model retained but inaccessible: callers
+/// receive the error and therefore cannot serve a stale formerly-valid parent.
+pub struct FederatedCacheTracker<C = ()> {
+    cache: DerivedIndexCache,
+    current_key: Option<String>,
+    model: Option<ReadModel>,
+    generation: Option<LogicalGeneration>,
+    composed: Option<C>,
+}
+
+impl<C> FederatedCacheTracker<C> {
+    pub fn new(cache_dir: PathBuf) -> Self {
+        Self {
+            cache: DerivedIndexCache { cache_dir },
+            current_key: None,
+            model: None,
+            generation: None,
+            composed: None,
+        }
+    }
+
+    fn open_generation(&self, cache_key: &str) -> Option<ReadModel> {
+        if !marker_valid(&self.cache.cache_dir, cache_key) {
+            return None;
+        }
+        match open_store(&self.cache.cache_dir, cache_key, SCHEMA_VERSION) {
+            Some(view) => Some(ReadModel::View(view)),
+            None => {
+                remove_store(&self.cache.cache_dir, cache_key);
+                None
+            }
+        }
+    }
+
+    fn persist(&self, cache_key: &str, derived: DerivedIndex) -> ReadModel {
+        let written = write_store(&self.cache.cache_dir, cache_key, SCHEMA_VERSION, &derived);
+        if write_marker(&self.cache.cache_dir, cache_key, written) {
+            if let Some(view) = open_store(&self.cache.cache_dir, cache_key, SCHEMA_VERSION) {
+                return ReadModel::View(view);
+            }
+        }
+        ReadModel::Fresh(Box::new(derived))
+    }
+
+    pub(crate) fn read_or_recompose<F>(
+        &mut self,
+        child_repository_root: impl AsRef<Path>,
+        child_corpus: &str,
+        recursive: bool,
+        build: F,
+    ) -> Result<FederatedCacheRead<'_, C>, FederatedCacheError>
+    where
+        F: FnOnce(&LogicalGeneration) -> Result<FederatedCacheBuild<C>, FederatedCacheError>,
+    {
+        // Reverification and exact input capture happen before either the
+        // resident-model fast path or a persistent-store lookup.
+        let generation =
+            capture_logical_generation(child_repository_root, child_corpus, recursive)?;
+        let cache_key = generation.cache_key().to_string();
+        if self.current_key.as_deref() == Some(cache_key.as_str()) {
+            if self.generation.as_ref() != Some(&generation) {
+                let built = build(&generation)?;
+                validate_federated_model(&generation, &built.model)?;
+                self.composed = Some(built.composed);
+            }
+            // Replace even an equal generation with the just-verified strict
+            // snapshot so the returned content handle is request-current.
+            self.generation = Some(generation);
+            return Ok(FederatedCacheRead {
+                refresh: FederatedCacheRefresh::WarmReuse,
+                model: self.model.as_ref().expect("current key has a model"),
+                generation: self.generation.as_ref().expect("generation installed"),
+                composed: self.composed.as_ref().expect("current key has a composition"),
+            });
+        }
+
+        // A process-local miss and a persistent store hit both compose once
+        // from this exact verified generation. The store can replace only the
+        // expensive derived projection, never the authoritative corpus.
+        let built = build(&generation)?;
+        validate_federated_model(&generation, &built.model)?;
+        let cold = self.current_key.is_none();
+        let (refresh, model) = if cold {
+            match self.open_generation(&cache_key) {
+                Some(model) => (FederatedCacheRefresh::StoreHit, model),
+                None => (
+                    FederatedCacheRefresh::Recomposed,
+                    self.persist(&cache_key, built.model),
+                ),
+            }
+        } else {
+            // A changed manifest/config/corpus/pin/override is a federation
+            // topology change. Rebuild the complete composed model rather
+            // than applying a source-blind document delta.
+            (
+                FederatedCacheRefresh::Recomposed,
+                self.persist(&cache_key, built.model),
+            )
+        };
+        self.current_key = Some(cache_key);
+        self.model = Some(model);
+        self.generation = Some(generation);
+        self.composed = Some(built.composed);
+        Ok(FederatedCacheRead {
+            refresh,
+            model: self.model.as_ref().expect("model just installed"),
+            generation: self.generation.as_ref().expect("generation just installed"),
+            composed: self.composed.as_ref().expect("composition just installed"),
+        })
+    }
+
+    pub fn current_key(&self) -> Option<&str> {
+        self.current_key.as_deref()
+    }
+}
+
+impl FederatedCacheTracker<crate::composition::ComposedCorpus> {
+    /// Read the authoritative composed corpus and its persisted projection
+    /// from one exact verified generation. Callers cannot supply an alternate
+    /// overlay or reopen either corpus between cache-key capture and build.
+    pub fn read_composed(
+        &mut self,
+        child_repository_root: impl AsRef<Path>,
+        child_corpus: &str,
+        recursive: bool,
+    ) -> Result<FederatedCacheRead<'_, crate::composition::ComposedCorpus>, FederatedCacheError>
+    {
+        self.read_or_recompose(
+            child_repository_root,
+            child_corpus,
+            recursive,
+            |generation| {
+                let Some(identity) = generation.identity() else {
+                    return Err(FederatedCacheError::InvalidModel {
+                        message: "composed cache reads require .decided/corpus.md".to_string(),
+                    });
+                };
+                let parent = generation
+                    .verified_parent()
+                    .expect("federated identity has a verified parent");
+                let child_files = generation
+                    .child_files()
+                    .expect("federated identity has captured child files");
+                let composed = crate::federated_corpus::compose_verified_generation_from_snapshot(
+                    child_corpus,
+                    parent,
+                    child_files,
+                )
+                .map_err(|error| {
+                    FederatedCacheError::composition(error.stable_code(), error.to_string())
+                })?;
+                let model = crate::derived::build_derived_index_from_composed(
+                    &identity.child_corpus_path,
+                    child_corpus,
+                    identity.recursive,
+                    &identity.layers,
+                    &parent.child_config_bytes,
+                    &composed,
+                );
+                Ok(FederatedCacheBuild::new(composed, model))
+            },
+        )
+    }
+}
+
+fn stable_public_path(path: &str) -> bool {
+    !path.is_empty()
+        && !Path::new(path).is_absolute()
+        && !Path::new(path)
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
+}
+
+fn validate_federated_model(
+    generation: &LogicalGeneration,
+    derived: &DerivedIndex,
+) -> Result<(), FederatedCacheError> {
+    let Some(identity) = generation.identity() else {
+        return Ok(());
+    };
+    let mut expected_layers = identity.layers.clone();
+    expected_layers.sort();
+    let mut actual_layers = derived.layers.clone();
+    actual_layers.sort();
+    if actual_layers != expected_layers {
+        return Err(FederatedCacheError::InvalidModel {
+            message: "derived layers do not match the verified generation".to_string(),
+        });
+    }
+    let expected_sources: std::collections::BTreeSet<&str> = expected_layers
+        .iter()
+        .map(|layer| layer.source.as_str())
+        .collect();
+    let expected_by_source: std::collections::BTreeMap<&str, &crate::corpus::CorpusLayer> =
+        expected_layers
+            .iter()
+            .map(|layer| (layer.source.as_str(), layer))
+            .collect();
+    let invalid_path = |source: &str, relative_path: &str, display_path: &str| {
+        !expected_sources.contains(source)
+            || !stable_public_path(relative_path)
+            || display_path != relative_path
+    };
+    if derived.source_artifacts.len() != derived.index_entries.len()
+        || derived
+            .source_artifacts
+            .iter()
+            .zip(&derived.index_entries)
+            .any(|(artifact, entry)| {
+                invalid_path(
+                    &artifact.path.source,
+                    &artifact.path.relative_path,
+                    &artifact.display_path,
+                ) || artifact.key.source != artifact.origin.source
+                    || artifact.path.source != artifact.origin.source
+                    || expected_by_source.get(artifact.origin.source.as_str()).copied()
+                        != Some(&crate::corpus::CorpusLayer::from(&artifact.origin))
+                    || entry.key.as_ref() != Some(&artifact.key)
+                    || entry.artifact_path.as_ref() != Some(&artifact.path)
+                    || entry.origin.as_ref() != Some(&artifact.origin)
+                    || entry.path != artifact.display_path
+            })
+    {
+        return Err(FederatedCacheError::InvalidModel {
+            message: "search rows contain missing, physical, or mismatched source identity"
+                .to_string(),
+        });
+    }
+    let mut resolution_sources = std::collections::BTreeSet::new();
+    for entry in &derived.resolution.entries {
+        let (Some(key), Some(path), Some(origin)) =
+            (&entry.key, &entry.artifact_path, &entry.origin)
+        else {
+            return Err(FederatedCacheError::InvalidModel {
+                message: "identity projection is missing source provenance".to_string(),
+            });
+        };
+        if invalid_path(&path.source, &path.relative_path, &entry.path)
+            || key.source != origin.source
+            || path.source != origin.source
+            || expected_by_source.get(origin.source.as_str()).copied()
+                != Some(&crate::corpus::CorpusLayer::from(origin))
+        {
+            return Err(FederatedCacheError::InvalidModel {
+                message: "identity projection contains physical or mismatched paths".to_string(),
+            });
+        }
+        resolution_sources.insert(key.source.as_str());
+    }
+    if resolution_sources != expected_sources {
+        return Err(FederatedCacheError::InvalidModel {
+            message: "identity projection does not retain both verified sources".to_string(),
+        });
+    }
+    if derived.live_decision_keys.len() != derived.live_decision_paths.len()
+        || derived
+            .live_decision_keys
+            .iter()
+            .any(|key| !expected_sources.contains(key.source.as_str()))
+        || derived.scope_rows.iter().any(|row| {
+            row.key
+                .as_ref()
+                .is_none_or(|key| !expected_sources.contains(key.source.as_str()))
+                || row.artifact_path.as_ref().is_none_or(|path| {
+                    !expected_sources.contains(path.source.as_str())
+                        || !stable_public_path(&path.relative_path)
+                        || row.path != path.relative_path
+                })
+                || row.origin.as_ref().is_none_or(|origin| {
+                    row.key.as_ref().is_none_or(|key| key.source != origin.source)
+                        || row
+                            .artifact_path
+                            .as_ref()
+                            .is_none_or(|path| path.source != origin.source)
+                        || expected_by_source.get(origin.source.as_str()).copied()
+                            != Some(&crate::corpus::CorpusLayer::from(origin))
+                })
+        })
+    {
+        return Err(FederatedCacheError::InvalidModel {
+            message: "scope or liveness projection is not source-aware".to_string(),
+        });
+    }
+    let identity_keys: std::collections::BTreeSet<&crate::corpus::ArtifactKey> = derived
+        .resolution
+        .entries
+        .iter()
+        .filter_map(|entry| entry.key.as_ref())
+        .collect();
+    if derived.resolution.canonical_redirects.iter().any(|redirect| {
+        !identity_keys.contains(&redirect.parent)
+            || !identity_keys.contains(&redirect.replacement)
+            || !identity_keys.contains(&redirect.rationale)
+    }) {
+        return Err(FederatedCacheError::InvalidModel {
+            message: "canonical redirect endpoints are absent from the identity projection"
+                .to_string(),
+        });
+    }
+    for relationship in &derived.relationships {
+        for endpoint in [
+            relationship.source_artifact.as_ref(),
+            relationship.resolved_artifact.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if !expected_sources.contains(endpoint.source.as_str())
+                || !stable_public_path(&endpoint.relative_path)
+            {
+                return Err(FederatedCacheError::InvalidModel {
+                    message: "relationship projection contains an invalid endpoint".to_string(),
+                });
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -117,8 +117,8 @@ fn tf(term: &str, tokens: &[String]) -> i64 {
 /// One searchable row of the repository index.
 #[derive(Debug, Clone)]
 pub struct IndexEntry {
-    /// Source-aware identity is present for in-memory rows. The frozen v1
-    /// store reconstructs `None` until the versioned v2 codec cutover.
+    /// Source-aware identity is present for in-memory and v2 persisted rows.
+    /// `None` remains representable only for legacy compatibility fixtures.
     pub key: Option<ArtifactKey>,
     pub artifact_path: Option<ArtifactPath>,
     pub origin: Option<ArtifactOrigin>,

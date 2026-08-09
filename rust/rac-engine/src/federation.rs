@@ -149,6 +149,10 @@ pub struct CorpusManifest {
     /// central composition layer; retaining the value prevents a second
     /// Markdown section parser from drifting from this manifest boundary.
     pub overrides: Option<serde_yaml::Value>,
+    /// Normalised YAML payload of the optional override mapping. The exact
+    /// manifest bytes remain authoritative; this separate payload makes the
+    /// mapping an explicit logical-generation input (ADR-143).
+    pub override_mapping_bytes: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -176,6 +180,8 @@ pub struct VerifiedParent {
     pub declaration: ParentDeclaration,
     pub child_repository_root: PathBuf,
     pub child_source: String,
+    pub child_config_path: PathBuf,
+    pub child_config_bytes: Vec<u8>,
     pub materialisation_root: PathBuf,
     pub corpus_root: PathBuf,
     pub config_path: PathBuf,
@@ -185,9 +191,37 @@ pub struct VerifiedParent {
     pub digest: String,
     /// Parsed but not interpreted by the materialisation boundary.
     pub overrides: Option<serde_yaml::Value>,
+    /// Normalised YAML payload of the override mapping, if declared.
+    pub override_mapping_bytes: Option<Vec<u8>>,
 }
 
 impl VerifiedParent {
+    /// Return the verification-time snapshot row for a stable inherited path.
+    /// Callers must not reinterpret `relative_path` beneath the child root.
+    pub fn snapshot_file(
+        &self,
+        path: &crate::corpus::ArtifactPath,
+    ) -> Option<&SnapshotFile> {
+        if path.source != self.declaration.source {
+            return None;
+        }
+        self.files
+            .iter()
+            .find(|file| file.relative_path == path.relative_path)
+    }
+
+    /// Exact bytes hashed by parent verification for this inherited artifact.
+    pub fn artifact_bytes(&self, path: &crate::corpus::ArtifactPath) -> Option<&[u8]> {
+        self.snapshot_file(path).map(|file| file.bytes.as_slice())
+    }
+
+    /// Strict UTF-8 plus universal-newline decoding used by `get_artifact`.
+    /// Invalid UTF-8 remains unreadable, matching the existing public tool.
+    pub fn artifact_text(&self, path: &crate::corpus::ArtifactPath) -> Option<String> {
+        let text = std::str::from_utf8(self.artifact_bytes(path)?).ok()?;
+        Some(text.replace("\r\n", "\n").replace('\r', "\n"))
+    }
+
     /// True when `path` resolves inside the read-only materialisation subtree.
     /// Local walks use this predicate to prevent the same Markdown byte from
     /// entering both the child and inherited layers.
@@ -552,33 +586,36 @@ pub fn load_manifest(repository_root: &Path) -> Result<Option<CorpusManifest>, P
     if override_sections.len() > 1 {
         return Err(malformed(&path, "## overrides may appear at most once"));
     }
-    let overrides = if let Some((start, end)) = override_sections.first().copied() {
-        let blocks = fenced_yaml_blocks(&path, &text, start, end)?;
-        if blocks.len() != 1 {
-            return Err(malformed(
-                &path,
-                "## overrides must contain exactly one fenced yaml block",
-            ));
-        }
-        let value: serde_yaml::Value = serde_yaml::from_str(&blocks[0]).map_err(|error| {
-            malformed(
-                &path,
-                format!("## overrides YAML must be one mapping: {error}"),
-            )
-        })?;
-        if !value.is_mapping() {
-            return Err(malformed(&path, "## overrides YAML must be one mapping"));
-        }
-        Some(value)
-    } else {
-        None
-    };
+    let (overrides, override_mapping_bytes) =
+        if let Some((start, end)) = override_sections.first().copied() {
+            let blocks = fenced_yaml_blocks(&path, &text, start, end)?;
+            if blocks.len() != 1 {
+                return Err(malformed(
+                    &path,
+                    "## overrides must contain exactly one fenced yaml block",
+                ));
+            }
+            let value: serde_yaml::Value =
+                serde_yaml::from_str(&blocks[0]).map_err(|error| {
+                    malformed(
+                        &path,
+                        format!("## overrides YAML must be one mapping: {error}"),
+                    )
+                })?;
+            if !value.is_mapping() {
+                return Err(malformed(&path, "## overrides YAML must be one mapping"));
+            }
+            (Some(value), Some(blocks[0].as_bytes().to_vec()))
+        } else {
+            (None, None)
+        };
 
     Ok(Some(CorpusManifest {
         path,
         bytes,
         inherits,
         overrides,
+        override_mapping_bytes,
     }))
 }
 
@@ -989,7 +1026,7 @@ fn exact_config_source(
     missing_config: ParentCorpusErrorCode,
     missing_source: ParentCorpusErrorCode,
     owner: &str,
-) -> Result<String, ParentCorpusError> {
+) -> Result<(String, Vec<u8>), ParentCorpusError> {
     if !config_path.is_file() {
         return Err(ParentCorpusError::at(
             missing_config,
@@ -997,21 +1034,42 @@ fn exact_config_source(
             format!("{owner} config is missing: {}", config_path.display()),
         ));
     }
-    let identity =
-        crate::scaffold::read_identity_config(&config_path.to_string_lossy()).map_err(|error| {
+    let bytes = std::fs::read(config_path).map_err(|error| {
+        ParentCorpusError::at(
+            ParentCorpusErrorCode::InvalidConfig,
+            config_path,
+            format!(
+                "cannot read {owner} config {}: {error}",
+                config_path.display()
+            ),
+        )
+    })?;
+    let text = std::str::from_utf8(&bytes).map_err(|_| {
+        ParentCorpusError::at(
+            ParentCorpusErrorCode::InvalidConfig,
+            config_path,
+            format!(
+                "{owner} config must be valid UTF-8: {}",
+                config_path.display()
+            ),
+        )
+    })?;
+    let identity = crate::scaffold::parse_identity_config(&config_path.to_string_lossy(), text)
+        .map_err(|error| {
             ParentCorpusError::at(
                 ParentCorpusErrorCode::InvalidConfig,
                 config_path,
                 error.message().to_string(),
             )
         })?;
-    identity.corpus_source.ok_or_else(|| {
+    let source = identity.corpus_source.ok_or_else(|| {
         ParentCorpusError::at(
             missing_source,
             config_path,
             format!("{owner} config must declare an explicit corpus.source"),
         )
-    })
+    })?;
+    Ok((source, bytes))
 }
 
 /// Verify the optional direct parent rooted at `child_repository_root`.
@@ -1047,7 +1105,7 @@ pub fn verify_parent(
 
     let child_config = child_root.join(CONFIG_RELATIVE_PATH);
     ensure_no_symlink_components(&child_root, &child_config)?;
-    let child_source = exact_config_source(
+    let (child_source, child_config_bytes) = exact_config_source(
         &child_config,
         ParentCorpusErrorCode::ChildConfigMissing,
         ParentCorpusErrorCode::ChildSourceMissing,
@@ -1121,6 +1179,8 @@ pub fn verify_parent(
         declaration: manifest.inherits,
         child_repository_root: child_root,
         child_source,
+        child_config_path: child_config,
+        child_config_bytes,
         materialisation_root,
         corpus_root: digest.corpus_root,
         config_path: digest.config_path,
@@ -1128,6 +1188,7 @@ pub fn verify_parent(
         files: digest.files,
         digest: digest.digest,
         overrides: manifest.overrides,
+        override_mapping_bytes: manifest.override_mapping_bytes,
     }))
 }
 
