@@ -35,7 +35,7 @@ pin shape, and parent-validation behaviour unresolved.
 - [REQ-009] The parent MUST pass structural and relationship validation before overlay. A parent error MUST surface in the child as one sourced `parent-corpus-invalid` error and block overlay; parent warnings and review advisories MUST remain parent-owned and MUST NOT be repeated in every child.
 - [REQ-010] Engines without federation capability MUST continue to ignore the declaration through the existing hidden-directory walk behaviour. An engine that implements federation MUST add no output or behaviour change for a repository without `.decided/corpus.md`; parity is measured against the contemporaneous single-corpus engine after its prerequisites are applied.
 - [REQ-011] Any optional config defaults MAY assist materialisation discovery, but the Markdown manifest MUST remain the inheritance and pin source of truth. Configuration MUST NOT silently create or update a parent declaration.
-- [REQ-012] The capability MUST be available to every user and MUST ship only after the separate federation implementing ADR is human-ratified. This requirement records the accepted design boundary but does not substitute for that decision.
+- [REQ-012] The capability MUST be available to every user and MUST ship only after each governing federation ADR in ADR-133 through ADR-143 is human-accepted. This requirement records the design boundary but does not substitute for those decisions.
 - [REQ-013] When the mechanism ships, the ADR-088 profile scaffold MUST gain the reserved parent declaration guidance only when explicitly requested. Unconfigured profile output MUST remain byte-identical.
 
 ## Acceptance Criteria
@@ -78,8 +78,8 @@ pin shape, and parent-validation behaviour unresolved.
   first real adoption path and keeps clones reproducible.
 - The source identity requirement lands before parent records reach exports or
   MCP.
-- The implementing ADR fixes the exact manifest parser and stable finding-code
-  names before release.
+- ADR-133, ADR-134, ADR-135, ADR-138, and ADR-143 are separately ratified before
+  parent loading, identity, composition, or cache behavior ships.
 
 ## Related Decisions
 
@@ -93,6 +93,11 @@ pin shape, and parent-validation behaviour unresolved.
 - adr-088
 - adr-089
 - adr-117
+- adr-133
+- adr-134
+- adr-135
+- adr-138
+- adr-143
 
 ## Related Designs
 

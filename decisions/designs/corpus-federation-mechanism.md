@@ -7,11 +7,13 @@ type: design
 
 ## Status
 
-Accepted
+Proposed
 
-The post-v0.28 design pass resolves the mechanism questions left by ADR-089.
-This design fixes the first useful federation increment; the implementing ADR
-remains a separate, human-ratified decision before engine work starts.
+The post-v0.28 design pass resolves the mechanism questions left by ADR-089 and
+acts as a synthesis for ADR-133 through ADR-143. Those independently ratifiable
+decisions, rather than this design alone, govern the first useful federation
+increment. Engine work starts only after every ADR required by its scope is
+human-accepted.
 
 ## Context
 
@@ -256,8 +258,8 @@ within the existing measured standing-surface budget.
 MCP audit records extend ADR-127's bounded returned-identity object only with
 the fixed source, layer, and pin fields needed to identify an inherited result.
 They do not copy artifact bodies, excerpts, override mappings, or the full
-response provenance. Because ADR-127 pins the current path-only shape, the
-implementing ADR must amend that decision explicitly before these fields ship.
+response provenance. Because ADR-127 pins the current path-only shape, ADR-141
+must amend that decision explicitly before these fields ship.
 
 Default reads use the effective combined corpus. Human-facing diagnostic and
 export commands may request `--local-only` to inspect the child layer. MCP and
@@ -387,7 +389,8 @@ applies.
 
 ## Open Questions
 
-All seven original questions are resolved:
+No first-increment design question remains open. The seven original questions
+are resolved as follows:
 
 - **Manifest home** -> `.decided/corpus.md`, an operational Markdown manifest
   outside the artifact walk.
@@ -405,9 +408,10 @@ All seven original questions are resolved:
   boost or new tool, additive provenance retained under the existing hard
   budget.
 
-The implementing ADR must record these choices before they become a released
-contract. Support for multiple or external parents requires a later decision
-and evidence from the one-parent implementation.
+ADR-133 through ADR-143 record the independent choices behind this synthesis.
+Each remains Proposed until separately ratified. Support for multiple or
+external parents requires a later decision and evidence from the one-parent
+implementation.
 
 ## Related Requirements
 
@@ -444,6 +448,17 @@ and evidence from the one-parent implementation.
 - adr-123
 - adr-127
 - adr-128
+- adr-133
+- adr-134
+- adr-135
+- adr-136
+- adr-137
+- adr-138
+- adr-139
+- adr-140
+- adr-141
+- adr-142
+- adr-143
 
 ## Related Roadmaps
 

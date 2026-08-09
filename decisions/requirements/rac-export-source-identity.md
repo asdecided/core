@@ -34,7 +34,7 @@ deduplication will disagree.
 - [REQ-004] Federation MUST require explicit `corpus.source` values for the child and every inherited layer, MUST reject duplicate source identities, and MUST use the same value in composite artifact and path keys, provenance, MCP responses, findings, caches, and exports.
 - [REQ-005] Documentation MUST publish the consumer-side aggregation recipe: N corpora merge by concatenating documents streams and unioning graph nodes and edges, keyed globally on `(source, id)`. The recipe MUST require distinct explicit `corpus.source` values wherever fallback identities could collide. A shared parent exported through N children MAY deduplicate on that key only when the record body and, when present, verified pin agree; differing copies MUST surface as an aggregation conflict rather than last-writer-wins.
 - [REQ-006] Repository keys MAY repeat across corpora because `source` is the outer namespace. A repeated canonical artifact id across distinct sources MUST remain distinguishable by `(source, id)` and MUST still follow federation's explicit collision and override rules inside one effective corpus.
-- [REQ-007] Source identity alone MUST NOT introduce inheritance, cross-corpus resolution, or validation. Those semantics remain owned by `corpus-federation` and its implementing ADR.
+- [REQ-007] Source identity alone MUST NOT introduce inheritance, cross-corpus resolution, or validation. Those semantics remain owned by `corpus-federation` and ADR-133 through ADR-143.
 - [REQ-008] The precedence change MUST ship with a migration note for consumers keyed on the old basename value. A repository with neither `corpus.source` nor `repository_key` MUST produce byte-identical source values and export bytes to the released fallback behaviour.
 
 ## Acceptance Criteria
@@ -70,8 +70,8 @@ deduplication will disagree.
   documentation calls it stable identity, while `corpus.name` and federation
   aliases remain the mutable display surfaces.
 - Source identity is mistaken for federation. Mitigation: REQ-007 keeps
-  aggregation additive and cross-corpus semantics behind ADR-089's implementing
-  decision.
+  aggregation additive and cross-corpus semantics behind the separately
+  ratified federation ADR set.
 
 ## Assumptions
 
@@ -90,6 +90,17 @@ deduplication will disagree.
 - adr-080
 - adr-085
 - adr-089
+- adr-133
+- adr-134
+- adr-135
+- adr-136
+- adr-137
+- adr-138
+- adr-139
+- adr-140
+- adr-141
+- adr-142
+- adr-143
 
 ## Related Designs
 

@@ -39,7 +39,7 @@ collisions and provenance ambiguous, and integrating only search would leave
 - [REQ-013] The freshness tracker MUST observe both materialised corpus roots, both governing config files, and the child manifest, and MUST refuse to serve a generation after the parent no longer matches its pin. Inherited recency MUST NOT be derived from child Git history.
 - [REQ-014] Federated exports MUST reuse `rac-export-source-identity`, key global identity as `(source, id)`, and include inherited records by default. Repeated `(source, id)` records MAY deduplicate only when their bodies and verified pins agree; a mismatch MUST be an explicit aggregation conflict. `--local-only` MUST emit only the child projection without changing the default contract.
 - [REQ-015] Identical child and parent bytes plus the same manifest MUST produce byte-identical validation, resolution, retrieval, enforcement, MCP, and export output across runs and clones. With no manifest, federation MUST add no output change relative to the same engine after the export-schema and source-identity prerequisites are applied.
-- [REQ-016] MCP audit records MUST extend ADR-127's bounded returned-identity object only with fixed source, layer, and pin fields. They MUST NOT copy artifact bodies, excerpts, override mappings, or full response provenance, and the implementing ADR MUST explicitly amend ADR-127's currently pinned path-only shape before implementation.
+- [REQ-016] MCP audit records MUST extend ADR-127's bounded returned-identity object only with fixed source, layer, and pin fields. They MUST NOT copy artifact bodies, excerpts, override mappings, or full response provenance, and ADR-141 MUST explicitly amend ADR-127's currently pinned path-only shape before implementation.
 
 ## Acceptance Criteria
 
@@ -116,6 +116,17 @@ collisions and provenance ambiguous, and integrating only search would leave
 - adr-123
 - adr-127
 - adr-128
+- adr-133
+- adr-134
+- adr-135
+- adr-136
+- adr-137
+- adr-138
+- adr-139
+- adr-140
+- adr-141
+- adr-142
+- adr-143
 
 ## Related Designs
 

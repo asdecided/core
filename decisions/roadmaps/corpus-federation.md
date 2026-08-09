@@ -10,11 +10,12 @@ type: roadmap
 Planned
 
 ADR-089 accepts federation in principle and fixes five non-negotiable
-constraints. The accepted `corpus-federation-mechanism` design now resolves the
+constraints. The refreshed `corpus-federation-mechanism` design now resolves the
 first-increment questions against the released Rust engine: one direct parent,
 one fixed Markdown manifest, verified materialised bytes, explicit source
 identity and overrides, one source-aware read model, and inherited code
-enforcement. The separate implementing ADR remains the gate before engine work.
+enforcement. ADR-133 through ADR-143 separate those choices for individual
+human ratification and remain the gate before engine work.
 Execution order and task state live in the GitHub epic named in
 `## Related Tickets` under ADR-093.
 
@@ -59,18 +60,21 @@ delta, and section-anchor work does not block federation.
 
 ### Mechanism design (`corpus-federation-mechanism`)
 
-The accepted design resolves the manifest home, one-parent cardinality,
+The design synthesis resolves the manifest home, one-parent cardinality,
 transitivity rejection, parent finding ownership, export opt-out, repository-key
 interaction, and MCP budget behaviour. It also records the current Rust seams,
 source-aware identity, code-scope semantics, enforcement, cache invalidation,
 and write boundary that the original proposal omitted.
 
-### Implementing ADR
+### Federation decision set
 
-Author and human-ratify the implementing ADR from the accepted design. It must
-fix the manifest grammar, stable finding-code names, source-aware model,
-ADR-127 audit-provenance amendment, and compatibility boundary. Engine
-implementation does not begin before this decision is accepted.
+Human-ratify ADR-133 through ADR-143 independently. Together they decide the
+topology, parent declaration and verification, source identity, qualified
+resolution, explicit overrides, unified read model, ranking, child-code
+enforcement, bounded MCP provenance, export composition, and versioned
+generation/cache contract. Engine implementation does not begin until every
+ADR required by the implementation slice is Accepted; ADR-141 must explicitly
+amend ADR-127 before MCP provenance changes ship.
 
 ### Source and export prerequisites
 
@@ -160,8 +164,8 @@ and export view, never an MCP or enforcement bypass.
   coexist during migration.
 - Export schemas and source identity land before federation publishes
   source-aware records.
-- The implementing ADR is reviewed with the real parent/child corpus pair
-  before resolver work starts.
+- The federation ADR set is reviewed with the real parent/child corpus pair,
+  and each governing ADR is separately Accepted before its engine work starts.
 
 ## Risks
 
@@ -209,6 +213,17 @@ and export view, never an MCP or enforcement bypass.
 - adr-123
 - adr-127
 - adr-128
+- adr-133
+- adr-134
+- adr-135
+- adr-136
+- adr-137
+- adr-138
+- adr-139
+- adr-140
+- adr-141
+- adr-142
+- adr-143
 
 ## Related Designs
 
