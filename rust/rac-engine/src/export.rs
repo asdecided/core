@@ -14,6 +14,27 @@ use crate::validate::load_ticketing_provider;
 pub const EDGE_TYPE: &str = "relates-to";
 pub const STATUS_ABSENT: &str = "unknown";
 
+pub const EXPORT_SCHEMA_NAMES: [&str; 3] = ["viewer", "documents", "graph"];
+
+const VIEWER_SCHEMA: &str =
+    include_str!("../assets/schemas/export-viewer-v1.schema.json");
+const DOCUMENTS_SCHEMA: &str =
+    include_str!("../assets/schemas/export-documents-v1.schema.json");
+const GRAPH_SCHEMA: &str = include_str!("../assets/schemas/export-graph-v1.schema.json");
+
+/// Return the packaged Draft 2020-12 contract for an export projection.
+///
+/// These bytes are the public resource surfaced by `decided export --schema`;
+/// keep the CLI write exact so consumers can compare them directly.
+pub fn export_schema(name: &str) -> Option<&'static str> {
+    match name {
+        "viewer" => Some(VIEWER_SCHEMA),
+        "documents" => Some(DOCUMENTS_SCHEMA),
+        "graph" => Some(GRAPH_SCHEMA),
+        _ => None,
+    }
+}
+
 /// `_corpus_name(directory)`.
 fn corpus_name(directory: &str) -> String {
     let trimmed = directory.trim_end_matches('/');

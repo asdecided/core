@@ -2076,6 +2076,8 @@ fn run_export(rest: &[&String]) -> u8 {
     let mut json = false;
     let mut html = false;
     let mut okf = false;
+    let mut schema: Option<String> = None;
+    let mut schema_mode = false;
     let mut documents = false;
     let mut graph = false;
     let mut agent_rules = false;
@@ -2139,6 +2141,44 @@ fn run_export(rest: &[&String]) -> u8 {
                     return c;
                 }
             }
+            "--schema" => {
+                if let Err(FlagError(c)) =
+                    set_mode("--schema", &mut schema_mode, &mut last_mode)
+                {
+                    return c;
+                }
+                i += 1;
+                match rest.get(i) {
+                    Some(v) if is_export_schema_choice(v) => schema = Some(v.to_string()),
+                    Some(v) if !v.starts_with('-') => {
+                        return argparse_error(
+                            prog,
+                            &format!(
+                                "argument --schema: invalid choice: '{v}' (choose from 'viewer', 'documents', 'graph')"
+                            ),
+                        )
+                    }
+                    _ => return argparse_error(prog, "argument --schema: expected one argument"),
+                }
+            }
+            other if other.starts_with("--schema=") => {
+                if let Err(FlagError(c)) =
+                    set_mode("--schema", &mut schema_mode, &mut last_mode)
+                {
+                    return c;
+                }
+                let value = &other["--schema=".len()..];
+                if is_export_schema_choice(value) {
+                    schema = Some(value.to_string());
+                } else {
+                    return argparse_error(
+                        prog,
+                        &format!(
+                            "argument --schema: invalid choice: '{value}' (choose from 'viewer', 'documents', 'graph')"
+                        ),
+                    );
+                }
+            }
             "--agent-rules" => {
                 if let Err(FlagError(c)) =
                     set_mode("--agent-rules", &mut agent_rules, &mut last_mode)
@@ -2193,6 +2233,7 @@ fn run_export(rest: &[&String]) -> u8 {
     cmd_export(&ExportArgs {
         directory: directory.unwrap_or_else(|| ".".to_string()),
         json,
+        schema,
         graph,
         documents,
         html,
@@ -2206,6 +2247,10 @@ fn run_export(rest: &[&String]) -> u8 {
 
 fn is_client_choice(v: &str) -> bool {
     matches!(v, "claude" | "agents" | "cursor" | "copilot")
+}
+
+fn is_export_schema_choice(v: &str) -> bool {
+    crate::export::EXPORT_SCHEMA_NAMES.contains(&v)
 }
 
 fn run_schema(rest: &[&String]) -> u8 {

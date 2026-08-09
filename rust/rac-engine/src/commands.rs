@@ -42,6 +42,14 @@ fn emit(text: String) {
     let _ = stdout.flush();
 }
 
+fn emit_exact(text: &str) {
+    use std::io::Write;
+    let payload = crate::pycompat::encode_stdout_surrogateescape(text);
+    let mut stdout = std::io::stdout().lock();
+    let _ = stdout.write_all(&payload);
+    let _ = stdout.flush();
+}
+
 // ---------------------------------------------------------------------------
 // Service results (decided.services.validate)
 // ---------------------------------------------------------------------------
@@ -1175,6 +1183,7 @@ pub fn cmd_review(args: &ReviewArgs) -> i32 {
 pub struct ExportArgs {
     pub directory: String,
     pub json: bool,
+    pub schema: Option<String>,
     pub graph: bool,
     pub documents: bool,
     pub html: bool,
@@ -1186,7 +1195,7 @@ pub struct ExportArgs {
 }
 
 pub fn cmd_export(args: &ExportArgs) -> i32 {
-    if !Path::new(&args.directory).is_dir() {
+    if args.schema.is_none() && !Path::new(&args.directory).is_dir() {
         return usage_error(&format!("not a directory: {}", args.directory));
     }
     // Agent-rules is a distinct mode (ADR-067) owning --out/--client/--check
@@ -1205,6 +1214,15 @@ pub fn cmd_export(args: &ExportArgs) -> i32 {
     }
     if args.out.is_some() && !(args.html || args.okf) {
         return usage_error("--out requires --html or --okf (--json writes to stdout)");
+    }
+    if let Some(name) = &args.schema {
+        let Some(schema) = crate::export::export_schema(name) else {
+            return usage_error(&format!(
+                "unknown export schema: {name} (choose from viewer, documents, graph)"
+            ));
+        };
+        emit_exact(schema);
+        return EXIT_OK;
     }
     if args.documents {
         emit(output::render_documents_jsonl(

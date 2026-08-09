@@ -6,6 +6,11 @@ details, release history over commit history.
 
 ## Unreleased
 
+- Added versioned Draft 2020-12 schemas for the viewer, documents, and graph
+  export contracts. `decided export --schema <viewer|documents|graph>` emits
+  the packaged schema bytes offline, and CI now checks fixture and live-corpus
+  exports for contract and field-set drift.
+
 ## v0.28.0 — 2026-08-09
 
 ### Retrieval that preserves lexical relevance
