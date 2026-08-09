@@ -47,7 +47,7 @@ bug; deterministic evaluation must measure it.
 
 ## Status
 
-Proposed
+Accepted
 
 ## Category
 

@@ -47,7 +47,7 @@ migration and new decisions about ordering, collisions, cycles, and overrides.
 
 ## Status
 
-Proposed
+Accepted
 
 ## Category
 

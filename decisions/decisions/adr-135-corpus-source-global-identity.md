@@ -49,7 +49,7 @@ to use export fallbacks until they opt into explicit identity.
 
 ## Status
 
-Proposed
+Accepted
 
 ## Category
 

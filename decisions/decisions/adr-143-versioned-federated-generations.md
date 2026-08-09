@@ -49,7 +49,7 @@ prevent stale inherited governance from being served as current.
 
 ## Status
 
-Proposed
+Accepted
 
 ## Category
 

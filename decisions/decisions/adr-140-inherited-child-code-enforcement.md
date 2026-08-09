@@ -50,7 +50,7 @@ exception; a convenience flag cannot silently weaken enforcement.
 
 ## Status
 
-Proposed
+Accepted
 
 ## Category
 

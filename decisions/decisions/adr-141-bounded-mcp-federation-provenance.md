@@ -38,8 +38,8 @@ The six-tool MCP surface remains unchanged when federation ships.
 - Tool descriptions and schemas retain the existing measured standing-surface
   budget; provenance is additive within that envelope.
 
-If accepted, this ADR explicitly amends ADR-127's returned-identity shape for
-federated results while leaving its principal, collection coverage, and
+This ADR explicitly amends ADR-127's returned-identity shape for federated
+results while leaving its principal, collection coverage, and
 content-exclusion rules intact. ADR-128 remains unamended.
 
 ## Consequences
@@ -55,7 +55,7 @@ source identity cannot be optional metadata.
 
 ## Status
 
-Proposed
+Accepted
 
 ## Category
 

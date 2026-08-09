@@ -15,7 +15,7 @@ first-increment questions against the released Rust engine: one direct parent,
 one fixed Markdown manifest, verified materialised bytes, explicit source
 identity and overrides, one source-aware read model, and inherited code
 enforcement. ADR-133 through ADR-143 separate those choices for individual
-human ratification and remain the gate before engine work.
+human ratification. They are now Accepted and govern the engine work.
 Execution order and task state live in the GitHub epic named in
 `## Related Tickets` under ADR-093.
 
@@ -68,13 +68,13 @@ and write boundary that the original proposal omitted.
 
 ### Federation decision set
 
-Human-ratify ADR-133 through ADR-143 independently. Together they decide the
-topology, parent declaration and verification, source identity, qualified
-resolution, explicit overrides, unified read model, ranking, child-code
-enforcement, bounded MCP provenance, export composition, and versioned
-generation/cache contract. Engine implementation does not begin until every
-ADR required by the implementation slice is Accepted; ADR-141 must explicitly
-amend ADR-127 before MCP provenance changes ship.
+ADR-133 through ADR-143 were independently human-ratified on PR #451. Together
+they decide the topology, parent declaration and verification, source identity,
+qualified resolution, explicit overrides, unified read model, ranking,
+child-code enforcement, bounded MCP provenance, export composition, and
+versioned generation/cache contract. Engine implementation may now begin
+within their combined boundary; ADR-141 explicitly amends ADR-127 for the MCP
+provenance change.
 
 ### Source and export prerequisites
 
@@ -164,8 +164,8 @@ and export view, never an MCP or enforcement bypass.
   coexist during migration.
 - Export schemas and source identity land before federation publishes
   source-aware records.
-- The federation ADR set is reviewed with the real parent/child corpus pair,
-  and each governing ADR is separately Accepted before its engine work starts.
+- Implementation remains within the accepted federation ADR set; any change to
+  those boundaries requires a new or superseding decision.
 
 ## Risks
 

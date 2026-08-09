@@ -57,7 +57,7 @@ validation and enforcement from disagreeing with retrieval.
 
 ## Status
 
-Proposed
+Accepted
 
 ## Category
 

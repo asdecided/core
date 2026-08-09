@@ -51,7 +51,7 @@ unqualified surfaces.
 
 ## Status
 
-Proposed
+Accepted
 
 ## Category
 

@@ -57,7 +57,7 @@ repository size when submodules are not suitable.
 
 ## Status
 
-Proposed
+Accepted
 
 ## Category
 

@@ -51,7 +51,7 @@ rather than treated as convenience behavior.
 
 ## Status
 
-Proposed
+Accepted
 
 ## Category
 

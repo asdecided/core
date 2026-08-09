@@ -7,13 +7,13 @@ type: design
 
 ## Status
 
-Proposed
+Accepted
 
 The post-v0.28 design pass resolves the mechanism questions left by ADR-089 and
-acts as a synthesis for ADR-133 through ADR-143. Those independently ratifiable
-decisions, rather than this design alone, govern the first useful federation
-increment. Engine work starts only after every ADR required by its scope is
-human-accepted.
+acts as a synthesis for ADR-133 through ADR-143. Those decisions were separately
+human-ratified on PR #451; together they govern and authorize the first useful
+federation increment. This design does not authorize extensions outside their
+combined boundary.
 
 ## Context
 
@@ -409,9 +409,9 @@ are resolved as follows:
   budget.
 
 ADR-133 through ADR-143 record the independent choices behind this synthesis.
-Each remains Proposed until separately ratified. Support for multiple or
-external parents requires a later decision and evidence from the one-parent
-implementation.
+Each is Accepted following separate human ratification on PR #451. Support for
+multiple or external parents requires a later decision and evidence from the
+one-parent implementation.
 
 ## Related Requirements
 

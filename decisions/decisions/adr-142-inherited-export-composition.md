@@ -50,7 +50,7 @@ identity before aggregating federated exports.
 
 ## Status
 
-Proposed
+Accepted
 
 ## Category
 
