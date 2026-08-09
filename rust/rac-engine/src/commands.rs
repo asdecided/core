@@ -1578,11 +1578,13 @@ pub fn cmd_diagnose(args: &DiagnoseArgs) -> i32 {
         &args.directory,
         &args.query,
         &args.target,
-        args.artifact_type.as_deref(),
-        !args.top_level,
-        &args.tags,
-        args.live,
-        args.surface_limit,
+        crate::resolve::DiagnoseOptions {
+            artifact_type: args.artifact_type.as_deref(),
+            recursive: !args.top_level,
+            tags: &args.tags,
+            live_only: args.live,
+            surface_limit: args.surface_limit,
+        },
     );
     if args.json {
         emit(output::render_diagnosis_json(&diagnosis));

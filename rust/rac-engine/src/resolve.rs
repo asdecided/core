@@ -829,25 +829,29 @@ pub fn diagnose_index(
 }
 
 /// Directory-backed named-target diagnosis.
+pub struct DiagnoseOptions<'a> {
+    pub artifact_type: Option<&'a str>,
+    pub recursive: bool,
+    pub tags: &'a [String],
+    pub live_only: bool,
+    pub surface_limit: usize,
+}
+
 pub fn diagnose_artifact(
     directory: &str,
     query: &str,
     target: &str,
-    artifact_type: Option<&str>,
-    recursive: bool,
-    tags: &[String],
-    live_only: bool,
-    surface_limit: usize,
+    options: DiagnoseOptions<'_>,
 ) -> SearchDiagnosis {
-    let entries = build_index(directory, recursive);
+    let entries = build_index(directory, options.recursive);
     diagnose_index(
         &entries,
         query,
         target,
-        artifact_type,
-        tags,
-        live_only,
-        surface_limit,
+        options.artifact_type,
+        options.tags,
+        options.live_only,
+        options.surface_limit,
     )
 }
 
