@@ -321,11 +321,16 @@ evidence terms are unaffected (`terms` evidence = `["search"]`, deduped).
 ## 9. RRF fusion, rounding, and the sort
 
 ```python
-fused[path] = 1.0 / (60 + lexical_rank[path]) + 0.5 / (60 + graph_rank[path])
+graph_allowed[path] = bm25[path] >= max(bm25.values()) * 0.85
+fused[path] = 1.0 / (60 + lexical_rank[path])
+if graph_allowed[path]:
+    fused[path] += 0.5 / (60 + graph_rank[path])
 ```
 
 `60 + rank` is integer addition, then f64 division; lexical term first, then
-`+` the graph term (one f64 add).
+`+` the graph term (one f64 add) only for candidates at or above the inclusive
+85% lexical floor. A candidate below the floor retains the lexical term and its
+graph contribution is clamped to zero.
 
 Final ordering: `matched.sort(key=lambda em: (-round(fused[path], 12), path))`.
 
@@ -357,7 +362,9 @@ Key order (dict insertion order — JSON must preserve it):
     "bm25": 3.600463,         // round(bm25, 6)
     "lexical_rank": 2,        // int
     "graph_rank": 3,          // int
-    "inbound": 14             // int (the raw count, not the float)
+    "inbound": 14,            // int (the raw count, not the float)
+    "graph_floor_ratio": 0.85,// fixed inclusive lexical floor
+    "graph_gate": "applied"  // "applied" or "clamped"
   }
 }
 ```
@@ -439,7 +446,7 @@ RAC-KTQ63DSJCAZ5               design       Explorer Command Surface
   `f"{indent}• field={field} terms={t1,t2}"` (terms comma-joined, no spaces);
   when the match has a snippet, ` [{section}: {snippet}]` is appended (section
   prefix again omitted when falsy); then a second line
-  `f"{indent}  score={score} bm25={bm25} lexical_rank={lr} graph_rank={gr} inbound={inb}"`
+  `f"{indent}  score={score} bm25={bm25} lexical_rank={lr} graph_rank={gr} inbound={inb} graph_floor_ratio={ratio} graph_gate={gate}"`
   — floats via `str()` = repr (`score=0.023272 bm25=1.37942`).
 - Footer: empty line, then `f"{count} match(es) for {query!r}."`.
 - Everything joined with `\n`, one trailing `\n` from `print`. Exit always 0.

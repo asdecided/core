@@ -7,7 +7,7 @@ type: requirement
 
 ## Status
 
-Proposed
+Accepted
 
 Classification: `[internal]` — a tested guarantee over the shipped ranking
 boost. Initiative 2 of the `retrieval-diagnostics` roadmap.
@@ -78,3 +78,11 @@ gate — and nothing would fail until an agent noticed worse grounding.
 
 - rac-explain-miss-diagnostics
 - rac-explainable-retrieval
+
+## Verification
+
+- Core unit tests pin the inclusive 0.85 boundary and a real ranking in which a
+  weak lexical hub is clamped.
+- `asdecided/benchmarks` extends `search-artifacts` with four adversarial
+  black-box cases and extends DecisionGrounding with two downstream adherence
+  scenarios.

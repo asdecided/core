@@ -1556,6 +1556,48 @@ pub fn cmd_find(args: &FindArgs) -> i32 {
     EXIT_OK
 }
 
+pub struct DiagnoseArgs {
+    pub query: String,
+    pub target: String,
+    pub directory: String,
+    pub artifact_type: Option<String>,
+    pub tags: Vec<String>,
+    pub surface_limit: usize,
+    pub json: bool,
+    pub top_level: bool,
+    pub live: bool,
+}
+
+/// Named-target explain-miss diagnostic. It calls the same directory-backed
+/// matcher and ranking path as `find`, then renders only the trace.
+pub fn cmd_diagnose(args: &DiagnoseArgs) -> i32 {
+    if !Path::new(&args.directory).is_dir() {
+        return usage_error(&format!("not a directory: {}", args.directory));
+    }
+    let diagnosis = crate::resolve::diagnose_artifact(
+        &args.directory,
+        &args.query,
+        &args.target,
+        crate::resolve::DiagnoseOptions {
+            artifact_type: args.artifact_type.as_deref(),
+            recursive: !args.top_level,
+            tags: &args.tags,
+            live_only: args.live,
+            surface_limit: args.surface_limit,
+        },
+    );
+    if args.json {
+        emit(output::render_diagnosis_json(&diagnosis));
+    } else {
+        emit(output::render_diagnosis_human(&diagnosis));
+    }
+    if diagnosis.outcome == crate::resolve::DIAGNOSIS_COMPLETE {
+        EXIT_OK
+    } else {
+        EXIT_VALIDATION_FAILED
+    }
+}
+
 pub struct RetrieveArgs {
     pub task: String,
     pub directory: String,

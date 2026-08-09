@@ -7,7 +7,7 @@ type: requirement
 
 ## Status
 
-Proposed
+Accepted
 
 Classification: `[external]` — an author-facing diagnostic surface.
 Initiative 1 of the `retrieval-diagnostics` roadmap.
@@ -79,3 +79,10 @@ the budget truncated it, and today the author can only guess which.
 
 - rac-explainable-retrieval
 - rac-floor-ratio-boost-gate
+
+## Verification
+
+- Native unit and CLI tests cover no-term, partial-term, outranked,
+  result-window-truncated, and named-target-required behaviour.
+- The diagnostic calls the same matcher and ranking function as `find` and is
+  additive to the existing search contract.

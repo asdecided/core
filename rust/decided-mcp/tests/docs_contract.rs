@@ -45,6 +45,7 @@ const SUPPORTED_DECIDED_COMMANDS: &[&str] = &[
     "quickstart",
     "resolve",
     "find",
+    "diagnose",
     "decisions-for",
     "eval",
     "migrate",

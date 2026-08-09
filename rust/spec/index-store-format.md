@@ -127,7 +127,7 @@ fails closed on: stored hash ≠ requested corpus hash; stored bundle ≠
 `scoring_fingerprint()`. Fingerprint string (pinned):
 
 ```
-id=4.0|title=3.0|path=2.0|heading=1.5|body=1.0|tags=2.5|k1=1.2|b=0.75|rrf=60|graph=0.5
+id=4.0|title=3.0|path=2.0|heading=1.5|body=1.0|tags=2.5|k1=1.2|b=0.75|rrf=60|graph=0.5|graph_floor=0.85
 ```
 
 Float repr rule: Python `repr()` — `4.0`, `1.5`, `0.75`, `1.2`; ints

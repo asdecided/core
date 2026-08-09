@@ -1207,9 +1207,10 @@ deterministic, case-insensitive token-boundary matching (ADR-037); a multi-term
 query requires every term to match somewhere. Results are ordered by a
 **deterministic relevance score** (ADR-078): a field-weighted BM25 lexical score
 and a bounded inbound-reference graph boost, fused with Reciprocal Rank Fusion,
-with sorted path as the tiebreak. No embeddings or semantic scoring — identical
-bytes and query yield a byte-identical order. An empty result is a valid outcome,
-not an error.
+with sorted path as the tiebreak. The graph signal is a near-tie breaker only:
+it is clamped when a candidate's BM25 score is below 85% of the strongest lexical
+match. No embeddings or semantic scoring — identical bytes and query yield a
+byte-identical order. An empty result is a valid outcome, not an error.
 
 - **Input:** `decided find <query> [directory]` — directory defaults to the
   current directory.
@@ -1247,11 +1248,12 @@ rewrite shape the stat scan accepts (a size- and mtime-preserving in-place
 rewrite, ADR-105's S5).
 
 `--explain` adds, per match, the matched field/terms/tier plus the relevance
-score and its components (`bm25`, `lexical_rank`, `graph_rank`, `inbound`), so a
-caller can see why one result outranks another. It is additive: the default
-output (without `--explain`) is unchanged, and `schema_version` stays `1`. (The
-tags tier renumbered the `tier` integer for path/heading/body by one; the field
-name and result order are unchanged.)
+score and its components (`bm25`, `lexical_rank`, `graph_rank`, `inbound`,
+`graph_floor_ratio`, `graph_gate`), so a caller can see why one result outranks
+another and whether graph boost was `applied` or `clamped`. It is additive: the
+default output (without `--explain`) is unchanged, and `schema_version` stays
+`1`. (The tags tier renumbered the `tier` integer for path/heading/body by one;
+the field name and result order are unchanged.)
 
 Each match also carries a **`recency`** object — git-derived freshness so you
 can see which result has decayed without opening it (ADR-045). `last_committed`
@@ -1301,6 +1303,30 @@ decided find markdown decisions/ --explain        # show the relevance-score bre
 }
 ```
 
+
+---
+
+## diagnose
+
+Explain why one named artifact did or did not surface for a query. The command
+traces the same tokeniser, tier matcher, filters, and ranking used by `find`; it
+does not run a second retrieval heuristic or change the result set.
+
+- **Input:** `decided diagnose <query> <target-id> [directory]`
+- **Options:** `--limit N` (default `5`; the surfaced result window) ·
+  `--type TYPE` · `--tag TAG` (repeatable) · `--live` · `--json` ·
+  `--top-level` · `--recursive`
+- **Exit codes:** `0` target diagnosed · `1` target ID missing or ambiguous ·
+  `2` invalid arguments or directory
+
+The `reason` distinguishes a target with no matching query term, a partial
+AND-query match, a filtered target, a target ranked below another result, and a
+target truncated beyond the selected result window.
+
+```bash
+decided diagnose "desktop persistence" RAC-01JY4M8X2QZ7 decisions/ --json
+decided diagnose "desktop persistence" RAC-01JY4M8X2QZ7 decisions/ --limit 3
+```
 
 ---
 

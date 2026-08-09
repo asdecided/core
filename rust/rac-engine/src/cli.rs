@@ -5,15 +5,16 @@
 //! (decision 9) — stdout stays byte-identical (empty on errors).
 
 use crate::commands::{
-    cmd_coverage, cmd_decisions_for, cmd_diff, cmd_doctor, cmd_eval, cmd_export, cmd_find,
-    cmd_gate, cmd_herald, cmd_hook, cmd_improve, cmd_index, cmd_init, cmd_inspect, cmd_mcp_stats, cmd_migrate,
-    cmd_new, cmd_portfolio, cmd_quickstart, cmd_relationships, cmd_rename, cmd_resolve,
-    cmd_retrieve, cmd_review, cmd_schema, cmd_sentry, cmd_skill, cmd_stats, cmd_telemetry,
-    cmd_templates, cmd_usage, cmd_validate, CoverageArgs, DecisionsForArgs, DiffArgs, DoctorArgs,
-    EvalArgs, ExportArgs, FindArgs, GateArgs, HeraldArgs, HookArgs, ImproveArgs, IndexArgs, InitArgs,
-    InspectArgs, McpStatsArgs, MigrateArgs, NewArgs, PortfolioArgs, QuickstartArgs,
-    RelationshipsArgs, RenameArgs, ResolveArgs, RetrieveArgs, ReviewArgs, SchemaArgs, SentryArgs,
-    SkillArgs, StatsArgs, TelemetryArgs, TemplatesArgs, UsageArgs, ValidateArgs, WatchkeeperArgs,
+    cmd_coverage, cmd_decisions_for, cmd_diagnose, cmd_diff, cmd_doctor, cmd_eval, cmd_export,
+    cmd_find, cmd_gate, cmd_herald, cmd_hook, cmd_improve, cmd_index, cmd_init, cmd_inspect,
+    cmd_mcp_stats, cmd_migrate, cmd_new, cmd_portfolio, cmd_quickstart, cmd_relationships,
+    cmd_rename, cmd_resolve, cmd_retrieve, cmd_review, cmd_schema, cmd_sentry, cmd_skill,
+    cmd_stats, cmd_telemetry, cmd_templates, cmd_usage, cmd_validate, CoverageArgs,
+    DecisionsForArgs, DiagnoseArgs, DiffArgs, DoctorArgs, EvalArgs, ExportArgs, FindArgs,
+    GateArgs, HeraldArgs, HookArgs, ImproveArgs, IndexArgs, InitArgs, InspectArgs, McpStatsArgs,
+    MigrateArgs, NewArgs, PortfolioArgs, QuickstartArgs, RelationshipsArgs, RenameArgs,
+    ResolveArgs, RetrieveArgs, ReviewArgs, SchemaArgs, SentryArgs, SkillArgs, StatsArgs,
+    TelemetryArgs, TemplatesArgs, UsageArgs, ValidateArgs, WatchkeeperArgs,
 };
 use crate::commands::cmd_watchkeeper;
 use crate::output::rac_version;
@@ -155,7 +156,7 @@ fn run_dispatch(args: &[String]) -> u8 {
     // Native-only additions dispatch but are deliberately NOT in SUBCOMMANDS:
     // the retired Python oracle's `invalid choice` bytes remain pinned by the
     // bounded compatibility suite.
-    if !matches!(first.as_str(), "retrieve" | "sentry" | "herald")
+    if !matches!(first.as_str(), "retrieve" | "sentry" | "herald" | "diagnose")
         && !SUBCOMMANDS.contains(&first.as_str())
     {
         return argparse_error("decided", &invalid_choice_message(first));
@@ -207,6 +208,7 @@ fn run_dispatch(args: &[String]) -> u8 {
         "templates" => run_templates(&rest),
         "resolve" => run_resolve(&rest),
         "find" => run_find(&rest),
+        "diagnose" => run_diagnose(&rest),
         "retrieve" => run_retrieve(&rest),
         "review" => run_review(&rest),
         "export" => run_export(&rest),
@@ -1697,6 +1699,98 @@ fn run_find(rest: &[&String]) -> u8 {
         live,
         cache,
         verify,
+    }) as u8
+}
+
+fn run_diagnose(rest: &[&String]) -> u8 {
+    let prog = "decided diagnose";
+    let mut query: Option<String> = None;
+    let mut target: Option<String> = None;
+    let mut directory: Option<String> = None;
+    let mut artifact_type: Option<String> = None;
+    let mut tags: Vec<String> = Vec::new();
+    let mut surface_limit: usize = 5;
+    let mut json = false;
+    let mut top_level = false;
+    let mut live = false;
+    let mut extras: Vec<String> = Vec::new();
+    let mut positional_only = false;
+
+    let mut i = 0;
+    while i < rest.len() {
+        let arg = rest[i].as_str();
+        if positional_only || arg == "-" || !arg.starts_with('-') {
+            if query.is_none() {
+                query = Some(arg.to_string());
+            } else if target.is_none() {
+                target = Some(arg.to_string());
+            } else if directory.is_none() {
+                directory = Some(arg.to_string());
+            } else {
+                extras.push(arg.to_string());
+            }
+            i += 1;
+            continue;
+        }
+        match arg {
+            "--" => positional_only = true,
+            "--json" => json = true,
+            "--top-level" => top_level = true,
+            "--live" => live = true,
+            "--recursive" => {}
+            other if other == "--type" || other.starts_with("--type=") => {
+                match take_opt_value(prog, "--type", other, rest, &mut i) {
+                    Ok(value) => artifact_type = Some(value),
+                    Err(code) => return code,
+                }
+            }
+            other if other == "--tag" || other.starts_with("--tag=") => {
+                match take_opt_value(prog, "--tag", other, rest, &mut i) {
+                    Ok(value) => tags.push(value),
+                    Err(code) => return code,
+                }
+            }
+            other if other == "--limit" || other.starts_with("--limit=") => {
+                let value = match take_opt_value(prog, "--limit", other, rest, &mut i) {
+                    Ok(value) => value,
+                    Err(code) => return code,
+                };
+                let Some(parsed) = py_parse_int(&value) else {
+                    return argparse_error(
+                        prog,
+                        &format!("argument --limit: invalid int value: {value:?}"),
+                    );
+                };
+                if parsed < 1 {
+                    return argparse_error(prog, "argument --limit: must be at least 1");
+                }
+                surface_limit = parsed as usize;
+            }
+            other => extras.push(other.to_string()),
+        }
+        i += 1;
+    }
+
+    let Some(query) = query else {
+        return argparse_error(prog, "the following arguments are required: query, target");
+    };
+    let Some(target) = target else {
+        return argparse_error(prog, "the following arguments are required: target");
+    };
+    if !extras.is_empty() {
+        return unrecognized(&extras);
+    }
+
+    cmd_diagnose(&DiagnoseArgs {
+        query,
+        target,
+        directory: directory.unwrap_or_else(|| ".".to_string()),
+        artifact_type,
+        tags,
+        surface_limit,
+        json,
+        top_level,
+        live,
     }) as u8
 }
 

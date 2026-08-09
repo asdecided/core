@@ -75,6 +75,42 @@ fn resolve_accepts_a_literal_hyphen_id_and_reaches_resolution() {
 }
 
 #[test]
+fn diagnose_requires_a_named_target() {
+    let output = run(&["diagnose", "storage"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("the following arguments are required: target")
+    );
+}
+
+#[test]
+fn diagnose_emits_a_named_target_trace() {
+    let root = scratch_root();
+    let root_text = root.to_string_lossy().into_owned();
+    let output = run(&[
+        "diagnose",
+        "explicit contract",
+        "RAC-111111111111",
+        &root_text,
+        "--json",
+    ]);
+    assert!(
+        output.status.success(),
+        "stdout={}, stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"target\": \"RAC-111111111111\""));
+    assert!(stdout.contains("\"outcome\": \"diagnosed\""));
+    assert!(stdout.contains("\"reason\": \"surfaced\""));
+    assert!(stdout.contains("\"rank\": 1"));
+
+    fs::remove_dir_all(root).expect("remove CLI smoke corpus");
+}
+
+#[test]
 fn generated_agent_rules_are_in_sync_with_the_decision_corpus() {
     let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../decisions");
     let corpus = corpus.to_string_lossy().into_owned();
