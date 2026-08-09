@@ -62,8 +62,9 @@ the engine.
 - Consumers chunk at recorded, deterministic section boundaries while the
   artifact remains the atomic knowledge unit — RAC records anchors, never
   chunks (ADR-004, ADR-010).
-- N corpora merge into one backend with zero identity collisions, without
-  federation semantics entering the engine (ADR-089 stays deferred).
+- N corpora merge into one backend with zero identity collisions. Source
+  identity itself adds no inheritance semantics; the separate
+  `corpus-federation` programme owns that engine work.
 - The claims above are evidenced: exports are schema-checked, byte-stable
   across clones, and the grounding eval discriminates instead of scoring a
   perfect 1.0 on twelve queries.
@@ -73,7 +74,7 @@ the engine.
 ### Export contract schemas (`rac-export-contract-schemas`)
 
 Ship JSON Schema files for the three projections as packaged resources,
-expose them via `rac export --schema <mode>`, validate every golden and
+expose them via `decided export --schema <mode>`, validate every golden and
 dogfood export against them in CI with a bidirectional drift guard, and
 publish a contracts page reconciled with the viewer contract. Turns the
 ADR-007 contract from asserted into machine-checkable — the cheapest,
@@ -81,7 +82,7 @@ highest-leverage enterprise consumability win in the programme.
 
 ### Point-in-time export (`rac-point-in-time-export`)
 
-`rac export --at <rev>` for the three JSON payload modes, composing the
+`decided export --at <rev>` for the three JSON payload modes, composing the
 ADR-043 revision-materialisation seam exactly as watchkeeper does. Output is
 a pure function of the repository content at the revision — byte-identical
 across runs, working directories, and clones — with paths and corpus
@@ -90,7 +91,7 @@ location.
 
 ### Incremental change feed (`rac-export-change-feed`)
 
-`rac export --documents|--graph --since <rev>` emits added, modified, and
+`decided export --documents|--graph --since <rev>` emits added, modified, and
 removed records — and edge deltas for the graph — between a base revision
 and the working tree or a second revision, keyed on canonical id, with
 resolved-SHA cursor metadata. The replay law is CI-asserted: applying the
@@ -109,17 +110,20 @@ edges in documents metadata.
 ### Multi-corpus source identity (`rac-export-source-identity`)
 
 One shared derivation for corpus identity across all three projections —
-explicit configuration first, repository key next, directory basename as
+explicit `corpus.source` first, repository key next, directory basename as
 the compatibility fallback — plus a documented consumer-side aggregation
-recipe keyed on `(source, id)`. Explicitly not federation: no inheritance,
-no cross-corpus resolution or validation in the engine (ADR-089 untouched).
+recipe keyed on `(source, id)`. Federation requires the explicit value and
+reuses it, but source identity alone adds no inheritance or cross-corpus
+resolution or validation (ADR-089 untouched). Identical parent records may
+deduplicate only when their verified pins agree; different pins are an
+aggregation conflict.
 
 ### Scale and retrieval evidence
 
 A deterministic synthetic large-corpus fixture with a documented
 performance floor for export and find; expansion of the ADR-066 grounding
 eval from twelve queries to a discriminating set with hard negatives; and
-optional `rac find` pagination whose defaults keep the golden outputs
+optional `decided find` pagination whose defaults keep the golden outputs
 byte-identical. In-repo scope stays inside the grounding eval — the
 per-tool benchmark families remain external per ADR-097. This initiative
 links the existing `rac-grounding-eval-benchmark` requirement and the
@@ -149,8 +153,9 @@ rather than duplicating them.
 
 ## Non-Goals
 
-- Corpus federation, `## inherits`, or any cross-corpus resolution in the
-  engine — deferred and sequenced last per ADR-089.
+- Corpus federation, `## inherits`, or cross-corpus resolution implemented as
+  part of this programme. The separate `corpus-federation` roadmap may pull
+  export schemas and source identity forward as prerequisites.
 - Chunk emission or per-section export records (ADR-004, ADR-010).
 - Embeddings, semantic scoring, or LLM judging anywhere (ADR-002, ADR-066).
 - MCP server-side caching, push sync, webhooks, or any serving-path change
@@ -169,13 +174,16 @@ rather than duplicating them.
   byte-identical to the plain export.
 - The replay law holds in CI: base export plus feed reproduces the head
   export byte-for-byte.
-- A two-corpus merge fixture shows zero `(source, id)` collisions and zero
-  bare-id collisions.
+- A two-corpus merge fixture shows zero `(source, id)` collisions; repeated
+  bare ids remain distinguishable and never become global identity.
 - After expansion the grounding eval discriminates: overall mean below 1.0
   with hard negatives present, and a documented floor replaces the
   twelve-query perfect score.
-- `rac validate rac/`, `rac relationships rac/ --validate`, and
-  `rac review rac/` stay clean across the programme's output.
+- `decided validate decisions/`,
+  `decided relationships decisions/ --validate`, and
+  `decided gate decisions/` remain non-blocking. `decided review decisions/`
+  may retain the existing advisory backlog but introduces no new blocking
+  review finding.
 
 ## Assumptions
 
@@ -239,6 +247,7 @@ rather than duplicating them.
 
 - deterministic-substrate
 - corpus-export-to-rag-backends
+- corpus-federation
 - lore-supermemory-grounding
 - retrieval-diagnostics
 - external-benchmark-evidence

@@ -9,191 +9,228 @@ type: roadmap
 
 Planned
 
-ADR-089 accepted federation in principle, deferred it in mechanism, and
-sequenced it last among the enterprise decisions. The sequencing condition
-is now satisfied — the additive enterprise ADRs it was scheduled behind
-(ADR-084, ADR-086 through ADR-088, ADR-090, ADR-091) have landed — and the
-design-partner scenario ADR-089 anticipated is real: an adopting
-organisation with a genuine firm-wide standards corpus is expanding Lore
-toward multi-thousand-seat scale. Execution is tracked in GitHub (ADR-093): the
-epic in `## Related Tickets` carries ordering and task state, with a
-sub-issue per initiative.
+ADR-089 accepts federation in principle and fixes five non-negotiable
+constraints. The accepted `corpus-federation-mechanism` design now resolves the
+first-increment questions against the released Rust engine: one direct parent,
+one fixed Markdown manifest, verified materialised bytes, explicit source
+identity and overrides, one source-aware read model, and inherited code
+enforcement. The separate implementing ADR remains the gate before engine work.
+Execution order and task state live in the GitHub epic named in
+`## Related Tickets` under ADR-093.
 
 ## Context
 
-The corpus is single-tree today: one canonical root per repository
-(ADR-018) with git `main` as the only source of truth (ADR-080);
-cross-repository references do not resolve; `## inherits` is deliberately
-unrecognised; and the enterprise profile scaffold stays hollow on its
-parent-corpus line (ADR-088). ADR-089 records the bar any federation
-design must clear — five non-negotiable constraints — and anticipates "a
-future design and its own implementing ADR, built with the design partner
-against a real shared-standards corpus."
+The released engine is single-corpus. `relationships::corpus_items` and its
+downstream validation, resolution, index, graph, cache, freshness, enforcement,
+and MCP models identify artifacts by an unqualified path or id. Org-wide reach
+exists today through ADR-117's two-endpoint topology, but the child cannot
+validate a reference to the org corpus or apply an org Decision's code
+constraints to child code.
 
-This programme is that mechanism work. The `corpus-federation-mechanism`
-design artifact is the concrete proposal; the implementing ADR is authored
-with the design partner and human-ratified when the build starts —
-deliberately not pre-drafted here.
+The original federation proposal named retired Python seams and left seven
+mechanism choices open. The design refresh closes those questions without
+turning AsDecided into a live cross-repository service: the parent is one
+read-only layer already materialised inside the child repository, and every
+answer remains a deterministic function of reviewed bytes.
+
+Two additive `corpus-sync` capabilities precede published federation output:
+machine-checkable export schemas (`rac-export-contract-schemas`) and one stable
+source identity (`rac-export-source-identity`). The remaining point-in-time,
+delta, and section-anchor work does not block federation.
 
 ## Outcomes
 
-- A child corpus resolves a pinned, materialised parent corpus fully
-  offline: firm-wide standards live in one place and every repository's
-  references to them resolve deterministically.
-- Duplicate identities between parent and child are explicit findings;
-  masking a parent artifact is a declared act with recorded provenance,
-  never an implicit precedence rule.
-- Every inherited artifact remains attributable to its source corpus in
-  resolution, MCP responses, findings, and exports.
-- Federated exports compose with the corpus-sync `(source, id)`
-  aggregation model, so a shared parent deduplicates cleanly across N
-  child corpora downstream.
-- Nothing is enterprise-gated: the solo developer gets the identical
-  capability (ADR-085, ADR-089).
+- A child repository declares and verifies one pinned parent in
+  `.decided/corpus.md`, fully offline.
+- Child artifacts cite parent artifacts with ordinary or qualified
+  relationships, and collisions never acquire implicit precedence.
+- Applicable inherited Decisions appear in grounding and path lookup and apply
+  their deterministic code constraints to child code.
+- Local and inherited artifacts share one deterministic read model while every
+  result, finding, audit record, and export remains attributable to its source.
+- A valid local override records the replacement and its live Decision
+  rationale without deleting or rewriting parent history.
+- The same pinned parent deduplicates across N child exports on `(source, id)`;
+  differing pins surface as a conflict.
+- Adding federation leaves repositories without a federation manifest
+  byte-identical to the contemporaneous single-corpus path.
 
 ## Initiatives
 
-### Mechanism design with the design partner
+### Mechanism design (`corpus-federation-mechanism`)
 
-Iterate the `corpus-federation-mechanism` design (Proposed) against the
-partner's real shared-standards corpus until its Open Questions close. The
-design carries the declaration shape, materialisation flow, overlay
-semantics, and provenance model inside ADR-089's five constraints.
+The accepted design resolves the manifest home, one-parent cardinality,
+transitivity rejection, parent finding ownership, export opt-out, repository-key
+interaction, and MCP budget behaviour. It also records the current Rust seams,
+source-aware identity, code-scope semantics, enforcement, cache invalidation,
+and write boundary that the original proposal omitted.
 
 ### Implementing ADR
 
-The resolver ships under its own implementing ADR, authored with the
-design partner and human-ratified — explicitly not pre-drafted by this
-programme. It must clear the five ADR-089 constraints and record the
-decision for everyone.
+Author and human-ratify the implementing ADR from the accepted design. It must
+fix the manifest grammar, stable finding-code names, source-aware model,
+ADR-127 audit-provenance amendment, and compatibility boundary. Engine
+implementation does not begin before this decision is accepted.
 
-### Resolver, validation, and export integration (`rac-parent-corpus-inheritance`, `rac-federated-resolution-provenance`)
+### Source and export prerequisites
 
-Parent artifacts enter resolution as a read-only overlay through the
-engine's existing seams — the corpus walk feeding the resolution and
-identifier indexes, the repository index feeding search, and the MCP
-identity map — with no second resolver, collision findings at the existing
-duplicate-identity detection point, and provenance carried end to end.
+Land the export schemas before adding source-aware fields, then land
+`corpus.source` as the one identity used by exports and federation. Pull these
+two initiatives from `corpus-sync`; do not pull point-in-time export, change
+feeds, or section anchors into the federation critical path.
+
+### Resolver, validation, routing, and enforcement
+
+Load one verified parent through a central source-aware layer set before
+deriving validation, resolution, search, graph, scope, cache, freshness, and MCP
+models. Support `alias::canonical-id`, explicit manifest overrides, sourced
+collision findings, inherited `decisions-for` and grounding, and inherited
+Sentry/`gate --code` evaluation against the child code tree. Mutation commands
+receive only the local layer.
 
 ### Profile unhollowing (ADR-088)
 
-Once the mechanism ships, the enterprise profile scaffold gains the
-reserved parent-corpus declaration line it has been hollow on, emitted
-only when a parent is configured; unconfigured profile output stays
+Once the mechanism ships, expose the reserved parent declaration guidance only
+when explicitly requested. Unconfigured profile and init output remain
 byte-identical.
 
 ### Composition with corpus-sync
 
-Federated exports stamp parent-origin records with the parent corpus's own
-source identity via the `rac-export-source-identity` derivation — one
-identity mechanism across the engine, not a second one for federation.
+Viewer, documents, and graph exports stamp parent and child records with their
+own `corpus.source`, using the published schemas and global `(source, id)` key.
+Inherited records are the default projection; `--local-only` is a diagnostic
+and export view, never an MCP or enforcement bypass.
 
 ## Constraints
 
-The five ADR-089 non-negotiables govern everything here:
-
-- Never gated behind "enterprise": if federation is sound it is sound for
-  the solo developer; it changes resolution for everyone or not at all
-  (ADR-085).
-- Deterministic and offline (ADR-002): parent resolution reads
-  materialised bytes — a pinned submodule, a vendored bundle, or a path —
-  never a live network fetch inside the validate, resolve, or serve paths.
-- Single canonical state preserved per repo (ADR-018, ADR-080): a parent
-  is an inherited, read-only layer; the child's `main` remains its own
-  truth; overrides are explicit, not implicit precedence.
-- Git-native and human-readable (ADR-016, ADR-055): inheritance is
-  declared in Markdown — a `## inherits` section plus a pinned source
-  reference; no database and no hidden index becomes the source of truth.
-- Provenance preserved: an inherited artifact is always attributable to
-  its source corpus, never silently absorbed.
-
-Additionally: artifact identity and per-repository key prefixes stay as
-ADR-026 defines them; all layers remain read-only with writes landing only
-by PR (ADR-065).
+- The five ADR-089 non-negotiables govern the programme: available to all;
+  deterministic and offline; one writable child truth plus read-only inherited
+  parent; Git-native human-readable declaration; provenance end to end.
+- Exactly one direct parent in the first increment. Multiple and transitive
+  inheritance fail loudly.
+- The parent is materialised inside the child repository, with canonical path
+  containment and a verified full digest before overlay.
+- One source-aware read model feeds every consumer. No command, MCP tool, or
+  enforcement surface merges directories independently.
+- No source boost or implicit precedence enters resolution or ranking; the
+  v0.28 lexical graph-floor invariant remains in force.
+- Inherited code scope is evaluated against the child code tree. Enforcement
+  cannot be disabled with `--local-only`.
+- Parent writes and live network fetches are prohibited.
+- Output changes are additive, except an internal persistent-store layout bump;
+  old caches degrade to misses.
 
 ## Non-Goals
 
-- Any live network fetch in validate, resolve, or serve paths (ADR-002,
-  ADR-089).
-- Enterprise gating of any federation behaviour (ADR-085, ADR-089).
-- Implicit precedence in either direction between parent and child.
-- Cross-corpus writes: the engine never writes under a parent
-  materialisation, and write-back of any kind stays propose-only via PR
-  (ADR-065).
-- A database or hidden index as a source of truth (ADR-080).
-- Embeddings or semantic resolution (ADR-066).
+- Multiple parents, parent DAGs, or transitive inheritance.
+- Absolute, adjacent-checkout, URL, registry, or live-fetched parents.
+- Cross-corpus writes or automatic parent refresh and pin updates.
+- Enterprise-only behaviour, per-artifact ACLs, or a hosted control plane.
+- Embeddings, semantic resolution, a vector index, or source-biased ranking.
+- Point-in-time export, incremental feeds, and section anchors; those remain in
+  `corpus-sync`.
+- A new MCP tool; any additive wording must remain within the measured standing
+  MCP surface budget.
 
 ## Success Measures
 
-- A fixture child corpus with a pinned, vendored parent validates fully
-  offline, byte-identically across clones of the same pinned state.
-- A parent/child identifier collision fixture yields a deterministic
-  finding naming both sources, and a declared override clears it with
-  override provenance recorded.
-- An export fixture over a federated corpus shows zero `(source, id)`
-  collisions, with parent records stamped with the parent's source.
-- Corpora with no `## inherits` produce output byte-identical to the
-  pre-federation engine.
-- `rac validate rac/`, `rac relationships rac/ --validate`, and
-  `rac review rac/` stay clean across the programme's output.
+- A child with one vendored or submodule-backed parent validates, resolves,
+  retrieves, serves, and enforces fully offline with byte-identical output
+  across two clones.
+- Missing, escaping, source-mismatched, transitive, and stale parent fixtures
+  fail before overlay with distinct stable findings.
+- A child relationship to a parent Decision resolves; source and pin survive
+  CLI, MCP, audit, finding, and export serialization without copying artifact
+  content into the audit record.
+- An inherited Decision scoped to a child path appears in `decisions-for` and
+  fails a violating child code change through the ordinary Sentry engine.
+- Collision and override fixtures prove there is no resolution-order
+  precedence and that parent history remains qualified-addressable.
+- A large-parent DecisionGrounding fixture includes hard negatives and proves
+  the v0.28 lexical floor still protects the stronger match under the existing
+  response budget.
+- The parent tree is byte-unchanged after every command, old index segments
+  rebuild as cache misses, and federation leaves contemporaneous no-manifest
+  goldens byte-identical.
 
 ## Assumptions
 
-- The design partner's shared-standards corpus remains available to
-  iterate the mechanism against, as ADR-089 anticipated.
-- The corpus-sync source-identity derivation (`rac-export-source-identity`)
-  is the export identity mechanism federation composes with; no second
-  derivation is introduced.
-- `## inherits` remains inert for released engines until the implementing
-  ADR ships, per ADR-089's compatibility clause.
+- One materialised parent covers the initial organisation-standards use case.
+- ADR-117's shared-endpoint topology remains the unmerged reach path and can
+  coexist during migration.
+- Export schemas and source identity land before federation publishes
+  source-aware records.
+- The implementing ADR is reviewed with the real parent/child corpus pair
+  before resolver work starts.
 
 ## Risks
 
-- Pressure to ship federation enterprise-gated. Mitigation: ADR-089
-  forbids it in advance; the constraint is restated here and in both
-  requirements.
-- Scope creep toward a live cross-repo index. Mitigation: the
-  materialised-bytes constraint is recorded, and the design's rejected
-  alternatives include exactly that shape.
-- Parent staleness confusion — a child resolving against bytes that no
-  longer match the declared pin. Mitigation: pin-verification findings are
-  a named requirement; stale state fails loudly rather than resolving
-  silently.
-- Silent precedence sneaking in through resolution-order accidents.
-  Mitigation: the collision-finding requirement pins the semantics at the
-  engine's existing duplicate-identity detection point.
+- Source-aware identity is added to one surface but omitted from another.
+  Mitigation: the central layer set feeds all derivations, and acceptance spans
+  CLI, MCP, enforcement, cache, audit, and export.
+- A large parent changes ranking or exhausts the response budget. Mitigation:
+  one combined deterministic ranking, no source boost, the graph-floor gate,
+  hard budgets, and a federation evaluation fixture.
+- Pin verification or watcher invalidation is weakened for performance.
+  Mitigation: verification precedes overlay and the pin is part of generation
+  and cache identity.
+- Overrides become undocumented local exceptions. Mitigation: every override
+  requires a local same-type replacement and a live local Decision rationale,
+  both validated and exported as provenance.
+- The first increment expands into arbitrary federation. Mitigation: multiple,
+  transitive, external, and live parents are explicit Non-Goals requiring new
+  decisions.
 
 ## Related Decisions
 
 - adr-002
+- adr-005
+- adr-007
 - adr-016
 - adr-018
 - adr-026
+- adr-033
 - adr-055
 - adr-065
+- adr-066
 - adr-080
-- adr-084
 - adr-085
 - adr-088
 - adr-089
 - adr-093
 - adr-094
+- adr-103
+- adr-104
+- adr-105
+- adr-112
+- adr-117
+- adr-119
+- adr-121
+- adr-123
+- adr-127
+- adr-128
 
 ## Related Designs
 
 - corpus-federation-mechanism
+- code-scope-consumption
+- sentry-code-constraint-evaluation
 
 ## Related Roadmaps
 
+- corpus-sync
+- org-grounding-plane
 - lore-at-team-scale
 - deterministic-substrate
-- corpus-sync
 
 ## Related Requirements
 
 - rac-parent-corpus-inheritance
 - rac-federated-resolution-provenance
+- rac-export-contract-schemas
 - rac-export-source-identity
+- rac-path-decisions-lookup
+- deterministic-decision-code-enforcement
 
 ## Related Tickets
 
