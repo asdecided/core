@@ -67,6 +67,10 @@ fn from_frontmatter(i: crate::frontmatter::Issue) -> Issue {
 #[derive(Debug, Clone)]
 pub struct Artifact {
     pub product: Product,
+    /// Exact decoded source retained when parsing an already-captured
+    /// snapshot. Consumers needing raw fenced blocks use this instead of
+    /// reopening `product.source_path`.
+    pub source_text: Option<String>,
     /// `product.metadata` — `None` for legacy (no-frontmatter) documents and
     /// for envelope-fatal frontmatter.
     pub metadata: Option<ArtifactMetadata>,
@@ -92,7 +96,7 @@ impl Artifact {
     }
 }
 
-fn attach_metadata(product: Product) -> Artifact {
+fn attach_metadata(product: Product, source_text: Option<String>) -> Artifact {
     // markdown::parse populated metadata_issues only for the unterminated
     // (`raw is None`) case; complete the `raw is not None` arm here.
     let mut metadata_issues: Vec<Issue> =
@@ -106,6 +110,7 @@ fn attach_metadata(product: Product) -> Artifact {
     let parse_issues = product.parse_issues.iter().map(from_markdown).collect();
     Artifact {
         product,
+        source_text,
         metadata,
         metadata_issues,
         parse_issues,
@@ -114,10 +119,21 @@ fn attach_metadata(product: Product) -> Artifact {
 
 /// `decided.core.markdown.parse(text, source_path)` with metadata attached.
 pub fn parse_text(text: &str, source_path: &str) -> Artifact {
-    attach_metadata(markdown::parse(text, source_path))
+    attach_metadata(markdown::parse(text, source_path), Some(text.to_string()))
+}
+
+/// Parse already-captured bytes with metadata attached, without reopening the
+/// source path. This is the verification-to-composition handoff for inherited
+/// Markdown snapshots.
+pub fn parse_bytes(bytes: &[u8], source_path: &str) -> Artifact {
+    let source_text = String::from_utf8_lossy(bytes).into_owned();
+    attach_metadata(
+        markdown::parse_bytes(bytes, source_path),
+        Some(source_text),
+    )
 }
 
 /// `decided.core.markdown.parse_file(path)` with metadata attached.
 pub fn parse_file(path: &str) -> Artifact {
-    attach_metadata(markdown::parse_file(path))
+    attach_metadata(markdown::parse_file(path), None)
 }

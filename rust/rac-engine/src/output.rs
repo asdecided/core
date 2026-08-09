@@ -476,6 +476,7 @@ struct SarifResult {
     message: String,
     uri: String,
     line: Option<i64>,
+    properties: Option<Value>,
 }
 
 fn sarif_document(mut results: Vec<SarifResult>) -> String {
@@ -525,6 +526,9 @@ fn sarif_document(mut results: Vec<SarifResult>) -> String {
                 "locations".into(),
                 Value::Array(vec![Value::Object(location)]),
             );
+            if let Some(properties) = &r.properties {
+                m.insert("properties".into(), properties.clone());
+            }
             Value::Object(m)
         })
         .collect();
@@ -565,6 +569,7 @@ pub fn render_validate_sarif(result: &DirectoryValidation) -> String {
                 message: issue.message.clone(),
                 uri: quote_uri(&file.path),
                 line: issue.line,
+                properties: None,
             });
         }
     }
@@ -576,6 +581,7 @@ pub fn render_validate_sarif(result: &DirectoryValidation) -> String {
                 message: finding.message.clone(),
                 uri: quote_uri(&finding.path),
                 line: None,
+                properties: None,
             });
         }
     }
@@ -649,6 +655,7 @@ pub fn render_relationships_sarif(validation: &RelationshipValidation) -> String
                 message,
                 uri,
                 line: None,
+                properties: None,
             }
         })
         .collect();
@@ -2217,6 +2224,21 @@ pub fn render_decisions_for_json(result: &ScopeLookupResult) -> String {
     dumps_indent2(&scope_lookup_value(result))
 }
 
+pub fn render_decisions_for_json_with_origin(result: &ScopeLookupResult) -> String {
+    dumps_indent2(&crate::retrieve::scope_lookup_value_with_origin(
+        result, true,
+    ))
+}
+
+pub fn render_decisions_for_json_with_composed(
+    result: &ScopeLookupResult,
+    corpus: &crate::composition::ComposedCorpus,
+) -> String {
+    dumps_indent2(&crate::retrieve::scope_lookup_value_with_composed(
+        result, corpus,
+    ))
+}
+
 // --- review ------------------------------------------------------------------
 
 fn priority_label(priority: i64) -> &'static str {
@@ -2397,6 +2419,7 @@ pub fn render_review_sarif(r: &ReviewReport) -> String {
             },
             uri: quote_uri(&issue.path),
             line: None,
+            properties: None,
         })
         .collect();
     sarif_document(results)
@@ -2470,6 +2493,12 @@ fn gate_finding_value(f: &GateFinding) -> Value {
     m.insert("path".into(), json!(f.path));
     m.insert("line".into(), json!(f.line));
     m.insert("message".into(), json!(f.message));
+    if let Some(decision_id) = &f.decision_id {
+        m.insert("decision_id".into(), json!(decision_id));
+    }
+    if let Some(origin) = &f.origin {
+        m.insert("provenance".into(), artifact_origin_value(origin));
+    }
     Value::Object(m)
 }
 
@@ -2520,6 +2549,10 @@ pub fn render_gate_sarif(report: &GateReport) -> String {
             message: f.message.clone(),
             uri: quote_uri(&f.path),
             line: f.line,
+            properties: f
+                .origin
+                .as_ref()
+                .map(artifact_origin_value),
         })
         .collect();
     sarif_document(results)
@@ -2564,6 +2597,21 @@ pub fn render_sentry_human(report: &SentryReport) -> String {
             finding.message
         ));
         lines.push(format!("      decision: {}", finding.decision_path));
+        if let Some(decision_id) = &finding.decision_id {
+            lines.push(format!("      decision id: {decision_id}"));
+        }
+        if let Some(origin) = &finding.origin {
+            lines.push(format!(
+                "      source: {} ({}){}",
+                origin.source,
+                origin.layer.as_str(),
+                origin
+                    .pin
+                    .as_ref()
+                    .map(|pin| format!(", {pin}"))
+                    .unwrap_or_default()
+            ));
+        }
     }
     lines.push(String::new());
     if report.ok() {
@@ -2582,14 +2630,20 @@ pub fn render_sentry_json(report: &SentryReport) -> String {
         .findings
         .iter()
         .map(|finding| {
-            json!({
-                "code": finding.code,
-                "decision_path": finding.decision_path,
-                "rule_id": finding.rule_id,
-                "path": finding.path,
-                "line": finding.line,
-                "message": finding.message,
-            })
+            let mut value = Map::new();
+            value.insert("code".into(), json!(finding.code));
+            value.insert("decision_path".into(), json!(finding.decision_path));
+            if let Some(decision_id) = &finding.decision_id {
+                value.insert("decision_id".into(), json!(decision_id));
+            }
+            if let Some(origin) = &finding.origin {
+                value.insert("provenance".into(), artifact_origin_value(origin));
+            }
+            value.insert("rule_id".into(), json!(finding.rule_id));
+            value.insert("path".into(), json!(finding.path));
+            value.insert("line".into(), json!(finding.line));
+            value.insert("message".into(), json!(finding.message));
+            Value::Object(value)
         })
         .collect();
     dumps_indent2(&json!({
@@ -2629,6 +2683,10 @@ pub fn render_sentry_sarif(report: &SentryReport) -> String {
                 ),
                 uri: quote_uri(&finding.path),
                 line: finding.line,
+                properties: finding
+                    .origin
+                    .as_ref()
+                    .map(artifact_origin_value),
             })
             .collect(),
     )
@@ -2918,6 +2976,21 @@ pub fn render_resolve_human(artifact: &ResolvedArtifact) -> String {
     )
 }
 
+pub fn render_resolve_human_with_origin(artifact: &ResolvedArtifact) -> String {
+    let mut rendered = render_resolve_human(artifact);
+    if let Some(origin) = &artifact.origin {
+        rendered.push_str(&format!(
+            "\nSource: {}\nLayer: {}",
+            origin.source,
+            origin.layer.as_str()
+        ));
+        if let Some(pin) = &origin.pin {
+            rendered.push_str(&format!("\nPin: {pin}"));
+        }
+    }
+    rendered
+}
+
 /// `ResolutionResult.to_dict()` for the failure outcomes — the `decided resolve
 /// --json` error body, also served as the MCP structured lookup error
 /// (`errors.from_resolution`, ADR-034).
@@ -2934,6 +3007,57 @@ pub fn resolution_error_value(result: &ResolutionResult) -> Value {
 
 /// `render_resolve_json` — `ResolutionResult.to_dict()` with `indent=2`.
 pub fn render_resolve_json(result: &ResolutionResult) -> String {
+    render_resolve_json_with_origin(result, false)
+}
+
+pub fn artifact_origin_value(origin: &crate::corpus::ArtifactOrigin) -> Value {
+    let mut provenance = Map::new();
+    provenance.insert("source".into(), json!(origin.source));
+    provenance.insert("layer".into(), json!(origin.layer.as_str()));
+    if let Some(pin) = &origin.pin {
+        provenance.insert("pin".into(), json!(pin));
+    }
+    Value::Object(provenance)
+}
+
+fn artifact_key_value(key: &crate::corpus::ArtifactKey) -> Value {
+    json!({"source": key.source, "id": key.canonical_id})
+}
+
+pub fn composed_provenance_value(
+    provenance: &crate::composition::ComposedProvenance,
+) -> Value {
+    let mut value = artifact_origin_value(&provenance.origin)
+        .as_object()
+        .cloned()
+        .expect("artifact origin is an object");
+    if !provenance.overrides.is_empty() {
+        value.insert(
+            "overrides".into(),
+            Value::Array(
+                provenance
+                    .overrides
+                    .iter()
+                    .map(|mapping| {
+                        json!({
+                            "state": mapping.state.as_str(),
+                            "parent": artifact_key_value(&mapping.parent),
+                            "replacement": artifact_key_value(&mapping.replacement),
+                            "rationale": artifact_key_value(&mapping.rationale),
+                        })
+                    })
+                    .collect(),
+            ),
+        );
+    }
+    Value::Object(value)
+}
+
+/// Federated resolution JSON with additive source/layer/pin provenance.
+pub fn render_resolve_json_with_origin(
+    result: &ResolutionResult,
+    include_origin: bool,
+) -> String {
     if result.outcome != OUTCOME_RESOLVED {
         return dumps_indent2(&resolution_error_value(result));
     }
@@ -2944,9 +3068,41 @@ pub fn render_resolve_json(result: &ResolutionResult) -> String {
     m.insert("type".into(), json!(artifact.artifact_type));
     m.insert("title".into(), json!(artifact.title));
     m.insert("path".into(), json!(artifact.path));
+    if include_origin {
+        if let Some(origin) = &artifact.origin {
+            m.insert("provenance".into(), artifact_origin_value(origin));
+        }
+    }
     // section/snippet/evidence/recency/tags are never set on the
     // resolution path — the keys stay absent.
     dumps_indent2(&Value::Object(m))
+}
+
+pub fn render_resolve_json_with_composed(
+    result: &ResolutionResult,
+    corpus: &crate::composition::ComposedCorpus,
+) -> String {
+    if result.outcome != OUTCOME_RESOLVED {
+        return dumps_indent2(&resolution_error_value(result));
+    }
+    let artifact = result.artifact.as_ref().expect("resolved implies artifact");
+    let mut value = Map::new();
+    value.insert("schema_version".into(), json!("1"));
+    value.insert("id".into(), json!(artifact.id));
+    value.insert("type".into(), json!(artifact.artifact_type));
+    value.insert("title".into(), json!(artifact.title));
+    value.insert("path".into(), json!(artifact.path));
+    if let Some(provenance) = artifact
+        .key
+        .as_ref()
+        .and_then(|key| corpus.provenance_for(key))
+    {
+        value.insert(
+            "provenance".into(),
+            composed_provenance_value(&provenance),
+        );
+    }
+    dumps_indent2(&Value::Object(value))
 }
 
 /// The match `recency` dict: `{last_committed, age_days, stale}`, all three
@@ -2988,11 +3144,24 @@ pub fn evidence_value(e: &Evidence) -> Value {
 /// are absent, never null (except `title`). Shared by the CLI `decided find`
 /// renderers and the MCP tool payloads.
 pub fn find_match_value(m: &ResolvedArtifact, include_evidence: bool) -> Value {
+    find_match_value_with_origin(m, include_evidence, false)
+}
+
+pub fn find_match_value_with_origin(
+    m: &ResolvedArtifact,
+    include_evidence: bool,
+    include_origin: bool,
+) -> Value {
     let mut obj = Map::new();
     obj.insert("id".into(), json!(m.id));
     obj.insert("type".into(), json!(m.artifact_type));
     obj.insert("title".into(), json!(m.title));
     obj.insert("path".into(), json!(m.path));
+    if include_origin {
+        if let Some(origin) = &m.origin {
+            obj.insert("provenance".into(), artifact_origin_value(origin));
+        }
+    }
     if let Some(section) = &m.section {
         obj.insert("section".into(), json!(section));
     }
@@ -3110,6 +3279,14 @@ pub fn render_retrieve_human(payload: &Value) -> String {
 /// type, match_count, matches}`. Shared by `render_find_json` (which wraps
 /// it in `indent=2` dumps) and the MCP search payloads (budget serializer).
 pub fn search_result_value(result: &SearchResult, include_evidence: bool) -> Value {
+    search_result_value_with_origin(result, include_evidence, false)
+}
+
+pub fn search_result_value_with_origin(
+    result: &SearchResult,
+    include_evidence: bool,
+    include_origin: bool,
+) -> Value {
     let mut m = Map::new();
     m.insert("schema_version".into(), json!("1"));
     m.insert("query".into(), json!(result.query));
@@ -3121,7 +3298,7 @@ pub fn search_result_value(result: &SearchResult, include_evidence: bool) -> Val
             result
                 .matches
                 .iter()
-                .map(|mm| find_match_value(mm, include_evidence))
+                .map(|mm| find_match_value_with_origin(mm, include_evidence, include_origin))
                 .collect(),
         ),
     );
@@ -3133,8 +3310,45 @@ pub fn render_find_json(result: &SearchResult, explain: bool) -> String {
     dumps_indent2(&search_result_value(result, explain))
 }
 
+pub fn render_find_json_with_origin(result: &SearchResult, explain: bool) -> String {
+    dumps_indent2(&search_result_value_with_origin(result, explain, true))
+}
+
+pub fn render_find_json_with_composed(
+    result: &SearchResult,
+    explain: bool,
+    corpus: &crate::composition::ComposedCorpus,
+) -> String {
+    let mut payload = search_result_value_with_origin(result, explain, true);
+    if let Some(matches) = payload.get_mut("matches").and_then(Value::as_array_mut) {
+        for (matched, artifact) in matches.iter_mut().zip(&result.matches) {
+            let Some(provenance) = artifact
+                .key
+                .as_ref()
+                .and_then(|key| corpus.provenance_for(key))
+            else {
+                continue;
+            };
+            if let Some(object) = matched.as_object_mut() {
+                object.insert(
+                    "provenance".into(),
+                    composed_provenance_value(&provenance),
+                );
+            }
+        }
+    }
+    dumps_indent2(&payload)
+}
+
 /// Additive named-target explain-miss payload (`decided diagnose --json`).
 pub fn diagnosis_value(diagnosis: &SearchDiagnosis) -> Value {
+    diagnosis_value_with_origin(diagnosis, false)
+}
+
+pub fn diagnosis_value_with_origin(
+    diagnosis: &SearchDiagnosis,
+    include_origin: bool,
+) -> Value {
     let mut m = Map::new();
     m.insert("schema_version".into(), json!("1"));
     m.insert("query".into(), json!(diagnosis.query));
@@ -3149,7 +3363,10 @@ pub fn diagnosis_value(diagnosis: &SearchDiagnosis) -> Value {
     m.insert("rank".into(), json!(diagnosis.rank));
     m.insert("outranked_by".into(), json!(diagnosis.outranked_by));
     if let Some(artifact) = &diagnosis.artifact {
-        m.insert("artifact".into(), find_match_value(artifact, true));
+        m.insert(
+            "artifact".into(),
+            find_match_value_with_origin(artifact, true, include_origin),
+        );
     }
     if !diagnosis.duplicate_paths.is_empty() {
         m.insert("duplicate_paths".into(), json!(diagnosis.duplicate_paths));
@@ -3159,6 +3376,10 @@ pub fn diagnosis_value(diagnosis: &SearchDiagnosis) -> Value {
 
 pub fn render_diagnosis_json(diagnosis: &SearchDiagnosis) -> String {
     dumps_indent2(&diagnosis_value(diagnosis))
+}
+
+pub fn render_diagnosis_json_with_origin(diagnosis: &SearchDiagnosis) -> String {
+    dumps_indent2(&diagnosis_value_with_origin(diagnosis, true))
 }
 
 pub fn render_diagnosis_human(diagnosis: &SearchDiagnosis) -> String {

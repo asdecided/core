@@ -2456,6 +2456,35 @@ pub fn parse_file(path: &str) -> Product {
     parse_file_with_cap(path, max_file_bytes())
 }
 
+/// Parse already-captured Markdown bytes without reopening their source path.
+///
+/// Federation verifies a parent digest over exact bytes, then passes that
+/// snapshot through this seam so parsing cannot race a mutable checkout.
+pub fn parse_bytes(data: &[u8], source_path: &str) -> Product {
+    parse_bytes_with_cap(data, source_path, max_file_bytes())
+}
+
+/// [`parse_bytes`] with an explicit byte cap (testing seam).
+pub fn parse_bytes_with_cap(data: &[u8], source_path: &str, cap: u128) -> Product {
+    if data.len() as u128 > cap {
+        return degraded_product(source_path, vec![oversize_issue(cap, "file")]);
+    }
+    match std::str::from_utf8(data) {
+        Ok(text) => parse_with_cap(text, source_path, cap),
+        Err(_) => {
+            let text = String::from_utf8_lossy(data);
+            let mut product = parse_with_cap(&text, source_path, cap);
+            product.parse_issues.push(Issue {
+                severity: "warning",
+                code: "non-utf8-content",
+                message: "artifact is not valid UTF-8; decoded lossily".to_string(),
+                line: Some(1),
+            });
+            product
+        }
+    }
+}
+
 /// `parse_file` with an explicit byte cap (testing seam).
 pub fn parse_file_with_cap(path: &str, cap: u128) -> Product {
     let size = match std::fs::metadata(path) {
@@ -2477,18 +2506,5 @@ pub fn parse_file_with_cap(path: &str, cap: u128) -> Product {
     if data.len() as u128 > cap {
         return degraded_product(path, vec![oversize_issue(cap, "file")]);
     }
-    match String::from_utf8(data) {
-        Ok(text) => parse_with_cap(&text, path, cap),
-        Err(e) => {
-            let text = String::from_utf8_lossy(e.as_bytes()).into_owned();
-            let mut product = parse_with_cap(&text, path, cap);
-            product.parse_issues.push(Issue {
-                severity: "warning",
-                code: "non-utf8-content",
-                message: "artifact is not valid UTF-8; decoded lossily".to_string(),
-                line: Some(1),
-            });
-            product
-        }
-    }
+    parse_bytes_with_cap(&data, path, cap)
 }

@@ -282,6 +282,8 @@ pub struct GateFinding {
     pub path: String,
     pub line: Option<i64>,
     pub message: String,
+    pub decision_id: Option<String>,
+    pub origin: Option<crate::corpus::ArtifactOrigin>,
 }
 
 pub struct GateReport {
@@ -377,16 +379,49 @@ pub fn build_gate_with_code(
     recursive: bool,
     code: Option<CodeGateOptions<'_>>,
 ) -> Result<GateReport, MalformedConfig> {
+    build_gate_internal(directory, recursive, code, None)
+}
+
+/// Unified gate over one verified effective composition.
+pub fn build_gate_with_composed(
+    directory: &str,
+    recursive: bool,
+    code: Option<CodeGateOptions<'_>>,
+    corpus: &crate::composition::ComposedCorpus,
+) -> Result<GateReport, MalformedConfig> {
+    build_gate_internal(directory, recursive, code, Some(corpus))
+}
+
+fn build_gate_internal(
+    directory: &str,
+    recursive: bool,
+    code: Option<CodeGateOptions<'_>>,
+    composed: Option<&crate::composition::ComposedCorpus>,
+) -> Result<GateReport, MalformedConfig> {
     // The oracle raises from load_enforcement_policy first, then
     // load_overrides — mirror that order so a doubly-malformed config
     // reports the enforcement error.
     let policy = load_enforcement_policy(directory)?;
     check_overrides(directory)?;
 
-    let validation = validate_directory(directory, recursive);
-    let relationships: RelationshipValidation = validate_relationships(directory, recursive);
-    let items = corpus_items(directory, recursive);
-    let portfolio = portfolio_from_corpus(directory, &items, recursive);
+    let items: Vec<_> = composed
+        .map(|corpus| corpus.effective().cloned().collect())
+        .unwrap_or_else(|| corpus_items(directory, recursive));
+    let validation = composed.map_or_else(
+        || validate_directory(directory, recursive),
+        |_| crate::commands::validate_directory_from_items(directory, recursive, &items),
+    );
+    let relationships: RelationshipValidation = composed.map_or_else(
+        || validate_relationships(directory, recursive),
+        |corpus| corpus.validate_relationships(directory, recursive),
+    );
+    // Parent review advisories remain parent-owned. Validation,
+    // relationships, and code enforcement use the effective corpus, but a
+    // child gate reviews only its writable local layer.
+    let review_items: Vec<_> = composed
+        .map(|corpus| corpus.local_items().cloned().collect())
+        .unwrap_or_else(|| items.clone());
+    let portfolio = portfolio_from_corpus(directory, &review_items, recursive);
     let review: ReviewReport = review_from_portfolio(directory, portfolio, recursive);
 
     let mut findings: Vec<GateFinding> = Vec::new();
@@ -397,6 +432,8 @@ pub fn build_gate_with_code(
                    path: String,
                    line: Option<i64>,
                    message: String,
+                   decision_id: Option<String>,
+                   origin: Option<crate::corpus::ArtifactOrigin>,
                    default: &'static str| {
         if let Some(enforcement) = policy.classify(&code, default) {
             findings.push(GateFinding {
@@ -407,6 +444,8 @@ pub fn build_gate_with_code(
                 path,
                 line,
                 message,
+                decision_id,
+                origin,
             });
         }
     };
@@ -419,7 +458,17 @@ pub fn build_gate_with_code(
         } else {
             ENFORCEMENT_ADVISORY
         };
-        add(SOURCE_VALIDATE, code, severity, path, line, message, default);
+        add(
+            SOURCE_VALIDATE,
+            code,
+            severity,
+            path,
+            line,
+            message,
+            None,
+            None,
+            default,
+        );
     }
 
     // Relationships: every issue fails `--validate` today, so blocking by
@@ -435,6 +484,8 @@ pub fn build_gate_with_code(
             uri,
             None,
             message,
+            None,
+            None,
             ENFORCEMENT_BLOCKING,
         );
     }
@@ -459,18 +510,33 @@ pub fn build_gate_with_code(
             issue.path.clone(),
             None,
             message,
+            None,
+            None,
             default,
         );
     }
 
     if let Some(options) = code {
-        match crate::sentry::analyze(
-            directory,
-            options.repository,
-            recursive,
-            options.base,
-            options.full_tree,
-        ) {
+        let sentry = if let Some(corpus) = composed {
+            crate::sentry::analyze_with_items(
+                directory,
+                options.repository,
+                options.base,
+                options.full_tree,
+                &items,
+                true,
+                corpus.read_only_root(),
+            )
+        } else {
+            crate::sentry::analyze(
+                directory,
+                options.repository,
+                recursive,
+                options.base,
+                options.full_tree,
+            )
+        };
+        match sentry {
             Ok(report) => {
                 code_coverage = Some(CodeCoverage {
                     live_decisions: report.live_decisions,
@@ -483,13 +549,31 @@ pub fn build_gate_with_code(
                     eligible_coverage_percent: report.eligible_coverage_percent(),
                 });
                 for finding in report.findings {
+                    let decision_id = finding.decision_id.clone();
+                    let origin = finding.origin.clone();
+                    let message = if composed.is_some() {
+                        let context = [finding.decision_id.as_deref(), finding.rule_id.as_deref()]
+                            .into_iter()
+                            .flatten()
+                            .collect::<Vec<_>>()
+                            .join(" ");
+                        if context.is_empty() {
+                            finding.message
+                        } else {
+                            format!("{context}: {}", finding.message)
+                        }
+                    } else {
+                        finding.message
+                    };
                     add(
                         SOURCE_SENTRY,
                         finding.code.to_string(),
                         "error".to_string(),
                         finding.path,
                         finding.line,
-                        finding.message,
+                        message,
+                        decision_id,
+                        origin,
                         ENFORCEMENT_BLOCKING,
                     );
                 }
@@ -502,6 +586,8 @@ pub fn build_gate_with_code(
                     directory.to_string(),
                     None,
                     message,
+                    None,
+                    None,
                     ENFORCEMENT_BLOCKING,
                 );
             }
