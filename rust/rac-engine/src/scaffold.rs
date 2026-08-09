@@ -35,6 +35,7 @@ use crate::walk::py_join;
 /// because the SAME error class maps to different exits per command
 /// (`OutputPathExists` is usage exit 2 under `new` but a refusal exit 1
 /// under `quickstart` — measured).
+#[derive(Debug)]
 pub enum ScaffoldError {
     /// `TemplateNotFound` — unsupported artifact type (usage).
     TemplateNotFound(String),
@@ -205,6 +206,27 @@ fn valid_repository_key(key: &str) -> bool {
         && b.iter().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
 }
 
+/// A configured corpus source is a stable, lower-case, slash-namespaced
+/// identity such as `asdecided/core` (ADR-135). Each segment starts and ends
+/// with an ASCII letter or digit; `.`, `_`, and `-` are allowed internally.
+fn valid_corpus_source(source: &str) -> bool {
+    fn valid_segment(segment: &str) -> bool {
+        let bytes = segment.as_bytes();
+        let endpoint = |byte: u8| byte.is_ascii_lowercase() || byte.is_ascii_digit();
+        !bytes.is_empty()
+            && endpoint(bytes[0])
+            && endpoint(bytes[bytes.len() - 1])
+            && bytes.iter().all(|byte| {
+                byte.is_ascii_lowercase()
+                    || byte.is_ascii_digit()
+                    || matches!(byte, b'.' | b'_' | b'-')
+            })
+    }
+
+    let segments: Vec<&str> = source.split('/').collect();
+    segments.len() >= 2 && segments.iter().all(|segment| valid_segment(segment))
+}
+
 fn invalid_key_error(key: &str) -> ScaffoldError {
     ScaffoldError::InvalidRepositoryKey(format!(
         "invalid repository key: {} (expected 2-10 uppercase \
@@ -219,42 +241,126 @@ pub struct RepositoryConfig {
     pub config_path: String,
 }
 
+/// The identity fields accepted from the nearest governing repository config.
+/// `repository_key` remains optional here because read-only exports retain the
+/// directory-basename compatibility fallback for uninitialised repositories.
+pub struct RepositoryIdentityConfig {
+    pub repository_key: Option<String>,
+    pub corpus_source: Option<String>,
+    pub config_path: String,
+}
+
+fn yaml_get<'a>(
+    pairs: &'a [(crate::frontmatter::Yaml, crate::frontmatter::Yaml)],
+    name: &str,
+) -> Option<&'a crate::frontmatter::Yaml> {
+    pairs.iter().find_map(|(key, value)| match key {
+        crate::frontmatter::Yaml::Str(key) if key == name => Some(value),
+        _ => None,
+    })
+}
+
+/// Read the two independent identity values from one config. Unknown sections
+/// remain additive; the recognised identity fields are strict so an invalid
+/// configured source can never silently fall through to another namespace.
+fn read_identity_config(config_path: &str) -> Result<RepositoryIdentityConfig, ScaffoldError> {
+    use crate::frontmatter::Yaml;
+
+    let text = std::fs::read_to_string(config_path)
+        .map_err(|e| malformed_config(config_path, &format!("invalid YAML: {e}")))?;
+    let data = crate::frontmatter::yaml_load_config(&text)
+        .map_err(|problem| malformed_config(config_path, &format!("invalid YAML: {problem}")))?;
+    let Yaml::Map(pairs) = data else {
+        return Err(malformed_config(
+            config_path,
+            "repository config must be a mapping",
+        ));
+    };
+
+    let repository_key = match yaml_get(&pairs, "repository_key") {
+        None | Some(Yaml::Null) => None,
+        Some(Yaml::Str(value)) => {
+            if !valid_repository_key(value) {
+                return Err(malformed_config(
+                    config_path,
+                    &format!("invalid repository_key: {}", py_repr_str(value)),
+                ));
+            }
+            Some(value.clone())
+        }
+        Some(_) => {
+            return Err(malformed_config(
+                config_path,
+                "missing required string field 'repository_key'",
+            ))
+        }
+    };
+
+    let corpus_source = match yaml_get(&pairs, "corpus") {
+        None | Some(Yaml::Null) => None,
+        Some(Yaml::Map(corpus)) => match yaml_get(corpus, "source") {
+            None | Some(Yaml::Null) => None,
+            Some(Yaml::Str(value)) if valid_corpus_source(value) => Some(value.clone()),
+            Some(Yaml::Str(value)) => {
+                return Err(malformed_config(
+                    config_path,
+                    &format!(
+                        "invalid corpus.source: {} (expected a lower-case slash-namespaced identity, e.g. asdecided/core)",
+                        py_repr_str(value)
+                    ),
+                ))
+            }
+            Some(_) => {
+                return Err(malformed_config(
+                    config_path,
+                    "'corpus.source' must be a string",
+                ))
+            }
+        },
+        Some(_) => {
+            return Err(malformed_config(
+                config_path,
+                "'corpus' must be a mapping",
+            ))
+        }
+    };
+
+    Ok(RepositoryIdentityConfig {
+        repository_key,
+        corpus_source,
+        config_path: config_path.to_string(),
+    })
+}
+
 /// `_read_config(config_path)` — strict read of one config file: YAML must
 /// parse (the invalid-YAML reason embeds this engine's own problem text —
 /// the oracle embeds PyYAML's; stderr-only divergence class), the root must
 /// be a mapping with a string `repository_key` matching the key contract.
 fn read_config(config_path: &str) -> Result<RepositoryConfig, ScaffoldError> {
-    let text = std::fs::read_to_string(config_path)
-        .map_err(|e| malformed_config(config_path, &format!("invalid YAML: {e}")))?;
-    let data = crate::frontmatter::yaml_load_config(&text)
-        .map_err(|problem| malformed_config(config_path, &format!("invalid YAML: {problem}")))?;
-    let key = match &data {
-        crate::frontmatter::Yaml::Map(pairs) => pairs.iter().find_map(|(k, v)| match (k, v) {
-            (crate::frontmatter::Yaml::Str(name), crate::frontmatter::Yaml::Str(value))
-                if name == "repository_key" =>
-            {
-                Some(value.clone())
-            }
-            _ => None,
-        }),
-        _ => None,
-    };
-    let Some(key) = key else {
+    let identity = read_identity_config(config_path)?;
+    let Some(key) = identity.repository_key else {
         return Err(malformed_config(
             config_path,
             "missing required string field 'repository_key'",
         ));
     };
-    if !valid_repository_key(&key) {
-        return Err(malformed_config(
-            config_path,
-            &format!("invalid repository_key: {}", py_repr_str(&key)),
-        ));
-    }
     Ok(RepositoryConfig {
         repository_key: key,
-        config_path: config_path.to_string(),
+        config_path: identity.config_path,
     })
+}
+
+/// Load the nearest governing config's identity fields. Unlike
+/// `load_repository_config`, this read-only face does not require a
+/// `repository_key`; exports may legitimately fall back to the corpus
+/// directory basename when neither identity value exists.
+pub fn load_repository_identity(
+    start_dir: &str,
+) -> Result<Option<RepositoryIdentityConfig>, ScaffoldError> {
+    match find_config_file(start_dir) {
+        Some(path) => read_identity_config(&path.to_string_lossy()).map(Some),
+        None => Ok(None),
+    }
 }
 
 /// `load_repository_config(start_dir)` — the nearest `.decided/config.yaml` at
@@ -778,6 +884,18 @@ mod tests {
         assert!(!valid_repository_key("1AB"));
         // Python `$` matches just before one trailing newline.
         assert!(valid_repository_key("RAC\n"));
+    }
+
+    #[test]
+    fn corpus_source_contract_edges() {
+        assert!(valid_corpus_source("asdecided/core"));
+        assert!(valid_corpus_source("acme.platform/payments-service"));
+        assert!(valid_corpus_source("org/team_1/service.v2"));
+        assert!(!valid_corpus_source("core"));
+        assert!(!valid_corpus_source("AsDecided/core"));
+        assert!(!valid_corpus_source("asdecided//core"));
+        assert!(!valid_corpus_source("asdecided/core-"));
+        assert!(!valid_corpus_source("asdecided/../core"));
     }
 
     /// RAC-KXBPS7SRM6ZB REQ-002: the native `decided new` must succeed when the

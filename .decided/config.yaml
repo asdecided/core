@@ -1,4 +1,6 @@
 repository_key: RAC
+corpus:
+  source: asdecided/core
 
 # External ticketing provider (ADR-087, ADR-093). Roadmap intent lives in the
 # corpus; execution is tracked in GitHub issues, linked from a live artifact's

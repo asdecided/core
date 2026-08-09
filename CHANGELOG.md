@@ -10,6 +10,10 @@ details, release history over commit history.
   export contracts. `decided export --schema <viewer|documents|graph>` emits
   the packaged schema bytes offline, and CI now checks fixture and live-corpus
   exports for contract and field-set drift.
+- Added optional `corpus.source` configuration as the stable corpus provenance
+  identity shared by viewer, documents, and graph exports. Existing
+  repositories fall back to their lower-case `repository_key`; uninitialised
+  corpora retain the released directory-basename source value.
 
 ## v0.28.0 — 2026-08-09
 

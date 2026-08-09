@@ -7,6 +7,7 @@ import argparse
 import copy
 import json
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +40,70 @@ def successful(engine: Path, *args: str) -> bytes:
             f"{result.stderr.decode('utf-8', errors='replace')}"
         )
     return result.stdout
+
+
+def successful_at(engine: Path, cwd: Path, *args: str) -> bytes:
+    result = subprocess.run(
+        [str(engine), *args],
+        cwd=cwd,
+        check=False,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        raise AssertionError(
+            f"{' '.join(args)} at {cwd} exited {result.returncode}: "
+            f"{result.stderr.decode('utf-8', errors='replace')}"
+        )
+    return result.stdout
+
+
+def assert_checkout_stability(engine: Path) -> None:
+    artifact = """---
+schema_version: 1
+id: APP-111111111111
+type: decision
+---
+# Stable source
+
+## Context
+
+Checkout locations differ.
+
+## Decision
+
+Keep exports stable.
+
+## Consequences
+
+Consumers keep one identity.
+
+## Status
+
+Accepted
+"""
+    with tempfile.TemporaryDirectory(prefix="asdecided-source-checkouts-") as temporary:
+        roots = [Path(temporary) / "first", Path(temporary) / "second"]
+        for root in roots:
+            (root / ".decided").mkdir(parents=True)
+            (root / "decisions").mkdir()
+            (root / ".decided" / "config.yaml").write_text(
+                "repository_key: APP\ncorpus:\n  source: acme/stable\n",
+                encoding="utf-8",
+            )
+            (root / "decisions" / "decision.md").write_text(
+                artifact,
+                encoding="utf-8",
+            )
+
+        modes = ((), ("--documents",), ("--graph",))
+        for extra in modes:
+            first = successful_at(engine, roots[0], "export", "decisions", *extra)
+            second = successful_at(engine, roots[1], "export", "decisions", *extra)
+            if first != second:
+                mode = extra[0] if extra else "viewer"
+                raise AssertionError(
+                    f"{mode} export changed across equivalent checkout locations"
+                )
 
 
 def object_keys(value: Any, schema: dict[str, Any], label: str) -> None:
@@ -164,7 +229,12 @@ def main() -> int:
     if not validators["documents"].is_valid(additive):
         raise AssertionError("documents schema rejected additive fields")
 
-    print("export schemas: fixture, viewer sample, and live corpus conform")
+    assert_checkout_stability(engine)
+
+    print(
+        "export schemas and source identity: fixture, viewer sample, live corpus, "
+        "and checkout-stability cases conform"
+    )
     return 0
 
 

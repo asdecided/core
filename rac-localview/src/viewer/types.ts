@@ -6,6 +6,8 @@
 export interface CorpusMeta {
   /** Human-readable corpus name, e.g. the exported directory name. */
   name: string;
+  /** Stable corpus provenance identity; absent only in older payloads. */
+  source?: string;
   /** Version of the RAC CLI that produced the export. */
   rac_version?: string;
   /** Number of artifacts in the export. */

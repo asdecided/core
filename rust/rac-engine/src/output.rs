@@ -2707,6 +2707,7 @@ pub fn render_doctor_json(report: &DoctorReport) -> String {
 pub fn render_export_json(export: &CorpusExport) -> String {
     let mut corpus = Map::new();
     corpus.insert("name".into(), json!(export.corpus_name));
+    corpus.insert("source".into(), json!(export.corpus_source));
     // Stable export schema key and model field; the RAC spelling is durable
     // compatibility data, not a command/product alias.
     corpus.insert("rac_version".into(), json!(export.rac_version));
@@ -2852,7 +2853,7 @@ pub fn render_documents_jsonl(export: &DocumentsExport) -> String {
             meta.insert("path".into(), json!(d.path));
             meta.insert("aliases".into(), json!(d.aliases));
             meta.insert("tags".into(), json!(d.tags));
-            meta.insert("source".into(), json!(export.corpus_name));
+            meta.insert("source".into(), json!(export.corpus_source));
             let mut m = Map::new();
             m.insert("schema_version".into(), json!("1"));
             m.insert("id".into(), json!(d.id));
@@ -2897,7 +2898,7 @@ pub fn render_graph_json(export: &GraphExport) -> String {
         .collect();
     let mut payload = Map::new();
     payload.insert("schema_version".into(), json!("1"));
-    payload.insert("source".into(), json!(export.corpus_name));
+    payload.insert("source".into(), json!(export.corpus_source));
     payload.insert("nodes".into(), Value::Array(nodes));
     payload.insert("edges".into(), Value::Array(edges));
     dumps_indent2(&Value::Object(payload))

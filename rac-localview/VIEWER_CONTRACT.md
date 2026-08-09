@@ -16,6 +16,7 @@ A single JSON document, as emitted by `rac export --json`.
   "schema_version": "1",
   "corpus": {
     "name": "rac",
+    "source": "asdecided/core",
     "rac_version": "0.11.0",
     "artifact_count": 106
   },
@@ -47,12 +48,15 @@ version, but a bump signals a breaking shape change.
 | field            | type    | meaning                                          |
 | ---------------- | ------- | ------------------------------------------------ |
 | `name`           | string  | Human-readable corpus name — the exported directory name. |
+| `source`         | string  | Stable corpus provenance identity shared with documents and graph exports. |
 | `rac_version`    | string  | Version of the RAC CLI that produced the export. The header shows it when present and tolerates its absence. |
 | `artifact_count` | integer | Number of artifacts in the export.               |
 | `sample`         | boolean | Optional, default false. True marks demonstration data; the viewer then shows SAMPLE DATA labels in the header and footer. Never emitted by Core; used by the committed sample corpus. |
 
-The export is deterministic: there is no `generated_at` timestamp and
-no environment-dependent field. The viewer must not expect either.
+The export is deterministic: there is no `generated_at` timestamp. A
+configured `corpus.source` is independent of checkout location; see the Core
+[export contract](../docs/export-contracts.md#corpus-source-identity) for its
+fallback behaviour. The viewer tolerates older payloads without `source`.
 
 ### `artifacts[]`
 
@@ -242,7 +246,8 @@ cited ids and aliases in text nodes are linkified). The viewer performs
   aliases, paths, authored-case statuses, `relates-to` edges only —
   including one unresolved alias target). Its `corpus.name` contains
   "SAMPLE DATA" and `sample: true` is set, so every surface that shows
-  corpus identity is labelled.
+  corpus identity is labelled. Its stable sample source is
+  `asdecided/ledgerline-sample`.
 - `/tmp/lore-export-500.json` — a deterministic 500-artifact synthetic
   corpus for performance testing. Not committed.
 
