@@ -90,4 +90,4 @@ record shape it already consumes, with a cursor it can resume from.
 ## Related Requirements
 
 - rac-point-in-time-export
-- rac-export-contract-schemas
+- export-contract-schemas

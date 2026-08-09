@@ -7,7 +7,7 @@
  * never written back to the export (ADR-007 determinism is unaffected).
  */
 
-import type { Artifact, LoreExport } from './types';
+import type { Artifact, AsDecidedExport } from './types';
 import { displayName } from './data';
 
 export interface GraphNode {
@@ -50,7 +50,7 @@ export function isRetired(status: string): boolean {
 }
 
 /** Build the graph model from an export payload — nodes, edges, degrees. */
-export function buildGraph(data: LoreExport): Graph {
+export function buildGraph(data: AsDecidedExport): Graph {
   const byId = new Map<string, GraphNode>();
   const adjacency = new Map<string, Set<string>>();
 

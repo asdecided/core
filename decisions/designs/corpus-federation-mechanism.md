@@ -79,7 +79,7 @@ corpus:
 `corpus.source` is the identity used in provenance and composite keys. It is
 independent of checkout location, directory spelling, and the short
 `repository_key`; the parent and child source identities must differ. The
-source-identity derivation defined by `rac-export-source-identity` uses this
+source-identity derivation defined by `corpus-source-identity` uses this
 value first and retains repository-key and basename fallbacks only for
 non-federated, backward-compatible exports. Federation requires the explicit
 value on both layers.
@@ -307,8 +307,8 @@ aggregation conflict, never a last-writer-wins duplicate. `--local-only` emits
 the child projection only.
 
 The export schemas land before source-aware fields, under
-`rac-export-contract-schemas`; source derivation lands under
-`rac-export-source-identity`. Federation reuses both contracts and introduces
+`export-contract-schemas`; source derivation lands under
+`corpus-source-identity`. Federation reuses both contracts and introduces
 no second export identity mechanism.
 
 ## Constraints
@@ -415,10 +415,10 @@ one-parent implementation.
 
 ## Related Requirements
 
-- rac-parent-corpus-inheritance
-- rac-federated-resolution-provenance
-- rac-export-contract-schemas
-- rac-export-source-identity
+- parent-corpus-inheritance
+- federated-resolution-provenance
+- export-contract-schemas
+- corpus-source-identity
 - rac-path-decisions-lookup
 - deterministic-decision-code-enforcement
 

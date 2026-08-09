@@ -94,6 +94,6 @@ audit and historical reconstruction.
 
 ## Related Requirements
 
-- rac-export-contract-schemas
-- rac-export-source-identity
-- rac-federated-resolution-provenance
+- export-contract-schemas
+- corpus-source-identity
+- federated-resolution-provenance

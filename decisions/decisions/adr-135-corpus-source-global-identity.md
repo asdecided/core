@@ -87,6 +87,6 @@ new pinned state of the same corpus.
 
 ## Related Requirements
 
-- rac-export-source-identity
-- rac-federated-resolution-provenance
-- rac-parent-corpus-inheritance
+- corpus-source-identity
+- federated-resolution-provenance
+- parent-corpus-inheritance

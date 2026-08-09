@@ -88,4 +88,4 @@ comparable, and interleaving introduces an arbitrary quota policy.
 
 ## Related Requirements
 
-- rac-federated-resolution-provenance
+- federated-resolution-provenance

@@ -155,7 +155,7 @@ fn export_rejects_an_invalid_configured_corpus_source() {
     fs::create_dir_all(root.join(".decided")).unwrap();
     fs::write(
         root.join(".decided/config.yaml"),
-        "repository_key: RAC\ncorpus:\n  source: Not Namespaced\n",
+        "repository_key: APP\ncorpus:\n  source: Not Namespaced\n",
     )
     .unwrap();
     let root_text = root.to_string_lossy().into_owned();

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { KeyboardHint, TerminalFrame } from '../components';
 import { buildIndex, loadExport } from './data';
 import type { CorpusIndex } from './data';
-import type { LoreExport } from './types';
+import type { AsDecidedExport } from './types';
 import { ListView } from './ListView';
 import type { ListFilters } from './ListView';
 import { DetailView } from './DetailView';
@@ -34,7 +34,7 @@ function useRoute(): Route {
 
 export function App() {
   const route = useRoute();
-  const [data, setData] = useState<LoreExport | null>(null);
+  const [data, setData] = useState<AsDecidedExport | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Filters live here so they survive list -> detail -> list.
   const [filters, setFilters] = useState<ListFilters>({
@@ -147,7 +147,7 @@ export function App() {
             <p className="viewer-meta__line">
               {corpus.rac_version ? (
                 <>
-                  rac {corpus.rac_version} {'·'}{' '}
+                  AsDecided {corpus.rac_version} {'·'}{' '}
                 </>
               ) : null}
               {corpus.artifact_count ?? data?.artifacts.length ?? 0} artifacts{' '}

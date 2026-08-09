@@ -15,7 +15,7 @@ served over the shipped ADR-098 HTTP endpoint, co-mounted as `lore-org`
 beside any local `lore` server); the fleet-wiring command (`rac init
 --org-endpoint <url>` emitting and merging the client config entry on fresh
 and already-initialized repositories, idempotently, per
-`rac-org-endpoint-wiring`); and the operator runbook (the Org Grounding docs
+`org-endpoint-wiring`); and the operator runbook (the Org Grounding docs
 page: corpus, endpoint, fleet wiring, boundaries, and the federation
 handoff). One unblocker was folded in: unhashable frontmatter keys — the
 fuzz campaign's pinned oracle-crash class — now surface as
@@ -63,7 +63,7 @@ The decision that org-wide grounding is a serving topology before it is a
 federation mechanism: the co-mount shape, the explicit-act wiring
 semantics, the engine's untouched boundaries, and the federation handoff.
 
-### Initiative 2 — Fleet wiring (`rac-org-endpoint-wiring`)
+### Initiative 2 — Fleet wiring (`org-endpoint-wiring`)
 
 `rac init --org-endpoint <url>`: emit the `lore-org` HTTP entry into
 `.mcp.json` and `.cursor/mcp.json`, creating the files when absent and
@@ -172,7 +172,7 @@ unresolved cross-references, and what changes when federation ships.
 
 ## Related Requirements
 
-- rac-org-endpoint-wiring
+- org-endpoint-wiring
 
 ## Related Tickets
 

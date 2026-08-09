@@ -70,7 +70,7 @@ describe('graph layout', () => {
   });
 });
 
-import type { LoreExport } from '../src/viewer/types';
+import type { AsDecidedExport } from '../src/viewer/types';
 
 describe('force controls', () => {
   const snapshot = (opts: Partial<{ repel: number; linkForce: number; linkDistance: number; center: number }>) => {
@@ -100,7 +100,7 @@ describe('force controls', () => {
 });
 
 describe('orphan layout', () => {
-  const withOrphans: LoreExport = {
+  const withOrphans: AsDecidedExport = {
     schema_version: '1',
     corpus: { name: 'orphans' },
     artifacts: [

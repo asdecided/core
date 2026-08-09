@@ -93,5 +93,5 @@ whether a documents record should know its outgoing typed edges.
 
 ## Related Requirements
 
-- rac-export-contract-schemas
+- export-contract-schemas
 - rac-corpus-documents-export

@@ -28,7 +28,7 @@ collisions and provenance ambiguous, and integrating only search would leave
 - [REQ-002] A parent/child canonical-id collision MUST surface as an explicit, deterministic, stable-coded cross-corpus finding with no implicit precedence in either direction (ADR-089, ADR-136). A colliding legacy or title alias MAY coexist, but an unqualified reference to it MUST be ambiguous and require qualification.
 - [REQ-003] Overrides MUST be explicit under `## overrides` in `.decided/corpus.md`: one qualified parent canonical id MUST map to one local same-type replacement and one live local Decision as rationale. An undeclared duplicate and an absent, ambiguous, cross-type, retired-rationale, chained, or parent-to-parent mapping MUST remain validation errors.
 - [REQ-004] Provenance MUST be preserved end to end in resolution, search and grounding results, relationship and validation findings, code-enforcement reports, MCP responses and audit records, and all export projections (ADR-089, ADR-135). It MUST distinguish local from inherited, name the stable source, and identify the verified pin for inherited output.
-- [REQ-005] Export composition MUST reuse `rac-export-source-identity`, retain each record's own source, key global identity as `(source, id)`, and include inherited records by default (ADR-026, ADR-135, ADR-142). Repeated records MAY deduplicate only when their bodies and verified pins agree; a mismatch MUST be an explicit aggregation conflict, and `--local-only` MUST emit only the child projection without changing the default contract.
+- [REQ-005] Export composition MUST reuse `corpus-source-identity`, retain each record's own source, key global identity as `(source, id)`, and include inherited records by default (ADR-026, ADR-135, ADR-142). Repeated records MAY deduplicate only when their bodies and verified pins agree; a mismatch MUST be an explicit aggregation conflict, and `--local-only` MUST emit only the child projection without changing the default contract.
 - [REQ-006] Determinism MUST hold: identical child and parent materialised bytes plus the same manifest MUST produce byte-identical validation, resolution, retrieval, enforcement, MCP, and export output across runs, machines, and clones (ADR-002).
 - [REQ-007] Single-corpus behaviour MUST remain unchanged: without `.decided/corpus.md`, federation MUST add no output or behaviour change relative to the contemporaneous single-corpus engine after the export-schema and source-identity prerequisites, asserted by golden regression.
 - [REQ-008] Child validation MUST never demand changes to parent bytes, no finding's remediation may require editing the read-only layer, and mutation commands MUST receive only the local writable layer (ADR-065, ADR-138).
@@ -90,8 +90,8 @@ collisions and provenance ambiguous, and integrating only search would leave
 
 ## Assumptions
 
-- `rac-parent-corpus-inheritance` supplies one verified, materialised parent.
-- `rac-export-source-identity` and the export schemas land before source-aware
+- `parent-corpus-inheritance` supplies one verified, materialised parent.
+- `corpus-source-identity` and the export schemas land before source-aware
   records are published.
 - The current shared scope and Sentry evaluators can consume source-aware items
   without introducing parallel matching semantics.
@@ -143,8 +143,8 @@ collisions and provenance ambiguous, and integrating only search would leave
 
 ## Related Requirements
 
-- rac-parent-corpus-inheritance
-- rac-export-contract-schemas
-- rac-export-source-identity
+- parent-corpus-inheritance
+- export-contract-schemas
+- corpus-source-identity
 - rac-path-decisions-lookup
 - deterministic-decision-code-enforcement

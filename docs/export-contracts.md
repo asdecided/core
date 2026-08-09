@@ -32,6 +32,10 @@ The default `decided export` projection is one JSON object containing:
   `body_html`
 - `relationships[]`: `from`, `to`, and the flattened `relates-to` `type`
 
+`rac_version` is a retained v1 machine key. It carries the version of the
+AsDecided CLI that produced the payload; it is not a current product or command
+name.
+
 The viewer schema is reconciled with the existing Portal input contract. The
 committed demonstration payload's additive `corpus.sample` field remains valid,
 although Core does not emit that field.

@@ -93,6 +93,6 @@ the surfaces intended to enforce it.
 ## Related Requirements
 
 - deterministic-decision-code-enforcement
-- rac-federated-resolution-provenance
-- rac-parent-corpus-inheritance
+- federated-resolution-provenance
+- parent-corpus-inheritance
 - rac-path-decisions-lookup

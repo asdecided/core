@@ -35,8 +35,8 @@ read-only layer already materialised inside the child repository, and every
 answer remains a deterministic function of reviewed bytes.
 
 Two additive `corpus-sync` capabilities precede published federation output:
-machine-checkable export schemas (`rac-export-contract-schemas`) and one stable
-source identity (`rac-export-source-identity`). The remaining point-in-time,
+machine-checkable export schemas (`export-contract-schemas`) and one stable
+source identity (`corpus-source-identity`). The remaining point-in-time,
 delta, and section-anchor work does not block federation.
 
 ## Outcomes
@@ -240,10 +240,10 @@ and export view, never an MCP or enforcement bypass.
 
 ## Related Requirements
 
-- rac-parent-corpus-inheritance
-- rac-federated-resolution-provenance
-- rac-export-contract-schemas
-- rac-export-source-identity
+- parent-corpus-inheritance
+- federated-resolution-provenance
+- export-contract-schemas
+- corpus-source-identity
 - rac-path-decisions-lookup
 - deterministic-decision-code-enforcement
 

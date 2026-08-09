@@ -101,5 +101,5 @@ lost, and a parent subtree could be discovered twice.
 
 ## Related Requirements
 
-- rac-federated-resolution-provenance
-- rac-parent-corpus-inheritance
+- federated-resolution-provenance
+- parent-corpus-inheritance

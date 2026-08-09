@@ -9,20 +9,20 @@
  *      committed sample corpus as an asset.
  */
 
-import type { Artifact, LoreExport, Relationship } from './types';
+import type { Artifact, AsDecidedExport, Relationship } from './types';
 
-export async function loadExport(): Promise<LoreExport> {
+export async function loadExport(): Promise<AsDecidedExport> {
   const inline = document.getElementById('lore-export');
   const text = inline?.textContent?.trim();
   if (text) {
-    return JSON.parse(text) as LoreExport;
+    return JSON.parse(text) as AsDecidedExport;
   }
   const url = new URL('./sample/lore-export.sample.json', import.meta.url);
   const res = await fetch(url);
   if (!res.ok) {
     throw new Error(`failed to load sample export (${res.status})`);
   }
-  return (await res.json()) as LoreExport;
+  return (await res.json()) as AsDecidedExport;
 }
 
 /**
@@ -45,7 +45,7 @@ export interface IndexedArtifact {
 }
 
 export interface CorpusIndex {
-  data: LoreExport;
+  data: AsDecidedExport;
   rows: IndexedArtifact[];
   byId: Map<string, Artifact>;
   /** Distinct artifact types, in first-seen order. */
@@ -63,7 +63,7 @@ export interface CorpusIndex {
 const TAG_RE = /<[^>]*>/g;
 const WS_RE = /\s+/g;
 
-export function buildIndex(data: LoreExport): CorpusIndex {
+export function buildIndex(data: AsDecidedExport): CorpusIndex {
   const byId = new Map<string, Artifact>();
   const citationLookup = new Map<string, string>();
   const types: string[] = [];

@@ -5,6 +5,11 @@ type: decision
 ---
 # ADR-036: Lore Product Identity
 
+> The current product, engine, and distribution naming in this historical
+> decision is superseded by ADR-132. Stable `RAC-*` artifact IDs and published
+> machine keys remain compatibility identifiers; current public surfaces use
+> AsDecided, `decided`, and `decided-mcp`.
+
 ## Status
 
 Accepted

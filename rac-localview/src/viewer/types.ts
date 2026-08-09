@@ -1,6 +1,6 @@
 /**
- * Types for the `rac export` JSON payload the viewer consumes.
- * Reconciled v1 — see lore-web/VIEWER_CONTRACT.md.
+ * Types for the `decided export` JSON payload the viewer consumes.
+ * Reconciled v1 — see rac-localview/VIEWER_CONTRACT.md.
  */
 
 export interface CorpusMeta {
@@ -8,7 +8,7 @@ export interface CorpusMeta {
   name: string;
   /** Stable corpus provenance identity; absent only in older payloads. */
   source?: string;
-  /** Version of the RAC CLI that produced the export. */
+  /** Retained v1 key containing the AsDecided CLI version. */
   rac_version?: string;
   /** Number of artifacts in the export. */
   artifact_count?: number;
@@ -27,7 +27,7 @@ export interface Artifact {
    *  viewer groups and colours it case-insensitively. */
   status: string;
   title: string;
-  /** Source path within the repository, e.g. "rac/decisions/adr-027.md". */
+  /** Source path within the repository, e.g. "decisions/decisions/adr-027.md". */
   path: string;
   /** Body rendered to HTML at export time. Trusted — see contract. */
   body_html: string;
@@ -42,7 +42,7 @@ export interface Relationship {
   type: string;
 }
 
-export interface LoreExport {
+export interface AsDecidedExport {
   /** Schema version, a string: "1". */
   schema_version: string;
   corpus: CorpusMeta;

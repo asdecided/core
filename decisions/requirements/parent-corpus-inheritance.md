@@ -32,7 +32,7 @@ pin shape, and parent-validation behaviour unresolved.
 - [REQ-006] Optional configuration defaults MAY assist materialisation discovery only through the established section-loader pattern; the Markdown manifest MUST remain the inheritance and pin source of truth and configuration MUST NOT silently create or update it (ADR-089).
 - [REQ-007] The capability MUST be available to every user and MUST NOT be enterprise-gated (ADR-085, ADR-089). It MUST ship only within the human-accepted boundary of ADR-133 through ADR-143; this requirement does not substitute for those decisions.
 - [REQ-008] When the mechanism ships, the ADR-088 profile scaffold MUST gain reserved parent-declaration guidance only when explicitly requested. Unconfigured profile output MUST remain byte-identical.
-- [REQ-009] The declaration MUST contain `version`, a child-local parent `alias`, the parent's configured `source`, a repository-relative materialisation `root`, a parent-relative `corpus` directory, and a full lowercase `sha256` digest. The child and parent MUST each declare an explicit, non-empty, distinct `corpus.source` under `rac-export-source-identity`.
+- [REQ-009] The declaration MUST contain `version`, a child-local parent `alias`, the parent's configured `source`, a repository-relative materialisation `root`, a parent-relative `corpus` directory, and a full lowercase `sha256` digest. The child and parent MUST each declare an explicit, non-empty, distinct `corpus.source` under `corpus-source-identity`.
 - [REQ-010] The first federation increment MUST accept exactly one direct parent. A second parent and a materialised parent that itself declares inheritance MUST produce distinct stable error findings before overlay; neither case may be flattened or partially interpreted.
 - [REQ-011] The parent materialisation MUST remain inside the canonical child repository root. Absolute paths, `..` components, unresolved paths, symlinks in the path to the parent config or any discovered artifact, and canonical paths outside the child repository MUST be rejected before those bytes enter the digest or corpus. Once verified, the materialisation subtree MUST be excluded from the local artifact walk.
 - [REQ-012] Before overlay, the engine MUST verify the parent source identity and a canonical versioned SHA-256 corpus digest over a domain separator, parent source, governing parent `.decided/config.yaml` bytes, and sorted corpus-relative Markdown paths and bytes. The digest MUST exclude checkout location, timestamps, and filesystem iteration order, and the same pure calculation MUST be available to operators.
@@ -109,5 +109,5 @@ pin shape, and parent-validation behaviour unresolved.
 
 ## Related Requirements
 
-- rac-export-source-identity
-- rac-federated-resolution-provenance
+- corpus-source-identity
+- federated-resolution-provenance
