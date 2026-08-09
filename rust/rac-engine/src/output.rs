@@ -32,7 +32,8 @@ use crate::relationships::{
     ISSUE_TARGET_TYPE_MISMATCH,
 };
 use crate::resolve::{
-    Evidence, Recency, ResolutionResult, ResolvedArtifact, SearchResult, OUTCOME_RESOLVED,
+    Evidence, Recency, ResolutionResult, ResolvedArtifact, SearchDiagnosis, SearchResult,
+    OUTCOME_RESOLVED,
 };
 use crate::review::{ReviewIssue, ReviewReport};
 use crate::sentry::SentryReport;
@@ -2959,7 +2960,7 @@ pub fn recency_value(recency: &Recency) -> Value {
 
 /// The search-match `evidence` dict exactly as `decided find --json --explain`
 /// serializes it: `{field, terms, tier, score, components:{bm25,
-/// lexical_rank, graph_rank, inbound}}`.
+/// lexical_rank, graph_rank, inbound, graph_floor_ratio, graph_gate}}`.
 pub fn evidence_value(e: &Evidence) -> Value {
     let mut ev = Map::new();
     ev.insert("field".into(), json!(e.field));
@@ -2971,6 +2972,11 @@ pub fn evidence_value(e: &Evidence) -> Value {
     components.insert("lexical_rank".into(), json!(e.lexical_rank));
     components.insert("graph_rank".into(), json!(e.graph_rank));
     components.insert("inbound".into(), json!(e.inbound));
+    components.insert(
+        "graph_floor_ratio".into(),
+        py_float(e.graph_floor_ratio),
+    );
+    components.insert("graph_gate".into(), json!(e.graph_gate));
     ev.insert("components".into(), Value::Object(components));
     Value::Object(ev)
 }
@@ -3126,6 +3132,77 @@ pub fn render_find_json(result: &SearchResult, explain: bool) -> String {
     dumps_indent2(&search_result_value(result, explain))
 }
 
+/// Additive named-target explain-miss payload (`decided diagnose --json`).
+pub fn diagnosis_value(diagnosis: &SearchDiagnosis) -> Value {
+    let mut m = Map::new();
+    m.insert("schema_version".into(), json!("1"));
+    m.insert("query".into(), json!(diagnosis.query));
+    m.insert("target".into(), json!(diagnosis.target));
+    m.insert("outcome".into(), json!(diagnosis.outcome));
+    m.insert("reason".into(), json!(diagnosis.reason));
+    m.insert("surface_limit".into(), json!(diagnosis.surface_limit));
+    m.insert("match_count".into(), json!(diagnosis.match_count));
+    m.insert("query_terms".into(), json!(diagnosis.query_terms));
+    m.insert("matched_terms".into(), json!(diagnosis.matched_terms));
+    m.insert("missing_terms".into(), json!(diagnosis.missing_terms));
+    m.insert("rank".into(), json!(diagnosis.rank));
+    m.insert("outranked_by".into(), json!(diagnosis.outranked_by));
+    if let Some(artifact) = &diagnosis.artifact {
+        m.insert("artifact".into(), find_match_value(artifact, true));
+    }
+    if !diagnosis.duplicate_paths.is_empty() {
+        m.insert("duplicate_paths".into(), json!(diagnosis.duplicate_paths));
+    }
+    Value::Object(m)
+}
+
+pub fn render_diagnosis_json(diagnosis: &SearchDiagnosis) -> String {
+    dumps_indent2(&diagnosis_value(diagnosis))
+}
+
+pub fn render_diagnosis_human(diagnosis: &SearchDiagnosis) -> String {
+    let mut lines = vec![
+        format!("Target: {}", diagnosis.target),
+        format!("Query: {}", py_repr_str(&diagnosis.query)),
+        format!("Outcome: {}", diagnosis.outcome),
+        format!("Reason: {}", diagnosis.reason),
+    ];
+    if let Some(artifact) = &diagnosis.artifact {
+        lines.push(format!("Artifact: {} ({})", artifact.id, artifact.path));
+    }
+    if let Some(rank) = diagnosis.rank {
+        lines.push(format!(
+            "Rank: {rank} of {} (surface limit {})",
+            diagnosis.match_count, diagnosis.surface_limit
+        ));
+    }
+    if !diagnosis.matched_terms.is_empty() {
+        lines.push(format!(
+            "Matched terms: {}",
+            diagnosis.matched_terms.join(", ")
+        ));
+    }
+    if !diagnosis.missing_terms.is_empty() {
+        lines.push(format!(
+            "Missing terms: {}",
+            diagnosis.missing_terms.join(", ")
+        ));
+    }
+    if !diagnosis.outranked_by.is_empty() {
+        lines.push(format!(
+            "Surfaced ahead: {}",
+            diagnosis.outranked_by.join(", ")
+        ));
+    }
+    if !diagnosis.duplicate_paths.is_empty() {
+        lines.push(format!(
+            "Duplicate paths: {}",
+            diagnosis.duplicate_paths.join(", ")
+        ));
+    }
+    lines.join("\n")
+}
+
 /// `render_find_human` — aligned match rows, or a valid empty result
 /// (PORT-CONTRACT.d/06 §13). `{query!r}` is Python string repr.
 pub fn render_find_human(result: &SearchResult, explain: bool) -> String {
@@ -3183,12 +3260,14 @@ pub fn render_find_human(result: &SearchResult, explain: bool) -> String {
                 }
                 lines.push(format!("{indent}\u{2022} {attribution}"));
                 lines.push(format!(
-                    "{indent}  score={} bm25={} lexical_rank={} graph_rank={} inbound={}",
+                    "{indent}  score={} bm25={} lexical_rank={} graph_rank={} inbound={} graph_floor_ratio={} graph_gate={}",
                     py_float_repr(e.score),
                     py_float_repr(e.bm25),
                     e.lexical_rank,
                     e.graph_rank,
-                    e.inbound
+                    e.inbound,
+                    py_float_repr(e.graph_floor_ratio),
+                    e.graph_gate
                 ));
             }
         }

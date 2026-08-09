@@ -55,6 +55,10 @@ fn rank_name(rank: i64) -> &'static str {
 // BM25F constants (ADR-078).
 const RRF_K: i64 = 60;
 const GRAPH_WEIGHT: f64 = 0.5;
+/// A graph signal may only contribute for lexical near-ties. Candidates below
+/// 85% of the strongest BM25 score keep their lexical score but receive no
+/// graph contribution (retrieval-diagnostics, Initiative 2).
+pub const GRAPH_FLOOR_RATIO: f64 = 0.85;
 const BM25_K1: f64 = 1.2;
 const BM25_B: f64 = 0.75;
 
@@ -235,6 +239,11 @@ pub struct Evidence {
     pub lexical_rank: i64,
     pub graph_rank: i64,
     pub inbound: i64,
+    /// The fixed lexical floor used to decide whether graph boost may apply.
+    pub graph_floor_ratio: f64,
+    /// `"applied"` when the candidate clears the lexical floor, otherwise
+    /// `"clamped"` (its graph contribution is zero).
+    pub graph_gate: &'static str,
     /// The unrounded BM25F score (test-only surface).
     pub bm25_raw: f64,
     /// The unrounded fused RRF score (test-only surface).
@@ -415,8 +424,11 @@ pub(crate) struct TierMatch {
     terms: Vec<String>,
 }
 
-fn match_fields(fields: &FieldTokens, terms: &[String]) -> Option<(i64, Vec<String>)> {
-    let mut matched_terms: HashSet<&str> = HashSet::new();
+fn trace_field_matches<'a>(
+    fields: &FieldTokens,
+    terms: &'a [String],
+) -> (Option<i64>, HashSet<&'a str>) {
+    let mut matched_terms: HashSet<&'a str> = HashSet::new();
     let mut best_rank: Option<i64> = None;
     for (rank, field) in [
         (RANK_ID, "id"),
@@ -438,6 +450,11 @@ fn match_fields(fields: &FieldTokens, terms: &[String]) -> Option<(i64, Vec<Stri
             best_rank = Some(rank);
         }
     }
+    (best_rank, matched_terms)
+}
+
+fn match_fields(fields: &FieldTokens, terms: &[String]) -> Option<(i64, Vec<String>)> {
+    let (best_rank, matched_terms) = trace_field_matches(fields, terms);
 
     // AND semantics: every distinct term must have matched somewhere.
     let distinct: HashSet<&str> = terms.iter().map(|t| t.as_str()).collect();
@@ -639,6 +656,12 @@ fn competition_ranks(scores: &[f64], paths: &[&str]) -> Vec<i64> {
     ranks
 }
 
+/// Whether a candidate is lexically close enough to the strongest match for
+/// the graph signal to act as a near-tie breaker.
+fn graph_gate_allows(bm25: f64, strongest_bm25: f64) -> bool {
+    bm25 >= strongest_bm25 * GRAPH_FLOOR_RATIO
+}
+
 // ---------------------------------------------------------------------------
 // Search (contract §4–10)
 // ---------------------------------------------------------------------------
@@ -650,6 +673,182 @@ pub struct SearchResult {
     /// The `--type` value; `"decision"` under `--decisions`; else None.
     pub artifact_type: Option<String>,
     pub matches: Vec<ResolvedArtifact>,
+}
+
+pub const DIAGNOSIS_COMPLETE: &str = "diagnosed";
+pub const DIAGNOSIS_TARGET_NOT_FOUND: &str = "target-not-found";
+pub const DIAGNOSIS_TARGET_DUPLICATE: &str = "target-duplicate";
+
+/// Named-target trace for `decided diagnose`. The diagnostic consumes the
+/// same tokenisation, matching, filters, and ranked result as `find`; it only
+/// explains that result and never mutates membership or order.
+#[derive(Debug, Clone)]
+pub struct SearchDiagnosis {
+    pub query: String,
+    pub target: String,
+    pub outcome: &'static str,
+    pub reason: &'static str,
+    pub surface_limit: usize,
+    pub match_count: usize,
+    pub query_terms: Vec<String>,
+    pub matched_terms: Vec<String>,
+    pub missing_terms: Vec<String>,
+    pub rank: Option<usize>,
+    pub outranked_by: Vec<String>,
+    pub artifact: Option<ResolvedArtifact>,
+    pub duplicate_paths: Vec<String>,
+}
+
+fn ordered_distinct_terms(terms: &[String]) -> Vec<String> {
+    let mut seen: HashSet<&str> = HashSet::new();
+    terms
+        .iter()
+        .filter(|term| seen.insert(term.as_str()))
+        .cloned()
+        .collect()
+}
+
+/// Diagnose one named target against the exact ranked retrieval path.
+pub fn diagnose_index(
+    entries: &[IndexEntry],
+    query: &str,
+    target: &str,
+    artifact_type: Option<&str>,
+    tags: &[String],
+    live_only: bool,
+    surface_limit: usize,
+) -> SearchDiagnosis {
+    let terms = tokenize(query);
+    let query_terms = ordered_distinct_terms(&terms);
+    let resolution = resolve_in_index(entries, target);
+    if resolution.outcome != OUTCOME_RESOLVED {
+        return SearchDiagnosis {
+            query: query.to_string(),
+            target: target.to_string(),
+            outcome: if resolution.outcome == OUTCOME_DUPLICATE {
+                DIAGNOSIS_TARGET_DUPLICATE
+            } else {
+                DIAGNOSIS_TARGET_NOT_FOUND
+            },
+            reason: if resolution.outcome == OUTCOME_DUPLICATE {
+                "duplicate_target"
+            } else {
+                "unknown_target"
+            },
+            surface_limit,
+            match_count: 0,
+            query_terms,
+            matched_terms: Vec::new(),
+            missing_terms: Vec::new(),
+            rank: None,
+            outranked_by: Vec::new(),
+            artifact: None,
+            duplicate_paths: resolution.duplicate_paths,
+        };
+    }
+
+    let resolved = resolution.artifact.expect("resolved target has artifact");
+    let entry = entries
+        .iter()
+        .find(|entry| entry.path == resolved.path)
+        .expect("resolved target came from entries");
+    let tokenized = tokenize_entry(entry);
+    let (_, matched_set) = trace_field_matches(&tokenized.fields, &terms);
+    let matched_terms: Vec<String> = query_terms
+        .iter()
+        .filter(|term| matched_set.contains(term.as_str()))
+        .cloned()
+        .collect();
+    let missing_terms: Vec<String> = query_terms
+        .iter()
+        .filter(|term| !matched_set.contains(term.as_str()))
+        .cloned()
+        .collect();
+
+    let tag_filter: Vec<String> = tags.iter().map(|tag| py_casefold(tag)).collect();
+    let filtered_reason = if artifact_type
+        .is_some_and(|wanted| wanted != entry.artifact_type.as_str())
+    {
+        Some("filtered_by_type")
+    } else if !tag_filter.is_empty() && !entry_has_tags(entry, &tag_filter) {
+        Some("filtered_by_tags")
+    } else if live_only && entry_is_retired(entry) {
+        Some("filtered_by_liveness")
+    } else {
+        None
+    };
+
+    let ranked = search_index_filtered(entries, query, artifact_type, tags, live_only);
+    let rank_index = ranked
+        .matches
+        .iter()
+        .position(|artifact| artifact.path == resolved.path);
+    let rank = rank_index.map(|index| index + 1);
+    let reason = if let Some(reason) = filtered_reason {
+        reason
+    } else if matched_terms.is_empty() {
+        "no_term_match"
+    } else if !missing_terms.is_empty() {
+        "partial_term_match"
+    } else if rank.is_some_and(|value| value > surface_limit) {
+        "budget_truncated"
+    } else if rank.is_some_and(|value| value > 1) {
+        "ranked_below"
+    } else if rank == Some(1) {
+        "surfaced"
+    } else {
+        "not_returned"
+    };
+    let outranked_by = rank_index
+        .map(|index| {
+            ranked.matches[..index.min(surface_limit)]
+                .iter()
+                .map(|artifact| artifact.id.clone())
+                .collect()
+        })
+        .unwrap_or_default();
+    let artifact = rank_index
+        .map(|index| ranked.matches[index].clone())
+        .or(Some(resolved));
+
+    SearchDiagnosis {
+        query: query.to_string(),
+        target: target.to_string(),
+        outcome: DIAGNOSIS_COMPLETE,
+        reason,
+        surface_limit,
+        match_count: ranked.matches.len(),
+        query_terms,
+        matched_terms,
+        missing_terms,
+        rank,
+        outranked_by,
+        artifact,
+        duplicate_paths: Vec::new(),
+    }
+}
+
+/// Directory-backed named-target diagnosis.
+pub fn diagnose_artifact(
+    directory: &str,
+    query: &str,
+    target: &str,
+    artifact_type: Option<&str>,
+    recursive: bool,
+    tags: &[String],
+    live_only: bool,
+    surface_limit: usize,
+) -> SearchDiagnosis {
+    let entries = build_index(directory, recursive);
+    diagnose_index(
+        &entries,
+        query,
+        target,
+        artifact_type,
+        tags,
+        live_only,
+        surface_limit,
+    )
 }
 
 /// `_entry_has_tags`: exact whole-tag comparison, full Unicode casefold.
@@ -785,12 +984,21 @@ pub(crate) fn rank_and_build(
     let paths: Vec<&str> = matched.iter().map(|(entry, _, _)| entry.path.as_str()).collect();
     let lexical_rank = competition_ranks(&bm25_scores, &paths);
     let graph_rank = competition_ranks(&inbound_scores, &paths);
+    let strongest_bm25 = bm25_scores.iter().copied().fold(0.0_f64, f64::max);
+    let graph_gate_applied: Vec<bool> = bm25_scores
+        .iter()
+        .map(|score| graph_gate_allows(*score, strongest_bm25))
+        .collect();
     let fused: Vec<f64> = bm25_scores
         .iter()
         .enumerate()
         .map(|(index, _)| {
             1.0 / ((RRF_K + lexical_rank[index]) as f64)
-                + GRAPH_WEIGHT / ((RRF_K + graph_rank[index]) as f64)
+                + if graph_gate_applied[index] {
+                    GRAPH_WEIGHT / ((RRF_K + graph_rank[index]) as f64)
+                } else {
+                    0.0
+                }
         })
         .collect();
     crate::timing::emit_since(
@@ -839,6 +1047,12 @@ pub(crate) fn rank_and_build(
                     lexical_rank: lexical_rank[index],
                     graph_rank: graph_rank[index],
                     inbound: entry.inbound_count,
+                    graph_floor_ratio: GRAPH_FLOOR_RATIO,
+                    graph_gate: if graph_gate_applied[index] {
+                        "applied"
+                    } else {
+                        "clamped"
+                    },
                     bm25_raw,
                     fused_raw,
                 }),
@@ -925,6 +1139,22 @@ mod tests {
         tokenize(s)
     }
 
+    fn test_entry(id: &str, title: &str, path: &str, body: &str, inbound: i64) -> IndexEntry {
+        IndexEntry {
+            id: id.to_string(),
+            artifact_type: "decision".to_string(),
+            title: Some(title.to_string()),
+            path: path.to_string(),
+            aliases: vec![id.to_string()],
+            search_sections: vec![SearchSection {
+                heading: "Decision".to_string(),
+                lines: vec![body.to_string()],
+            }],
+            inbound_count: inbound,
+            tags: Vec::new(),
+        }
+    }
+
     #[test]
     fn tokenize_contract_examples() {
         assert_eq!(toks("soft-delete"), vec!["soft", "delete"]);
@@ -960,6 +1190,129 @@ mod tests {
         let paths = vec!["b", "a", "c"];
         let ranks = competition_ranks(&scores, &paths);
         assert_eq!(ranks, vec![1, 1, 3]);
+    }
+
+    #[test]
+    fn graph_gate_uses_inclusive_eighty_five_percent_floor() {
+        assert!(!graph_gate_allows(8.499_999, 10.0));
+        assert!(graph_gate_allows(8.5, 10.0));
+        assert!(graph_gate_allows(10.0, 10.0));
+        assert!(graph_gate_allows(0.0, 0.0));
+    }
+
+    #[test]
+    fn graph_gate_clamps_a_weak_lexical_hub_in_real_ranking() {
+        let entries = vec![
+            test_entry(
+                "RAC-STRONG000001",
+                "Widget storage",
+                "strong.md",
+                "Widget storage keeps widget state durable.",
+                0,
+            ),
+            test_entry(
+                "RAC-WEAKHUB0001",
+                "Popular reference",
+                "weak-hub.md",
+                "Widget.",
+                20,
+            ),
+        ];
+        let result = search_index(&entries, "widget", None, &[]);
+        assert_eq!(
+            result
+                .matches
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["RAC-STRONG000001", "RAC-WEAKHUB0001"]
+        );
+        let hub = result.matches[1].evidence.as_ref().expect("search evidence");
+        assert_eq!(hub.graph_gate, "clamped");
+        assert!(
+            hub.bm25_raw < result.matches[0].evidence.as_ref().unwrap().bm25_raw * 0.85
+        );
+    }
+
+    #[test]
+    fn named_target_diagnosis_distinguishes_rank_and_budget_misses() {
+        let entries = vec![
+            test_entry(
+                "RAC-STRONG000001",
+                "Widget storage",
+                "strong.md",
+                "Widget storage keeps widget state durable.",
+                0,
+            ),
+            test_entry(
+                "RAC-TARGET000001",
+                "Secondary option",
+                "target.md",
+                "Widget storage remains available.",
+                0,
+            ),
+        ];
+
+        let ranked = diagnose_index(
+            &entries,
+            "widget storage",
+            "RAC-TARGET000001",
+            None,
+            &[],
+            false,
+            5,
+        );
+        assert_eq!(ranked.reason, "ranked_below");
+        assert_eq!(ranked.rank, Some(2));
+        assert_eq!(ranked.outranked_by, vec!["RAC-STRONG000001"]);
+
+        let truncated = diagnose_index(
+            &entries,
+            "widget storage",
+            "RAC-TARGET000001",
+            None,
+            &[],
+            false,
+            1,
+        );
+        assert_eq!(truncated.reason, "budget_truncated");
+        assert_eq!(truncated.rank, Some(2));
+    }
+
+    #[test]
+    fn named_target_diagnosis_reports_no_and_partial_term_matches() {
+        let entries = vec![test_entry(
+            "RAC-TARGET000001",
+            "Widget storage",
+            "target.md",
+            "Widget state remains durable.",
+            0,
+        )];
+
+        let none = diagnose_index(
+            &entries,
+            "quorum lease",
+            "RAC-TARGET000001",
+            None,
+            &[],
+            false,
+            5,
+        );
+        assert_eq!(none.reason, "no_term_match");
+        assert_eq!(none.missing_terms, vec!["quorum", "lease"]);
+
+        let partial = diagnose_index(
+            &entries,
+            "widget quorum",
+            "RAC-TARGET000001",
+            None,
+            &[],
+            false,
+            5,
+        );
+        assert_eq!(partial.reason, "partial_term_match");
+        assert_eq!(partial.matched_terms, vec!["widget"]);
+        assert_eq!(partial.missing_terms, vec!["quorum"]);
     }
 
     #[test]

@@ -62,7 +62,7 @@ const ALL_SEGMENTS: [&str; 12] = [
 /// Must track `resolve`'s BM25F constants; the golden-vector test pins the
 /// exact string against the oracle's `scoring_fingerprint()`.
 pub fn scoring_fingerprint() -> &'static str {
-    "id=4.0|title=3.0|path=2.0|heading=1.5|body=1.0|tags=2.5|k1=1.2|b=0.75|rrf=60|graph=0.5"
+    "id=4.0|title=3.0|path=2.0|heading=1.5|body=1.0|tags=2.5|k1=1.2|b=0.75|rrf=60|graph=0.5|graph_floor=0.85"
 }
 
 // ---------------------------------------------------------------------------

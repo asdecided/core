@@ -6,6 +6,14 @@ details, release history over commit history.
 
 ## Unreleased
 
+- Added `decided diagnose` for deterministic, named-target explain-miss traces,
+  including no-match, partial-match, filtering, outranked, and result-window
+  truncation reasons.
+- Constrained relationship-graph ranking to lexical near-ties: candidates below
+  85% of the strongest BM25 match keep their lexical score but receive no graph
+  boost. `--explain` now reports the fixed ratio and whether the gate was
+  applied or clamped.
+
 ## v0.27.0 — 2026-08-08
 
 ### Hardened shared MCP serving

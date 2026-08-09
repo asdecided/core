@@ -7,7 +7,7 @@ type: roadmap
 
 ## Status
 
-Planned
+Achieved
 
 Prioritised as the rank-8 Tranche B item of the deterministic-substrate
 programme, graduated out of `future/` now its recorded sequencing condition
