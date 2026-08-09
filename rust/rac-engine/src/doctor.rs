@@ -15,7 +15,8 @@ use crate::identity::path_stem;
 use crate::pycompat::{py_casefold, py_repr_str, py_strip};
 use crate::relationships::{
     corpus_items, relationship_severity, relationships_from_corpus, validate_relationships,
-    CorpusItem, RelationshipIssue, ISSUE_DUPLICATE_IDENTIFIER, ISSUE_RELATIONSHIP_CYCLE,
+    CorpusItem, Relationship, RelationshipIssue, RelationshipValidation,
+    ISSUE_DUPLICATE_IDENTIFIER, ISSUE_RELATIONSHIP_CYCLE,
 };
 use crate::resolve::{index_from_items, resolve_in_index, IndexEntry, OUTCOME_RESOLVED};
 use crate::review::{drift_problem, suspect_drift};
@@ -114,10 +115,63 @@ pub fn diagnose(directory: &str, recursive: bool, hub_threshold: i64) -> DoctorR
     }
 }
 
+/// Diagnose only writable child artifacts while resolving their graph through
+/// the authoritative composed catalog. Parent warnings and advisories are not
+/// copied into each child; parent load/validation failures have already
+/// stopped composition at the command boundary.
+pub fn diagnose_composed(
+    directory: &str,
+    recursive: bool,
+    hub_threshold: i64,
+    corpus: &crate::composition::ComposedCorpus,
+) -> DoctorReport {
+    let items: Vec<CorpusItem> = corpus.local_items().cloned().collect();
+    let relationships = corpus.relationships();
+    let validation = crate::commands::validate_directory_from_items(directory, recursive, &items);
+    let relationship_validation = corpus.validate_relationships(directory, recursive);
+    let identity_index = corpus.identity_index();
+    let mut findings = Vec::new();
+    findings.extend(validation_findings_from_result(&validation));
+    findings.extend(relationship_findings_from_result(
+        directory,
+        &relationship_validation,
+    ));
+    findings.extend(degree_findings_with_relationships(
+        &items,
+        &relationships,
+        hub_threshold,
+    ));
+    findings.extend(injection_findings(&items));
+    findings.extend(unlinked_reference_findings_with_index(
+        &items,
+        &identity_index,
+        &relationships,
+    ));
+    findings.extend(suspect_artifact_findings(directory, &items));
+    findings.sort_by(|a, b| {
+        severity_rank(a.severity)
+            .cmp(&severity_rank(b.severity))
+            .then_with(|| a.path.cmp(&b.path))
+            .then_with(|| a.code.cmp(b.code))
+            .then_with(|| a.problem.cmp(&b.problem))
+    });
+    DoctorReport {
+        directory: directory.to_string(),
+        hub_threshold,
+        findings,
+    }
+}
+
 /// One finding per structurally invalid artifact; the problem names the
 /// sorted, deduplicated error codes.
 fn validation_findings(directory: &str, recursive: bool) -> Vec<DoctorFinding> {
     let result = validate_directory(directory, recursive);
+    validation_findings_from_result(&result)
+}
+
+fn validation_findings_from_result(
+    result: &crate::commands::DirectoryValidation,
+) -> Vec<DoctorFinding> {
     let mut findings = Vec::new();
     for file in &result.files {
         if file.status != STATUS_INVALID {
@@ -184,6 +238,13 @@ fn issue_problem(issue: &RelationshipIssue) -> String {
 /// (`RELATIONSHIP_SEVERITY.get(code, SEVERITY_ERROR)`).
 fn relationship_findings(directory: &str, recursive: bool) -> Vec<DoctorFinding> {
     let result = validate_relationships(directory, recursive);
+    relationship_findings_from_result(directory, &result)
+}
+
+fn relationship_findings_from_result(
+    directory: &str,
+    result: &RelationshipValidation,
+) -> Vec<DoctorFinding> {
     result
         .issues
         .iter()
@@ -238,27 +299,43 @@ fn issue_code_static(code: &str) -> &'static str {
 /// over the resolved edges; the orphan definition matches the portfolio's
 /// "never a resolved target" count exactly.
 fn degree_findings(items: &[CorpusItem], hub_threshold: i64) -> Vec<DoctorFinding> {
+    let relationships = relationships_from_corpus(items);
+    degree_findings_with_relationships(items, &relationships, hub_threshold)
+}
+
+fn degree_findings_with_relationships(
+    items: &[CorpusItem],
+    relationships: &[Relationship],
+    hub_threshold: i64,
+) -> Vec<DoctorFinding> {
     let known: Vec<&CorpusItem> = items.iter().filter(|i| i.spec.is_some()).collect();
-    let mut inbound: std::collections::HashMap<&str, i64> =
-        known.iter().map(|i| (i.path.as_str(), 0)).collect();
-    let mut outbound: std::collections::HashMap<&str, i64> =
-        known.iter().map(|i| (i.path.as_str(), 0)).collect();
-    for rel in relationships_from_corpus(items) {
-        let Some(resolved) = &rel.resolved_path else {
+    let mut inbound: std::collections::HashMap<&crate::corpus::ArtifactPath, i64> = known
+        .iter()
+        .map(|item| (&item.artifact_path, 0))
+        .collect();
+    let mut outbound: std::collections::HashMap<&crate::corpus::ArtifactPath, i64> = known
+        .iter()
+        .map(|item| (&item.artifact_path, 0))
+        .collect();
+    for rel in relationships {
+        let (Some(source), Some(resolved)) = (
+            rel.source_artifact.as_ref(),
+            rel.resolved_artifact.as_ref(),
+        ) else {
             continue; // only resolved (unique, non-self) edges
         };
-        if let Some(count) = inbound.get_mut(resolved.as_str()) {
+        if let Some(count) = inbound.get_mut(resolved) {
             *count += 1;
         }
-        if let Some(count) = outbound.get_mut(rel.source_path.as_str()) {
+        if let Some(count) = outbound.get_mut(source) {
             *count += 1;
         }
     }
     let mut findings = Vec::new();
     for item in &known {
         let path = item.path.as_str();
-        let in_degree = *inbound.get(path).unwrap_or(&0);
-        let degree = in_degree + *outbound.get(path).unwrap_or(&0);
+        let in_degree = *inbound.get(&item.artifact_path).unwrap_or(&0);
+        let degree = in_degree + *outbound.get(&item.artifact_path).unwrap_or(&0);
         if in_degree == 0 {
             findings.push(DoctorFinding {
                 path: path.to_string(),
@@ -735,30 +812,46 @@ struct UnlinkedReference {
 /// one finding per (source, target), sorted by `(source_path, target_id)`.
 fn detect_unlinked_references(items: &[CorpusItem]) -> Vec<UnlinkedReference> {
     let index: Vec<IndexEntry> = index_from_items(items);
-    let by_path: std::collections::HashMap<&str, &IndexEntry> =
-        index.iter().map(|e| (e.path.as_str(), e)).collect();
+    let relationships = relationships_from_corpus(items);
+    detect_unlinked_references_with_index(items, &index, &relationships)
+}
 
-    let mut declared: std::collections::HashMap<&str, std::collections::HashSet<String>> =
-        std::collections::HashMap::new();
-    for rel in relationships_from_corpus(items) {
-        if let Some(resolved) = rel.resolved_path {
-            if let Some(item) = items.iter().find(|i| i.path == rel.source_path) {
-                declared
-                    .entry(item.path.as_str())
-                    .or_default()
-                    .insert(resolved);
-            }
+fn detect_unlinked_references_with_index(
+    items: &[CorpusItem],
+    identity_index: &[IndexEntry],
+    relationships: &[Relationship],
+) -> Vec<UnlinkedReference> {
+    let sources: Vec<IndexEntry> = index_from_items(items);
+    let by_key: std::collections::HashMap<&crate::corpus::ArtifactKey, &IndexEntry> = identity_index
+        .iter()
+        .filter_map(|entry| entry.key.as_ref().map(|key| (key, entry)))
+        .collect();
+
+    let mut declared: std::collections::HashMap<
+        crate::corpus::ArtifactPath,
+        std::collections::HashSet<crate::corpus::ArtifactPath>,
+    > = std::collections::HashMap::new();
+    for rel in relationships {
+        if let (Some(source), Some(resolved)) =
+            (&rel.source_artifact, &rel.resolved_artifact)
+        {
+            declared
+                .entry(source.clone())
+                .or_default()
+                .insert(resolved.clone());
         }
     }
 
     let mut findings: Vec<UnlinkedReference> = Vec::new();
-    for source in &index {
+    for source in &sources {
+        let Some(source_path) = source.artifact_path.as_ref() else {
+            continue;
+        };
         let self_aliases: std::collections::HashSet<String> =
             source.aliases.iter().map(|a| py_casefold(a)).collect();
         let empty = std::collections::HashSet::new();
-        let already = declared.get(source.path.as_str()).unwrap_or(&empty);
-        let mut seen_targets: std::collections::HashSet<String> =
-            std::collections::HashSet::new();
+        let already = declared.get(source_path).unwrap_or(&empty);
+        let mut seen_targets = std::collections::HashSet::new();
         for section in &source.search_sections {
             let heading = py_casefold(py_strip(&section.heading));
             if RELATIONSHIP_HEADINGS.contains(&heading.as_str()) {
@@ -769,18 +862,23 @@ fn detect_unlinked_references(items: &[CorpusItem]) -> Vec<UnlinkedReference> {
                     if self_aliases.contains(&py_casefold(&token)) {
                         continue; // self-reference
                     }
-                    let result = resolve_in_index(&index, &token);
+                    let result = resolve_in_index(identity_index, &token);
                     if result.outcome != OUTCOME_RESOLVED {
                         continue; // not a unique corpus artifact
                     }
                     let target = result.artifact.expect("resolved implies artifact");
-                    if target.path == source.path || already.contains(&target.path) {
+                    let (Some(target_key), Some(target_path)) =
+                        (target.key.as_ref(), target.artifact_path.as_ref())
+                    else {
+                        continue;
+                    };
+                    if source.key.as_ref() == Some(target_key) || already.contains(target_path) {
                         continue;
                     }
-                    if !seen_targets.insert(target.path.clone()) {
+                    if !seen_targets.insert(target_key.clone()) {
                         continue; // one finding per (source, target) pair
                     }
-                    let target_entry = by_path[target.path.as_str()];
+                    let target_entry = by_key[target_key];
                     findings.push(UnlinkedReference {
                         source_path: source.path.clone(),
                         target_id: target.id.clone(),
@@ -818,6 +916,30 @@ fn unlinked_reference_findings(items: &[CorpusItem]) -> Vec<DoctorFinding> {
                 "Add `{}` under `## {}` if the link is intended \u{2014} a suggestion to \
                  review; RAC writes no edge (ADR-082).",
                 r.suggested_line, r.related_section
+            ),
+        })
+        .collect()
+}
+
+fn unlinked_reference_findings_with_index(
+    items: &[CorpusItem],
+    identity_index: &[IndexEntry],
+    relationships: &[Relationship],
+) -> Vec<DoctorFinding> {
+    detect_unlinked_references_with_index(items, identity_index, relationships)
+        .into_iter()
+        .map(|record| DoctorFinding {
+            path: record.source_path,
+            code: CODE_UNLINKED_REFERENCE,
+            severity: SEVERITY_WARNING,
+            problem: format!(
+                "body references {} but declares no {} link to it",
+                record.matched_token, record.related_section
+            ),
+            fix: format!(
+                "Add `{}` under `## {}` if the link is intended — a suggestion to \
+                 review; RAC writes no edge (ADR-082).",
+                record.suggested_line, record.related_section
             ),
         })
         .collect()

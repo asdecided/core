@@ -1,0 +1,21 @@
+{
+  "description": "DecisionGrounding federation track: one child, a large inherited parent, a highly connected lexical hard negative, and no source preference.",
+  "cases": [
+    {
+      "id": "FQ01",
+      "tool": "search_artifacts",
+      "category": "federated_large_parent",
+      "query": "quantum ledger compaction anchor",
+      "relevant": ["FEDEVAL-000000000001"],
+      "must_not_return": ["FEDEVAL-000000000002"]
+    },
+    {
+      "id": "FQ02",
+      "tool": "search_artifacts",
+      "category": "federated_large_parent",
+      "query": "signed anchor checkpoint pruning",
+      "relevant": ["FEDEVAL-000000000001"],
+      "must_not_return": ["FEDEVAL-000000000002", "FEDEVAL-000000000003"]
+    }
+  ]
+}

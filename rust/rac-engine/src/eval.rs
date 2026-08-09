@@ -18,6 +18,8 @@ use std::path::Path;
 
 use serde_json::{Map, Value};
 
+use crate::composition::ComposedCorpus;
+use crate::corpus::ArtifactPath;
 use crate::pycompat::{py_repr_str, py_round};
 use crate::pyjson::py_float;
 use crate::relationships::{corpus_items, relationships_from_corpus, Relationship};
@@ -349,9 +351,60 @@ fn related_returned(root: &str, case: &QueryCase) -> EvalResult<Vec<String>> {
     Ok(incoming_ids(&relationships, &identity_by_path, &artifact.path))
 }
 
-fn returned_ids(root: &str, entries: &[IndexEntry], case: &QueryCase) -> EvalResult<Vec<String>> {
+fn related_returned_composed(
+    corpus: &ComposedCorpus,
+    root: &str,
+    case: &QueryCase,
+) -> EvalResult<Vec<String>> {
+    const MAX_RELATED_EDGES: usize = 1000;
+    let artifact = corpus.resolve(&case.query).map_err(|_| {
+        EvalUsageError(format!(
+            "get_related case {}: query {} did not resolve to an artifact in {}",
+            py_repr_str(&case.id),
+            py_repr_str(&case.query),
+            py_repr_str(root)
+        ))
+    })?;
+    let relationships = corpus.relationships();
+    let identity_by_path: HashMap<&ArtifactPath, &str> = corpus
+        .effective()
+        .map(|item| (&item.artifact_path, item.key.canonical_id.as_str()))
+        .collect();
+    let mut incoming = Vec::new();
+    for relationship in &relationships {
+        if relationship.resolved_artifact.as_ref() != Some(&artifact.artifact_path)
+            || relationship.source_artifact.as_ref() == Some(&artifact.artifact_path)
+        {
+            continue;
+        }
+        let Some(source_path) = relationship.source_artifact.as_ref() else {
+            continue;
+        };
+        let Some(id) = identity_by_path.get(source_path) else {
+            continue;
+        };
+        if incoming.len() < MAX_RELATED_EDGES {
+            incoming.push((
+                relationship_order(&relationship.relationship),
+                (*id).to_string(),
+                source_path.clone(),
+            ));
+        }
+    }
+    incoming.sort_by(|left, right| (left.0, &left.1, &left.2).cmp(&(right.0, &right.1, &right.2)));
+    Ok(incoming.into_iter().map(|(_, id, _)| id).collect())
+}
+
+fn returned_ids(
+    root: &str,
+    entries: &[IndexEntry],
+    composed: Option<&ComposedCorpus>,
+    case: &QueryCase,
+) -> EvalResult<Vec<String>> {
     if case.tool == TOOL_SEARCH {
         Ok(search_returned(entries, case))
+    } else if let Some(corpus) = composed {
+        related_returned_composed(corpus, root, case)
     } else {
         related_returned(root, case)
     }
@@ -452,6 +505,19 @@ pub fn corpus_hash(root: &str) -> String {
     format!("sha256:{}", digest.hexdigest())
 }
 
+fn composed_corpus_hash(corpus: &ComposedCorpus) -> String {
+    let mut digest = Sha256::new();
+    for item in corpus.catalog() {
+        digest.update(item.artifact_path.source.as_bytes());
+        digest.update(b"\0");
+        digest.update(item.artifact_path.relative_path.as_bytes());
+        digest.update(b"\0");
+        digest.update(corpus.content(&item.key).unwrap_or_default());
+        digest.update(b"\0");
+    }
+    format!("sha256:{}", digest.hexdigest())
+}
+
 /// `query_set_hash(path)` — `sha256:` over the raw file bytes.
 pub fn query_set_hash(path: &str) -> String {
     format!(
@@ -468,11 +534,16 @@ pub fn run_eval(root: &str, queries_path: &str) -> EvalResult<Scorecard> {
         return usage(format!("corpus not found or not a directory: {root}"));
     }
     let cases = load_query_set(queries_path)?;
-    let entries = build_index(root, true);
+    let composed = crate::federated_corpus::load_composed_corpus(root, true)
+        .map_err(|error| EvalUsageError(error.to_string()))?;
+    let entries = composed
+        .as_ref()
+        .map(ComposedCorpus::effective_index)
+        .unwrap_or_else(|| build_index(root, true));
 
     let mut results: Vec<CaseResult> = Vec::with_capacity(cases.len());
     for case in cases {
-        let returned = returned_ids(root, &entries, &case)?;
+        let returned = returned_ids(root, &entries, composed.as_ref(), &case)?;
         results.push(score_case(returned, case));
     }
     let n_queries = results.len() as i64;
@@ -491,7 +562,15 @@ pub fn run_eval(root: &str, queries_path: &str) -> EvalResult<Scorecard> {
         "lore_version".into(),
         Value::String(crate::output::rac_version()),
     );
-    metadata.insert("corpus_hash".into(), Value::String(corpus_hash(root)));
+    metadata.insert(
+        "corpus_hash".into(),
+        Value::String(
+            composed
+                .as_ref()
+                .map(composed_corpus_hash)
+                .unwrap_or_else(|| corpus_hash(root)),
+        ),
+    );
     metadata.insert(
         "query_set_hash".into(),
         Value::String(query_set_hash(queries_path)),

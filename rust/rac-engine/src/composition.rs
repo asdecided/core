@@ -710,6 +710,18 @@ impl ComposedCorpus {
         resolve_relationships(&self.effective_rows, &self.resolution_index)
     }
 
+    /// Child-declared edges resolved against the full composed identity
+    /// catalog. Diagnostics use this projection to keep their subjects local
+    /// without losing qualified parent and override resolution.
+    pub fn local_relationships(&self) -> Vec<Relationship> {
+        let rows: Vec<ValidationRow> = self
+            .local
+            .iter()
+            .map(|index| self.catalog_rows[*index].clone())
+            .collect();
+        resolve_relationships(&rows, &self.resolution_index)
+    }
+
     /// Resolve declared edges for every retained catalog record, including an
     /// overridden parent's immutable history. Export uses this projection;
     /// live reads and enforcement continue to use `relationships`.
@@ -738,6 +750,15 @@ impl ComposedCorpus {
         summary
     }
 
+    pub fn local_relationship_summary(&self) -> RelationshipSummary {
+        let rows: Vec<ValidationRow> = self
+            .local
+            .iter()
+            .map(|index| self.catalog_rows[*index].clone())
+            .collect();
+        crate::relationships::summary_from_rows_with_index(&rows, &self.resolution_index, true)
+    }
+
     /// Run the existing relationship validator over source-aware keys. The
     /// child repository root is intentionally supplied here so inherited
     /// filesystem scope is checked against child code.
@@ -762,6 +783,102 @@ impl ComposedCorpus {
             })
         });
         validation
+    }
+
+    pub fn validate_local_relationships(
+        &self,
+        child_directory: &str,
+        recursive: bool,
+    ) -> RelationshipValidation {
+        let rows: Vec<ValidationRow> = self
+            .local
+            .iter()
+            .map(|index| self.catalog_rows[*index].clone())
+            .collect();
+        validation_from_rows_with_index(
+            child_directory,
+            &rows,
+            &self.catalog_rows,
+            recursive,
+            &self.resolution_index,
+            false,
+            true,
+        )
+    }
+
+    /// Validate one proposed child document against the composed catalog.
+    /// Only proposal-owned findings are returned; an on-disk local artifact
+    /// with the same canonical id is treated as the document being replaced.
+    pub fn validate_proposed_document(
+        &self,
+        artifact: &crate::parse::Artifact,
+        source_path: &str,
+        child_directory: &str,
+        recursive: bool,
+    ) -> RelationshipValidation {
+        let source = self.child_source.clone().unwrap_or_else(|| {
+            crate::corpus::compatible_local_layer(child_directory).source
+        });
+        let origin = crate::corpus::CorpusLayer::local(source).origin();
+        let spec = crate::spec::spec_for(&crate::classify::classify(artifact).artifact_type);
+        let proposed = CorpusItem::new(
+            source_path.to_string(),
+            source_path.to_string(),
+            artifact.clone(),
+            spec,
+            origin,
+            crate::corpus::PhysicalArtifactLocator::new(
+                crate::corpus::PhysicalCorpusLocator::local(child_directory),
+                source_path,
+            ),
+        );
+        let canonical = py_casefold(&proposed.key.canonical_id);
+        let mut catalog_rows: Vec<ValidationRow> = self
+            .catalog_rows
+            .iter()
+            .filter(|row| {
+                !(row.origin.layer == Layer::Local
+                    && py_casefold(&row.key.canonical_id) == canonical)
+            })
+            .cloned()
+            .collect();
+        let mut effective_rows: Vec<ValidationRow> = self
+            .effective_rows
+            .iter()
+            .filter(|row| {
+                !(row.origin.layer == Layer::Local
+                    && py_casefold(&row.key.canonical_id) == canonical)
+            })
+            .cloned()
+            .collect();
+        let proposal_row = validation_row_from_item(&proposed);
+        catalog_rows.push(proposal_row.clone());
+        effective_rows.push(proposal_row.clone());
+        catalog_rows.sort_by(|left, right| {
+            left.artifact_path
+                .cmp(&right.artifact_path)
+                .then_with(|| left.key.cmp(&right.key))
+        });
+        effective_rows.sort_by(|left, right| {
+            left.artifact_path
+                .cmp(&right.artifact_path)
+                .then_with(|| left.key.cmp(&right.key))
+        });
+        let index = composed_resolution_index(
+            &catalog_rows,
+            &effective_rows,
+            self.parent.as_ref(),
+            &self.overrides,
+        );
+        validation_from_rows_with_index(
+            child_directory,
+            &[proposal_row],
+            &catalog_rows,
+            recursive,
+            &index,
+            false,
+            true,
+        )
     }
 }
 

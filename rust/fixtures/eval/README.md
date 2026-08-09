@@ -1,8 +1,8 @@
 # Grounding retrieval benchmark fixture (v0.23.0, WS1)
 
 This directory is the versioned fixture the `decided eval` grounding benchmark
-scores. It is a dev/CI surface, not a RAC artifact corpus — nothing here is part
-of the product knowledge under `rac/`.
+scores. It is a dev/CI surface, not an AsDecided artifact corpus — nothing here
+is part of the repository's product-knowledge corpus.
 
 ## Layout
 
@@ -27,14 +27,26 @@ of the product knowledge under `rac/`.
   category's `p_at_1` / `r_at_5`. Per-tool figures are diagnostic.
 - `baseline.json` — the committed `metrics` baseline, written by
   `decided eval --update-baseline` (human-only; CI never rebaselines).
+- `federation/` — the ADR-139 DecisionGrounding track. Its child inherits a
+  40-artifact standards parent containing a precise inherited match, six
+  lexical near-matches, and a 32-inbound-edge hard negative. The hard negative
+  has graph rank 1 but remains outside the top-five window because the v0.28
+  lexical floor clamps its graph contribution.
 
 ## Running
 
 ```sh
-rac eval                  # human-readable scorecard
-rac eval --json           # full scorecard JSON
-rac eval --check          # CI gate: exit 0 pass / 1 regression / 2 usage error
-rac eval --update-baseline  # human-only re-baseline
+decided eval                  # human-readable scorecard
+decided eval --json           # full scorecard JSON
+decided eval --check          # CI gate: exit 0 pass / 1 regression / 2 usage error
+decided eval --update-baseline  # human-only re-baseline
+
+# ADR-139 large-parent/hard-negative track
+decided eval --check \
+  --root rust/fixtures/eval/federation/child/decisions \
+  --queries rust/fixtures/eval/federation/queries.json \
+  --baseline rust/fixtures/eval/federation/baseline.json \
+  --config rust/fixtures/eval/federation/eval-config.json
 ```
 
 ## Calibration

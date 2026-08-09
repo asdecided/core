@@ -511,6 +511,23 @@ pub fn validate_stdin_against_corpus(
     }
 }
 
+fn validate_stdin_against_composed(
+    artifact: &Artifact,
+    corpus_dir: &str,
+    source_path: &str,
+    recursive: bool,
+    corpus: &crate::composition::ComposedCorpus,
+) -> StdinCorpusValidation {
+    let structural = validate_product(artifact, corpus_dir);
+    let relationships =
+        corpus.validate_proposed_document(artifact, source_path, corpus_dir, recursive);
+    StdinCorpusValidation {
+        source_path: source_path.to_string(),
+        structural_issues: structural,
+        relationship_issues: relationships.issues,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // cmd_validate
 // ---------------------------------------------------------------------------
@@ -668,7 +685,17 @@ pub fn cmd_validate(args: &ValidateArgs) -> i32 {
         } else {
             py_path_str(&args.file)
         };
-        let result = validate_stdin_against_corpus(&artifact, corpus, &source_path, true);
+        let result = match load_composed_or_exit(corpus, true) {
+            Ok(Some(composed)) => validate_stdin_against_composed(
+                &artifact,
+                corpus,
+                &source_path,
+                true,
+                &composed,
+            ),
+            Ok(None) => validate_stdin_against_corpus(&artifact, corpus, &source_path, true),
+            Err(code) => return code,
+        };
         if args.json {
             emit(output::render_stdin_corpus_json(&result));
         } else {
@@ -915,7 +942,15 @@ pub fn cmd_relationships(args: &RelationshipsArgs) -> i32 {
 
     // Inspection arm (non --validate): always exit 0.
     let report = if is_dir {
-        build_relationship_report(&args.path, !args.top_level)
+        match load_composed_or_exit(&args.path, !args.top_level) {
+            Ok(Some(composed)) => crate::relationships::build_relationship_report_from_composed(
+                &args.path,
+                !args.top_level,
+                &composed,
+            ),
+            Ok(None) => build_relationship_report(&args.path, !args.top_level),
+            Err(code) => return code,
+        }
     } else {
         build_relationship_report_file(&args.path)
     };
@@ -940,7 +975,14 @@ pub fn cmd_stats(args: &StatsArgs) -> i32 {
     if !Path::new(&args.directory).is_dir() {
         return usage_error(&format!("not a directory: {}", args.directory));
     }
-    let stats = crate::stats::collect_stats(&args.directory);
+    let stats = match load_composed_or_exit(&args.directory, true) {
+        Ok(Some(composed)) => {
+            let items: Vec<_> = composed.effective().cloned().collect();
+            crate::stats::collect_stats_from_items(&args.directory, &items)
+        }
+        Ok(None) => crate::stats::collect_stats(&args.directory),
+        Err(code) => return code,
+    };
     if args.json {
         emit(output::render_stats_json(&stats));
     } else {
@@ -968,8 +1010,16 @@ pub fn cmd_portfolio(args: &PortfolioArgs) -> i32 {
         return usage_error(&format!("not a directory: {}", args.directory));
     }
     let recursive = !args.top_level;
-    let items = corpus_items(&args.directory, recursive);
-    let summary = crate::portfolio::portfolio_from_corpus(&args.directory, &items, recursive);
+    let summary = match load_composed_or_exit(&args.directory, recursive) {
+        Ok(Some(composed)) => {
+            crate::portfolio::portfolio_from_composed(&args.directory, &composed, recursive)
+        }
+        Ok(None) => {
+            let items = corpus_items(&args.directory, recursive);
+            crate::portfolio::portfolio_from_corpus(&args.directory, &items, recursive)
+        }
+        Err(code) => return code,
+    };
     if args.json {
         emit(output::render_portfolio_json(&summary));
     } else {
@@ -993,7 +1043,15 @@ pub fn cmd_index(args: &IndexArgs) -> i32 {
     if !Path::new(&args.directory).is_dir() {
         return usage_error(&format!("not a directory: {}", args.directory));
     }
-    let index = crate::index::build_repository_index(&args.directory, !args.top_level);
+    let recursive = !args.top_level;
+    let index = match load_composed_or_exit(&args.directory, recursive) {
+        Ok(Some(composed)) => {
+            let items: Vec<_> = composed.effective().cloned().collect();
+            crate::index::build_repository_index_from_items(&args.directory, &items, recursive)
+        }
+        Ok(None) => crate::index::build_repository_index(&args.directory, recursive),
+        Err(code) => return code,
+    };
     if args.json {
         emit(output::render_index_json(&index));
     } else {
@@ -1016,7 +1074,13 @@ pub fn cmd_coverage(args: &CoverageArgs) -> i32 {
     if !Path::new(&args.directory).is_dir() {
         return usage_error(&format!("not a directory: {}", args.directory));
     }
-    let report = crate::coverage::analyze_coverage(&args.directory);
+    let report = match load_composed_or_exit(&args.directory, true) {
+        Ok(Some(composed)) => {
+            crate::coverage::analyze_coverage_from_composed(&args.directory, &composed)
+        }
+        Ok(None) => crate::coverage::analyze_coverage(&args.directory),
+        Err(code) => return code,
+    };
     if args.json {
         emit(output::render_coverage_json(&report));
     } else {
@@ -1217,7 +1281,13 @@ pub fn cmd_herald(args: &HeraldArgs) -> i32 {
         Ok(text) => text.lines().map(str::trim).filter(|line| !line.is_empty()).map(str::to_string).collect::<Vec<_>>(),
         Err(error) => return usage_error(&format!("could not read paths file {}: {error}", args.paths_file)),
     };
-    let report = crate::herald::collect(&args.directory, &paths, !args.top_level);
+    let report = match load_composed_or_exit(&args.directory, !args.top_level) {
+        Ok(Some(composed)) => {
+            crate::herald::collect_from_composed(&args.directory, &paths, &composed)
+        }
+        Ok(None) => crate::herald::collect(&args.directory, &paths, !args.top_level),
+        Err(code) => return code,
+    };
     let body = crate::herald::render(&report, &args.link_base, args.max_inline);
     if let Err(error) = std::fs::write(&args.out, body) {
         return usage_error(&format!("could not write Herald output {}: {error}", args.out));
@@ -1330,8 +1400,17 @@ pub fn cmd_doctor(args: &DoctorArgs) -> i32 {
     if !Path::new(&args.directory).is_dir() {
         return usage_error(&format!("not a directory: {}", args.directory));
     }
-    let report =
-        crate::doctor::diagnose(&args.directory, !args.top_level, args.hub_threshold);
+    let recursive = !args.top_level;
+    let report = match load_composed_or_exit(&args.directory, recursive) {
+        Ok(Some(composed)) => crate::doctor::diagnose_composed(
+            &args.directory,
+            recursive,
+            args.hub_threshold,
+            &composed,
+        ),
+        Ok(None) => crate::doctor::diagnose(&args.directory, recursive, args.hub_threshold),
+        Err(code) => return code,
+    };
     if args.json {
         emit(output::render_doctor_json(&report));
     } else {
@@ -1366,7 +1445,17 @@ pub fn cmd_review(args: &ReviewArgs) -> i32 {
             return usage_error("--stale-after must be a non-negative number of days");
         }
     }
-    let report = crate::review::build_review(&args.directory, !args.top_level, args.stale_after);
+    let recursive = !args.top_level;
+    let report = match load_composed_or_exit(&args.directory, recursive) {
+        Ok(Some(composed)) => crate::review::build_review_composed(
+            &args.directory,
+            recursive,
+            args.stale_after,
+            &composed,
+        ),
+        Ok(None) => crate::review::build_review(&args.directory, recursive, args.stale_after),
+        Err(code) => return code,
+    };
     if args.sarif {
         emit(output::render_review_sarif(&report));
     } else if args.json {
@@ -1789,6 +1878,69 @@ pub fn annotate_search_recency(matches: &mut [crate::resolve::ResolvedArtifact],
     );
 }
 
+/// Join Git recency onto local matches from a composed corpus without ever
+/// attributing the child checkout's history to inherited artifacts.
+///
+/// Ranking has already completed when this runs. Inherited records retain a
+/// missing `recency` field; local records use their runtime-only physical
+/// locator while public paths remain owning-source-relative.
+pub fn annotate_composed_search_recency(
+    matches: &mut [crate::resolve::ResolvedArtifact],
+    directory: &str,
+    corpus: &crate::composition::ComposedCorpus,
+) {
+    use crate::corpus::Layer;
+    use crate::gitinfo;
+
+    let local: Vec<(usize, PathBuf)> = matches
+        .iter()
+        .enumerate()
+        .filter_map(|(index, artifact)| {
+            let key = artifact.key.as_ref()?;
+            let item = corpus.item(key)?;
+            (item.origin.layer == Layer::Local)
+                .then(|| (index, item.locator.path.clone()))
+        })
+        .collect();
+    if local.is_empty() {
+        return;
+    }
+    let local_count = local.len();
+
+    let timing_started = crate::timing::start();
+    let threshold = crate::validate::load_freshness_threshold(directory);
+    let reference = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs() as i64)
+        .unwrap_or(0);
+    let repo_root = gitinfo::repository_root(Path::new(directory));
+    let paths: Vec<PathBuf> = local.iter().map(|(_, path)| path.clone()).collect();
+    let committed = match &repo_root {
+        Some(root) => gitinfo::last_committed_for_paths_in_repo(root, &paths),
+        None => paths.into_iter().map(|path| (path, None)).collect(),
+    };
+    for ((index, _), (_, last)) in local.into_iter().zip(committed) {
+        let staleness = gitinfo::staleness(last.as_deref(), threshold, reference);
+        matches[index].recency = Some(crate::resolve::Recency {
+            last_committed: staleness
+                .last_committed
+                .as_deref()
+                .map(gitinfo::isoformat_roundtrip),
+            age_days: staleness.age_days,
+            stale: staleness.stale,
+        });
+    }
+    crate::timing::emit_since(
+        "git.recency_join",
+        timing_started,
+        &[
+            ("matches", matches.len() as u64),
+            ("local_matches", local_count as u64),
+            ("repository", u64::from(repo_root.is_some())),
+        ],
+    );
+}
+
 /// Serve `decided find` from the persistent index store (`_find_from_store`,
 /// ADR-112): a warm run against an unchanged corpus reads the mapped base;
 /// a cold run builds fresh, writes the store, and serves either the
@@ -1881,7 +2033,9 @@ pub fn cmd_find(args: &FindArgs) -> i32 {
             args.live,
         )
     };
-    if composed.is_none() {
+    if let Some(composed) = &composed {
+        annotate_composed_search_recency(&mut result.matches, &args.directory, composed);
+    } else {
         annotate_search_recency(&mut result.matches, &args.directory);
     }
     let render_started = crate::timing::start();

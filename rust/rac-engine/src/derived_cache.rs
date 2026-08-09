@@ -902,25 +902,15 @@ impl FederatedCacheTracker<crate::composition::ComposedCorpus> {
             child_corpus,
             recursive,
             |generation| {
-                let Some(identity) = generation.identity() else {
-                    return Err(FederatedCacheError::InvalidModel {
+                let identity = generation.identity().ok_or_else(|| {
+                    FederatedCacheError::InvalidModel {
                         message: "composed cache reads require .decided/corpus.md".to_string(),
-                    });
-                };
+                    }
+                })?;
+                let composed = compose_logical_generation(child_corpus, generation)?;
                 let parent = generation
                     .verified_parent()
                     .expect("federated identity has a verified parent");
-                let child_files = generation
-                    .child_files()
-                    .expect("federated identity has captured child files");
-                let composed = crate::federated_corpus::compose_verified_generation_from_snapshot(
-                    child_corpus,
-                    parent,
-                    child_files,
-                )
-                .map_err(|error| {
-                    FederatedCacheError::composition(error.stable_code(), error.to_string())
-                })?;
                 let model = crate::derived::build_derived_index_from_composed(
                     &identity.child_corpus_path,
                     child_corpus,
@@ -933,6 +923,30 @@ impl FederatedCacheTracker<crate::composition::ComposedCorpus> {
             },
         )
     }
+}
+
+/// Compose the authoritative corpus from one already-captured logical
+/// generation. This is also the cache-disabled serving boundary: callers get
+/// the same verified bytes and overlay semantics without opening or writing a
+/// persistent store.
+pub fn compose_logical_generation(
+    child_corpus: &str,
+    generation: &LogicalGeneration,
+) -> Result<crate::composition::ComposedCorpus, FederatedCacheError> {
+    let parent = generation
+        .verified_parent()
+        .ok_or_else(|| FederatedCacheError::InvalidModel {
+            message: "composed generation requires .decided/corpus.md".to_string(),
+        })?;
+    let child_files = generation
+        .child_files()
+        .expect("federated identity has captured child files");
+    crate::federated_corpus::compose_verified_generation_from_snapshot(
+        child_corpus,
+        parent,
+        child_files,
+    )
+    .map_err(|error| FederatedCacheError::composition(error.stable_code(), error.to_string()))
 }
 
 fn stable_public_path(path: &str) -> bool {

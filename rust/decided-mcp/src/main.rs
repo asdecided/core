@@ -29,7 +29,61 @@ const TOOLS_LIST_RESULT: &str = include_str!("tools_list_result.json");
 
 pub(crate) struct ServerState {
     tracker: Option<rac_engine::freshness::FreshnessTracker>,
+    federated_tracker: Option<
+        rac_engine::derived_cache::FederatedCacheTracker<
+            rac_engine::composition::ComposedCorpus,
+        >,
+    >,
     graph_cache: graph::GraphCache,
+}
+
+enum RequestRead<'a> {
+    Legacy {
+        generation: Option<u64>,
+        model: Option<&'a rac_engine::freshness::TrackerModel>,
+    },
+    FederatedCached(
+        rac_engine::derived_cache::FederatedCacheRead<
+            'a,
+            rac_engine::composition::ComposedCorpus,
+        >,
+    ),
+    FederatedFresh {
+        generation: rac_engine::derived_cache::LogicalGeneration,
+        composed: Box<rac_engine::composition::ComposedCorpus>,
+    },
+}
+
+impl RequestRead<'_> {
+    fn legacy(&self) -> (Option<u64>, Option<&rac_engine::freshness::TrackerModel>) {
+        match self {
+            Self::Legacy { generation, model } => (*generation, *model),
+            _ => (None, None),
+        }
+    }
+
+    fn composed(&self) -> Option<&rac_engine::composition::ComposedCorpus> {
+        match self {
+            Self::FederatedCached(read) => Some(read.composed),
+            Self::FederatedFresh { composed, .. } => Some(composed),
+            Self::Legacy { .. } => None,
+        }
+    }
+
+    fn cached_model(&self) -> Option<&rac_engine::derived_cache::ReadModel> {
+        match self {
+            Self::FederatedCached(read) => Some(read.model),
+            _ => None,
+        }
+    }
+
+    fn logical_generation(&self) -> Option<&rac_engine::derived_cache::LogicalGeneration> {
+        match self {
+            Self::FederatedCached(read) => Some(read.generation),
+            Self::FederatedFresh { generation, .. } => Some(generation),
+            Self::Legacy { .. } => None,
+        }
+    }
 }
 
 /// The SDK's logging notification for an unparseable input line (§1) —
@@ -146,8 +200,16 @@ fn main() {
     } else {
         None
     };
+    let federated_tracker = if rac_engine::derived_cache::cache_enabled(cache) {
+        Some(rac_engine::derived_cache::FederatedCacheTracker::new(
+            rac_engine::derived_cache::default_cache_dir(),
+        ))
+    } else {
+        None
+    };
     let mut state = ServerState {
         tracker,
+        federated_tracker,
         graph_cache: graph::GraphCache::default(),
     };
     // Audit recorder (ADR-084): built from the `.decided/config.yaml` audit stanza,
@@ -185,14 +247,38 @@ fn main() {
 
 /// Startup diagnostic (stderr only; declared-normalized in parity, §0).
 fn check_corpus(root: &str) {
-    let entries = rac_engine::resolve::build_index(root, true);
-    if !entries.iter().any(|e| e.artifact_type != "unknown") {
+    let has_artifacts = if federation_configured(root) {
+        let repository_root = rac_engine::validate::repository_root(root);
+        let generation = rac_engine::derived_cache::capture_logical_generation(
+            &repository_root,
+            root,
+            true,
+        )
+        .unwrap_or_else(|error| usage_error(&error.to_string()));
+        let composed = rac_engine::derived_cache::compose_logical_generation(root, &generation)
+            .unwrap_or_else(|error| usage_error(&error.to_string()));
+        let has_artifacts = composed
+            .effective()
+            .any(|item| item.spec.is_some());
+        has_artifacts
+    } else {
+        rac_engine::resolve::build_index(root, true)
+            .iter()
+            .any(|entry| entry.artifact_type != "unknown")
+    };
+    if !has_artifacts {
         eprintln!(
             "decided-mcp: no AsDecided artifacts found under '{root}'. Point --root at a \
 directory containing RAC Markdown artifacts, or run 'decided init' to initialize \
 a new repository. The server is running; get_summary will report the empty state."
         );
     }
+}
+
+fn federation_configured(root: &str) -> bool {
+    rac_engine::validate::repository_root(root)
+        .join(rac_engine::federation::MANIFEST_RELATIVE_PATH)
+        .is_file()
 }
 
 fn serve(
@@ -457,15 +543,57 @@ fn dispatch(
     ) {
         return Err(format!("Unknown tool: {name}"));
     }
-    // Freshen the read-model once per call (the corpus-change check every
-    // tool answer rides, ADR-105); without the tracker every arm re-walks.
-    let (generation, model) = match state.tracker.as_mut() {
-        Some(tracker) => {
-            let (generation, model) = tracker.read_model_with_generation(false);
-            (Some(generation), Some(model))
+    let ServerState {
+        tracker,
+        federated_tracker,
+        graph_cache,
+    } = state;
+    // A configured repository enters the verified generation boundary on
+    // every call. Cache-off skips persistence, never parent verification or
+    // composition. A failed re-verification returns an error before the
+    // previously valid model can be observed.
+    let request = if federation_configured(root) {
+        let repository_root = rac_engine::validate::repository_root(root);
+        match federated_tracker.as_mut() {
+            Some(tracker) => RequestRead::FederatedCached(
+                tracker
+                    .read_composed(&repository_root, root, true)
+                    .map_err(|error| error.to_string())?,
+            ),
+            None => {
+                let generation = rac_engine::derived_cache::capture_logical_generation(
+                    &repository_root,
+                    root,
+                    true,
+                )
+                .map_err(|error| error.to_string())?;
+                let composed = rac_engine::derived_cache::compose_logical_generation(
+                    root,
+                    &generation,
+                )
+                .map_err(|error| error.to_string())?;
+                RequestRead::FederatedFresh {
+                    generation,
+                    composed: Box::new(composed),
+                }
+            }
         }
-        None => (None, None),
+    } else {
+        match tracker.as_mut() {
+            Some(tracker) => {
+                let (generation, model) = tracker.read_model_with_generation(false);
+                RequestRead::Legacy {
+                    generation: Some(generation),
+                    model: Some(model),
+                }
+            }
+            None => RequestRead::Legacy {
+                generation: None,
+                model: None,
+            },
+        }
     };
+    let (generation, model) = request.legacy();
     // Audit args mirror server.py's per-tool `observed(...)` shapes exactly
     // (insertion order = recorded key order): non-default arguments ride the
     // record only when supplied. `sidecar::observe` keeps the telemetry seam
@@ -483,7 +611,16 @@ fn dispatch(
             let audit_args = json!({ "id": a_str(&a, 0, "") });
             Ok(sidecar::observe(name, || {
                 audit::observe(recorder, principal, name, audit_args, || {
-                    tools::get_artifact(root, model, &a_str(&a, 0, ""), effective)
+                    if let Some(corpus) = request.composed() {
+                        tools::get_artifact_composed(
+                            root,
+                            corpus,
+                            &a_str(&a, 0, ""),
+                            effective,
+                        )
+                    } else {
+                        tools::get_artifact(root, model, &a_str(&a, 0, ""), effective)
+                    }
                 })
             }))
         }
@@ -511,15 +648,28 @@ fn dispatch(
             let audit_args = Value::Object(m);
             Ok(sidecar::observe(name, || {
                 audit::observe(recorder, principal, name, audit_args, || {
-                    tools::search_artifacts(
-                        root,
-                        model,
-                        &query,
-                        artifact_type.as_deref(),
-                        &tags,
-                        live_only,
-                        server_budget,
-                    )
+                    if let Some(corpus) = request.composed() {
+                        tools::search_artifacts_composed(
+                            root,
+                            request.cached_model(),
+                            corpus,
+                            &query,
+                            artifact_type.as_deref(),
+                            &tags,
+                            live_only,
+                            server_budget,
+                        )
+                    } else {
+                        tools::search_artifacts(
+                            root,
+                            model,
+                            &query,
+                            artifact_type.as_deref(),
+                            &tags,
+                            live_only,
+                            server_budget,
+                        )
+                    }
                 })
             }))
         }
@@ -556,9 +706,15 @@ fn dispatch(
             let audit_args = Value::Object(m);
             Ok(sidecar::observe(name, || {
                 audit::observe(recorder, principal, name, audit_args, || {
-                    tools::retrieve_grounding(
-                        root, model, &task, &scope, top_k, effective, live_only,
-                    )
+                    if let Some(corpus) = request.composed() {
+                        tools::retrieve_grounding_composed(
+                            root, corpus, &task, &scope, top_k, effective, live_only,
+                        )
+                    } else {
+                        tools::retrieve_grounding(
+                            root, model, &task, &scope, top_k, effective, live_only,
+                        )
+                    }
                 })
             }))
         }
@@ -578,7 +734,23 @@ fn dispatch(
             let audit_args = Value::Object(m);
             Ok(sidecar::observe(name, || {
                 audit::observe(recorder, principal, name, audit_args, || {
-                    tools::find_decisions_tool(root, model, &topic, path.as_deref(), server_budget)
+                    if let Some(corpus) = request.composed() {
+                        tools::find_decisions_tool_composed(
+                            root,
+                            corpus,
+                            &topic,
+                            path.as_deref(),
+                            server_budget,
+                        )
+                    } else {
+                        tools::find_decisions_tool(
+                            root,
+                            model,
+                            &topic,
+                            path.as_deref(),
+                            server_budget,
+                        )
+                    }
                 })
             }))
         }
@@ -592,16 +764,32 @@ fn dispatch(
             let depth = a_int(&a, 1, 1);
             let audit_args = json!({ "id": id.clone(), "depth": depth });
             let fresh_graph;
-            let graph_view = match (generation, model) {
-                (Some(generation), Some(model)) => state.graph_cache.view_for(generation, model),
-                _ => {
-                    fresh_graph = graph::GraphView::fresh(root);
-                    &fresh_graph
+            let graph_view = if let (Some(corpus), Some(logical)) =
+                (request.composed(), request.logical_generation())
+            {
+                graph_cache.view_for_composed(logical.cache_key(), corpus)
+            } else {
+                match (generation, model) {
+                    (Some(generation), Some(model)) => graph_cache.view_for(generation, model),
+                    _ => {
+                        fresh_graph = graph::GraphView::fresh(root);
+                        &fresh_graph
+                    }
                 }
             };
             Ok(sidecar::observe(name, || {
                 audit::observe(recorder, principal, name, audit_args, || {
-                    tools::get_related(graph_view, &id, depth, server_budget)
+                    if let Some(corpus) = request.composed() {
+                        tools::get_related_composed(
+                            graph_view,
+                            corpus,
+                            &id,
+                            depth,
+                            server_budget,
+                        )
+                    } else {
+                        tools::get_related(graph_view, &id, depth, server_budget)
+                    }
                 })
             }))
         }
@@ -611,7 +799,18 @@ fn dispatch(
             let audit_args = json!({});
             Ok(sidecar::observe(name, || {
                 audit::observe(recorder, principal, name, audit_args, || {
-                    tools::get_summary(root, model, server_budget)
+                    if let (Some(corpus), Some(generation)) =
+                        (request.composed(), request.logical_generation())
+                    {
+                        tools::get_summary_composed(
+                            root,
+                            generation,
+                            corpus,
+                            server_budget,
+                        )
+                    } else {
+                        tools::get_summary(root, model, server_budget)
+                    }
                 })
             }))
         }
@@ -669,6 +868,7 @@ mod tests {
                 "/definitely-not-a-decided-corpus",
                 None,
             )),
+            federated_tracker: None,
             graph_cache: graph::GraphCache::default(),
         };
         let result = dispatch(
@@ -697,6 +897,7 @@ mod tests {
                 &root,
                 Some(10),
             )),
+            federated_tracker: None,
             graph_cache: graph::GraphCache::default(),
         };
         let arguments = json!({"id": "FIX-0DEC1GRAPH00", "depth": 2});

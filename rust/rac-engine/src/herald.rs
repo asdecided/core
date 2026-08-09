@@ -2,13 +2,16 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::retrieve::decisions_for_path;
+use crate::corpus::{ArtifactKey, ArtifactOrigin, Layer};
+use crate::retrieve::{decisions_for_path, decisions_for_path_with_rows, scope_rows_from_items};
 
 pub const MARKER: &str = "<!-- lore-decisions-on-pr -->";
 const PATHS_SHOWN: usize = 3;
 
 #[derive(Debug)]
 pub struct HeraldDecision {
+    pub key: Option<ArtifactKey>,
+    pub origin: Option<ArtifactOrigin>,
     pub id: String,
     pub title: String,
     pub status: String,
@@ -39,6 +42,8 @@ pub fn collect(corpus: &str, paths: &[String], recursive: bool) -> HeraldReport 
             let entry = merged
                 .entry(decision.id.clone())
                 .or_insert_with(|| HeraldDecision {
+                    key: decision.key,
+                    origin: None,
                     id: decision.id,
                     title: decision.title,
                     status: decision.status,
@@ -46,6 +51,45 @@ pub fn collect(corpus: &str, paths: &[String], recursive: bool) -> HeraldReport 
                     matching_entries: BTreeSet::new(),
                     changed_paths: BTreeSet::new(),
                 });
+            entry.matching_entries.insert(decision.matching_entry);
+            entry.changed_paths.insert(path.clone());
+        }
+    }
+    HeraldReport {
+        decisions: merged.into_values().collect(),
+    }
+}
+
+/// Herald collection over one effective composed scope projection. Stable
+/// ArtifactKey deduplication prevents equal canonical ids or relative paths
+/// in different sources from collapsing.
+pub fn collect_from_composed(
+    corpus_directory: &str,
+    paths: &[String],
+    corpus: &crate::composition::ComposedCorpus,
+) -> HeraldReport {
+    let items: Vec<_> = corpus.effective().cloned().collect();
+    let rows = scope_rows_from_items(&items);
+    let mut merged: BTreeMap<ArtifactKey, HeraldDecision> = BTreeMap::new();
+    let changed: BTreeSet<&String> = paths
+        .iter()
+        .filter(|path| !path.trim().is_empty())
+        .collect();
+    for path in changed {
+        for decision in decisions_for_path_with_rows(&rows, corpus_directory, path).decisions {
+            let Some(key) = decision.key.clone() else {
+                continue;
+            };
+            let entry = merged.entry(key.clone()).or_insert_with(|| HeraldDecision {
+                key: Some(key),
+                origin: decision.origin,
+                id: decision.id,
+                title: decision.title,
+                status: decision.status,
+                path: decision.path,
+                matching_entries: BTreeSet::new(),
+                changed_paths: BTreeSet::new(),
+            });
             entry.matching_entries.insert(decision.matching_entry);
             entry.changed_paths.insert(path.clone());
         }
@@ -78,9 +122,18 @@ fn bullet(decision: &HeraldDecision, link_base: &str) -> String {
     } else {
         format!("{}/{}", link_base.trim_end_matches('/'), decision.path)
     };
+    let label = if decision
+        .origin
+        .as_ref()
+        .is_some_and(|origin| origin.layer == Layer::Inherited)
+    {
+        format!("**{} — {}**", decision.id, decision.title)
+    } else {
+        format!("**[{} — {}]({link})**", decision.id, decision.title)
+    };
     format!(
-        "- **[{} — {}]({})** ({}) — applies to {} — changed: {}",
-        decision.id, decision.title, link, decision.status, scopes, changed
+        "- {label} ({}) — applies to {} — changed: {}",
+        decision.status, scopes, changed
     )
 }
 
@@ -136,6 +189,8 @@ mod tests {
 
     fn decision(id: &str) -> HeraldDecision {
         HeraldDecision {
+            key: None,
+            origin: None,
             id: id.to_string(),
             title: format!("{id} title"),
             status: "Accepted".to_string(),
