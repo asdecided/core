@@ -6,13 +6,25 @@ details, release history over commit history.
 
 ## Unreleased
 
+## v0.28.0 — 2026-08-09
+
+### Retrieval that preserves lexical relevance
+
+- Constrained relationship-graph ranking to lexical near-ties. A candidate
+  below 85% of the strongest BM25 match keeps its lexical score but receives no
+  graph boost. This prevents a well-connected but weak match from displacing a
+  more relevant decision.
+- Extended `find --explain` with the fixed graph-floor ratio and an `applied` or
+  `clamped` gate result. This makes the ranking decision visible without
+  changing the default `find` response.
+
+### Diagnose missed decisions
+
 - Added `decided diagnose` for deterministic, named-target explain-miss traces,
   including no-match, partial-match, filtering, outranked, and result-window
   truncation reasons.
-- Constrained relationship-graph ranking to lexical near-ties: candidates below
-  85% of the strongest BM25 match keep their lexical score but receive no graph
-  boost. `--explain` now reports the fixed ratio and whether the gate was
-  applied or clamped.
+- Reused the production tokeniser, filters, and ranking path for diagnosis, so
+  the trace explains the result that `find` actually produced.
 
 ## v0.27.0 — 2026-08-08
 
