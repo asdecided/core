@@ -117,7 +117,7 @@ fn fragment_for(
 
 /// Fan the parse + per-doc derive across `n_workers`, or None on any fault.
 fn fragments_parallel(
-    entries: &[crate::walk::WalkEntry],
+    paths: &[crate::walk::WalkEntry],
     n_workers: usize,
     origin: &ArtifactOrigin,
     physical_corpus: &PhysicalCorpusLocator,
@@ -129,7 +129,7 @@ fn fragments_parallel(
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         pool.install(|| {
             use rayon::prelude::*;
-            entries
+            paths
                 .par_iter()
                 .map(|entry| fragment_for(entry, origin, physical_corpus))
                 .collect::<Vec<DocFragment>>()
