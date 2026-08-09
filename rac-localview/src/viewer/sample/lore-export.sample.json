@@ -2,6 +2,7 @@
   "schema_version": "1",
   "corpus": {
     "name": "ledgerline — SAMPLE DATA (fictional service)",
+    "source": "asdecided/ledgerline-sample",
     "rac_version": "0.0.0-sample",
     "artifact_count": 30,
     "sample": true

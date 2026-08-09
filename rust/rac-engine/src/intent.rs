@@ -7,7 +7,11 @@
 
 use std::collections::HashMap;
 
-use crate::compare::{ArtifactChange, RepoState, RepositoryComparison, CHANGE_ADDED, CHANGE_MODIFIED, CHANGE_REMOVED};
+use crate::compare::{
+    ArtifactChange, RepoState, RepositoryComparison, CHANGE_ADDED, CHANGE_MODIFIED,
+    CHANGE_REMOVED,
+};
+use crate::diff::diff as diff_products;
 use crate::parse::Artifact;
 use crate::pycompat::{is_re_digit, is_re_word, py_strip};
 
@@ -308,6 +312,56 @@ fn impact_finding(
     })
 }
 
+/// Return the unique add/remove counterpart with the same opaque artifact id.
+///
+/// The v1 comparison contract remains path-based, so a move still appears in
+/// `changes` as one add plus one removal. Intent analysis must nevertheless
+/// compare the two bodies as one artifact: otherwise a path-only move reports
+/// every mandatory requirement as removed. Ambiguous duplicate ids retain the
+/// path-based behaviour and are left to validation.
+fn move_counterpart<'a>(
+    change: &ArtifactChange,
+    comparison: &'a RepositoryComparison,
+    counterpart_kind: &str,
+) -> Option<&'a ArtifactChange> {
+    let id = change.id.as_deref()?;
+    if comparison
+        .base
+        .entries
+        .iter()
+        .filter(|entry| entry.info.id == id)
+        .count()
+        != 1
+        || comparison
+            .head
+            .entries
+            .iter()
+            .filter(|entry| entry.info.id == id)
+            .count()
+            != 1
+    {
+        return None;
+    }
+    let same_kind_count = comparison
+        .changes
+        .iter()
+        .filter(|candidate| {
+            candidate.change == change.change && candidate.id.as_deref() == Some(id)
+        })
+        .count();
+    if same_kind_count != 1 {
+        return None;
+    }
+    let mut counterparts = comparison.changes.iter().filter(|candidate| {
+        candidate.change == counterpart_kind && candidate.id.as_deref() == Some(id)
+    });
+    let counterpart = counterparts.next()?;
+    if counterparts.next().is_some() {
+        return None;
+    }
+    Some(counterpart)
+}
+
 /// `analyze_intent(comparison)` — deterministic, stably ordered findings.
 pub fn analyze_intent(comparison: &RepositoryComparison) -> Vec<IntentFinding> {
     let mut findings: Vec<IntentFinding> = Vec::new();
@@ -325,11 +379,40 @@ pub fn analyze_intent(comparison: &RepositoryComparison) -> Vec<IntentFinding> {
                 findings.push(impact);
             }
         } else if change.change == CHANGE_REMOVED {
-            findings.extend(removed_findings(change, &comparison.base));
-            if let Some(impact) = impact_finding(change, &base_incoming, "Removed") {
-                findings.push(impact);
+            if let Some(added) = move_counterpart(change, comparison, CHANGE_ADDED) {
+                let base_product = comparison.base.entry(&change.path).map(|e| &e.artifact);
+                let head_product = comparison.head.entry(&added.path).map(|e| &e.artifact);
+                if let (Some(base_product), Some(head_product)) = (base_product, head_product) {
+                    let product_diff = diff_products(base_product, head_product);
+                    let moved = ArtifactChange {
+                        change: CHANGE_MODIFIED,
+                        type_name: added.type_name.clone(),
+                        id: added.id.clone(),
+                        title: added.title.clone(),
+                        path: added.path.clone(),
+                        base_status: change.base_status,
+                        head_status: added.head_status,
+                        diff: if product_diff.is_empty() {
+                            None
+                        } else {
+                            Some(product_diff)
+                        },
+                    };
+                    findings.extend(modified_findings(&moved, base_product, head_product));
+                    if let Some(impact) = impact_finding(&moved, &head_incoming, "Modified") {
+                        findings.push(impact);
+                    }
+                }
+            } else {
+                findings.extend(removed_findings(change, &comparison.base));
+                if let Some(impact) = impact_finding(change, &base_incoming, "Removed") {
+                    findings.push(impact);
+                }
             }
         } else if change.change == CHANGE_ADDED {
+            if move_counterpart(change, comparison, CHANGE_REMOVED).is_some() {
+                continue;
+            }
             findings.extend(added_findings(change, &comparison.head));
             if change.type_name != "unknown"
                 && !head_outgoing.contains(&change.path)
@@ -357,4 +440,83 @@ pub fn analyze_intent(comparison: &RepositoryComparison) -> Vec<IntentFinding> {
         ))
     });
     findings
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::compare::{compare_states, load_state};
+    use std::fs;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+
+    fn temp_root(label: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "asdecided-intent-{label}-{}-{}",
+            std::process::id(),
+            NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+        ))
+    }
+
+    fn requirement(requirements: &str) -> String {
+        format!(
+            "---\nschema_version: 1\nid: RAC-KWJ4VMKVSS65\ntype: requirement\n---\n\
+             # Requirement: Stable move\n\n## Status\n\nProposed\n\n## Requirements\n\n\
+             {requirements}\n"
+        )
+    }
+
+    fn moved_comparison(base_requirements: &str, head_requirements: &str) -> RepositoryComparison {
+        let root = temp_root("move");
+        let base = root.join("base");
+        let head = root.join("head");
+        fs::create_dir_all(&base).unwrap();
+        fs::create_dir_all(&head).unwrap();
+        fs::write(base.join("old-name.md"), requirement(base_requirements)).unwrap();
+        fs::write(head.join("new-name.md"), requirement(head_requirements)).unwrap();
+
+        let base_text = base.to_string_lossy().into_owned();
+        let head_text = head.to_string_lossy().into_owned();
+        let comparison = compare_states(
+            load_state(&base_text, "base"),
+            load_state(&head_text, "head"),
+        );
+        fs::remove_dir_all(root).unwrap();
+        comparison
+    }
+
+    #[test]
+    fn identity_preserving_move_does_not_remove_constraints() {
+        let requirement = "- [REQ-001] The engine MUST preserve the requirement.";
+        let comparison = moved_comparison(requirement, requirement);
+
+        assert!(comparison.changes.iter().any(|c| c.change == CHANGE_ADDED));
+        assert!(comparison
+            .changes
+            .iter()
+            .any(|c| c.change == CHANGE_REMOVED));
+        assert!(!analyze_intent(&comparison)
+            .iter()
+            .any(|finding| finding.code == CONSTRAINT_REMOVED));
+    }
+
+    #[test]
+    fn identity_preserving_move_still_reports_a_removed_constraint() {
+        let comparison = moved_comparison(
+            "- [REQ-001] The engine MUST preserve the requirement.\n\
+             - [REQ-002] The engine MUST retain this constraint.",
+            "- [REQ-001] The engine MUST preserve the requirement.",
+        );
+        let findings = analyze_intent(&comparison);
+        let removed: Vec<&IntentFinding> = findings
+            .iter()
+            .filter(|finding| finding.code == CONSTRAINT_REMOVED)
+            .collect();
+
+        assert_eq!(removed.len(), 1);
+        assert!(removed[0].detail.contains("REQ-002"));
+        assert_eq!(removed[0].path, "new-name.md");
+    }
 }

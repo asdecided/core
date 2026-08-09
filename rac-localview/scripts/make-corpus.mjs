@@ -346,6 +346,7 @@ const sampleExport = {
     // The name itself carries the SAMPLE DATA label so any surface
     // that prints it is self-labelling.
     name: 'ledgerline — SAMPLE DATA (fictional service)',
+    source: 'asdecided/ledgerline-sample',
     rac_version: '0.0.0-sample',
     artifact_count: SAMPLE.length,
     sample: true,
@@ -448,6 +449,7 @@ const synthExport = {
   schema_version: '1',
   corpus: {
     name: 'synthetic-500 — SAMPLE DATA (performance test corpus)',
+    source: 'asdecided/synthetic-500',
     rac_version: '0.0.0-sample',
     artifact_count: synthArtifacts.length,
     sample: true,

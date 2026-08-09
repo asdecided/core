@@ -95,5 +95,5 @@ parent corpus and would misstate provenance.
 
 ## Related Requirements
 
-- rac-federated-resolution-provenance
-- rac-parent-corpus-inheritance
+- federated-resolution-provenance
+- parent-corpus-inheritance

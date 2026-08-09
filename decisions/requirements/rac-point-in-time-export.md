@@ -85,5 +85,5 @@ change feed builds on.
 
 ## Related Requirements
 
-- rac-export-contract-schemas
+- export-contract-schemas
 - rac-export-change-feed

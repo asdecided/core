@@ -114,6 +114,6 @@ deduplication will disagree.
 
 ## Related Requirements
 
-- rac-export-contract-schemas
-- rac-parent-corpus-inheritance
-- rac-federated-resolution-provenance
+- export-contract-schemas
+- parent-corpus-inheritance
+- federated-resolution-provenance

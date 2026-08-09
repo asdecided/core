@@ -43,6 +43,9 @@ describe('viewer App', () => {
     await mountAt('#/');
     expect(container.querySelector('.viewer')).toBeTruthy();
     expect(container.querySelectorAll('.viewer-row').length).toBeGreaterThan(0);
+    expect(container.querySelector('.viewer-meta__line')?.textContent).toContain(
+      'AsDecided 0.0.0-test',
+    );
   });
 
   it('renders the graph view with nodes and edges', async () => {

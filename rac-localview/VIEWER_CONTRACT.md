@@ -1,21 +1,26 @@
-# Lore export viewer — input contract
+# AsDecided export viewer — input contract
 
-Status: **Reconciled v1** — matches `rac export` as of roadmap v0.11.0.
+Status: **Reconciled v1** — matches `decided export`.
 This document defines the JSON payload the static export viewer
-(`rac export --html`) consumes, as implemented in `src/viewer/`. The
+(`decided export --html`) consumes, as implemented in `src/viewer/`. The
 viewer consumes exactly what Core emits; any future shape change is a
 joint change to Core's export, this contract, and the viewer, with the
 vendored Portal shell rebuilt (`npm run vendor:shell`).
 
+The v1 machine field `rac_version` and the `lore-export` HTML seam and filenames
+are retained compatibility identifiers. They do not name the current product
+or command surface.
+
 ## 1. Payload: the export document
 
-A single JSON document, as emitted by `rac export --json`.
+A single JSON document, as emitted by `decided export --json`.
 
 ```json
 {
   "schema_version": "1",
   "corpus": {
-    "name": "rac",
+    "name": "decisions",
+    "source": "asdecided/core",
     "rac_version": "0.11.0",
     "artifact_count": 106
   },
@@ -26,7 +31,7 @@ A single JSON document, as emitted by `rac export --json`.
       "type": "decision",
       "status": "Accepted",
       "title": "ADR-027: CI test topology",
-      "path": "rac/decisions/adr-027-ci-test-topology.md",
+      "path": "decisions/decisions/adr-027-ci-test-topology.md",
       "body_html": "<p>…</p>"
     }
   ],
@@ -47,12 +52,15 @@ version, but a bump signals a breaking shape change.
 | field            | type    | meaning                                          |
 | ---------------- | ------- | ------------------------------------------------ |
 | `name`           | string  | Human-readable corpus name — the exported directory name. |
-| `rac_version`    | string  | Version of the RAC CLI that produced the export. The header shows it when present and tolerates its absence. |
+| `source`         | string  | Stable corpus provenance identity shared with documents and graph exports. |
+| `rac_version`    | string  | Retained v1 key containing the AsDecided CLI version. The header shows it when present and tolerates its absence. |
 | `artifact_count` | integer | Number of artifacts in the export.               |
 | `sample`         | boolean | Optional, default false. True marks demonstration data; the viewer then shows SAMPLE DATA labels in the header and footer. Never emitted by Core; used by the committed sample corpus. |
 
-The export is deterministic: there is no `generated_at` timestamp and
-no environment-dependent field. The viewer must not expect either.
+The export is deterministic: there is no `generated_at` timestamp. A
+configured `corpus.source` is independent of checkout location; see the Core
+[export contract](../docs/export-contracts.md#corpus-source-identity) for its
+fallback behaviour. The viewer tolerates older payloads without `source`.
 
 ### `artifacts[]`
 
@@ -124,7 +132,7 @@ external module scripts, so injection works as follows:
    placed before the (inlined) application script. On boot the app reads
    `document.getElementById('lore-export')` and parses its text content.
    All JS and CSS are inlined into the same file; there are no other
-   references. `rac export --html` produces exactly this: the vendored
+   references. `decided export --html` produces exactly this: the vendored
    Portal shell with the corpus JSON substituted into that element
    (escaping `</` as `<\/` and `<!--` as `<\u0021--`, both valid JSON
    escapes, so the payload is `<script>`-safe and parses unchanged).
@@ -159,17 +167,16 @@ the artifact around any conforming export.
 single-file artifact with an **empty** data seam —
 `<script type="application/json" id="lore-export"></script>`, no
 whitespace inside the element — and writes it to
-`dist/viewer/lore-portal-shell.html` by default. `rac export --html`
+`dist/viewer/lore-portal-shell.html` by default. `decided export --html`
 injects the escaped corpus JSON into that seam; nothing else in the
 file changes.
 
-`npm run vendor:shell` (`scripts/vendor-portal-shell.mjs`) builds the
-shell and commits it into the RAC package as
-`src/rac/templates/portal/lore-portal-shell.html` together with
-`provenance.json` (rac-localview source commit, shell hash, viewer
-source-tree hash). A drift-guard test on the Python side fails when the
-viewer source changes without re-vendoring; the normative hash
-algorithm is documented in `scripts/vendor-portal-shell.mjs`.
+`npm run vendor:shell` (`scripts/vendor-portal-shell.mjs`) builds the shell and
+writes it into the AsDecided engine as
+`rust/rac-engine/assets/portal/asdecided-portal-shell.html`. The command also
+writes a local `provenance.json` containing the viewer source commit, shell
+hash, and viewer source-tree hash. The normative hash algorithm is documented
+in `scripts/vendor-portal-shell.mjs`.
 
 ### Fonts in the single-file artifact
 
@@ -242,14 +249,15 @@ cited ids and aliases in text nodes are linkified). The viewer performs
   aliases, paths, authored-case statuses, `relates-to` edges only —
   including one unresolved alias target). Its `corpus.name` contains
   "SAMPLE DATA" and `sample: true` is set, so every surface that shows
-  corpus identity is labelled.
+  corpus identity is labelled. Its stable sample source is
+  `asdecided/ledgerline-sample`.
 - `/tmp/lore-export-500.json` — a deterministic 500-artifact synthetic
   corpus for performance testing. Not committed.
 
 ## 6. Editor-host integration (optional)
 
-When the viewer runs inside an editor webview (VS Code / Cursor — the RAC
-extension, RAC v0.21.7), it talks to the host over `postMessage`. The bridge is
+When the viewer runs inside the legacy v0.21.7 editor webview for VS Code or
+Cursor, it talks to the host over `postMessage`. The bridge is
 **feature-detected**: it activates only when `acquireVsCodeApi` is present, so a
 standalone Portal opened from `file://` is entirely unaffected — every message
 path is inert and behaviour is identical to a hosted-free build.

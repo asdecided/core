@@ -154,7 +154,7 @@ Copy the firm-wide ADRs into every child corpus.
 
 ## Related Requirements
 
-- rac-org-endpoint-wiring
+- org-endpoint-wiring
 
 ## Related Roadmaps
 

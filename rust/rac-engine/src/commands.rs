@@ -1225,15 +1225,25 @@ pub fn cmd_export(args: &ExportArgs) -> i32 {
         return EXIT_OK;
     }
     if args.documents {
-        emit(output::render_documents_jsonl(
-            &crate::export::build_documents_export(&args.directory),
-        ));
+        let export = match crate::export::build_documents_export(&args.directory) {
+            Ok(export) => export,
+            Err(error) => {
+                eprintln!("decided: {}", error.message());
+                return EXIT_VALIDATION_FAILED;
+            }
+        };
+        emit(output::render_documents_jsonl(&export));
         return EXIT_OK;
     }
     if args.graph {
-        emit(output::render_graph_json(&crate::export::build_graph_export(
-            &args.directory,
-        )));
+        let export = match crate::export::build_graph_export(&args.directory) {
+            Ok(export) => export,
+            Err(error) => {
+                eprintln!("decided: {}", error.message());
+                return EXIT_VALIDATION_FAILED;
+            }
+        };
+        emit(output::render_graph_json(&export));
         return EXIT_OK;
     }
     // OKF consumes source Markdown directly, so its projection skips the
@@ -1271,7 +1281,13 @@ pub fn cmd_export(args: &ExportArgs) -> i32 {
         ));
         return EXIT_OK;
     }
-    let export = crate::export::build_corpus_export(&args.directory, output::rac_version());
+    let export = match crate::export::build_corpus_export(&args.directory, output::rac_version()) {
+        Ok(export) => export,
+        Err(error) => {
+            eprintln!("decided: {}", error.message());
+            return EXIT_VALIDATION_FAILED;
+        }
+    };
 
     // JSON is the default mode: the payload is the product (--json a no-op).
     if !args.html {

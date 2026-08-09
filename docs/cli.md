@@ -1065,6 +1065,20 @@ Establish the repository identity namespace: a `.decided/config.yaml` holding th
 `repository_key` that prefixes every ID assigned by `decided new`. The key is
 configuration, not artifact meaning — it never dictates folder structure.
 
+For stable export and federation provenance, the same file may also declare an
+optional global corpus identity:
+
+```yaml
+repository_key: APP
+corpus:
+  source: acme/payments-service
+```
+
+`corpus.source` is a lower-case, slash-namespaced stable identity. It is
+independent of the repository key and checkout path; changing it is an identity
+migration. See [Export contracts](export-contracts.md#corpus-source-identity)
+for fallback and aggregation behaviour.
+
 - **Input:** `decided init [directory]` — defaults to the current directory.
 - **Options:** `--key KEY` (default `RAC`; 2–10 uppercase alphanumeric
   characters starting with a letter) · `--ticketing PROVIDER` · `--profile NAME`

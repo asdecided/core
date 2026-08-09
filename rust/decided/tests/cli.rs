@@ -148,3 +148,26 @@ fn export_schema_rejects_an_unknown_projection() {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+#[test]
+fn export_rejects_an_invalid_configured_corpus_source() {
+    let root = scratch_root();
+    fs::create_dir_all(root.join(".decided")).unwrap();
+    fs::write(
+        root.join(".decided/config.yaml"),
+        "repository_key: APP\ncorpus:\n  source: Not Namespaced\n",
+    )
+    .unwrap();
+    let root_text = root.to_string_lossy().into_owned();
+    let output = run(&["export", &root_text, "--graph"]);
+
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("invalid corpus.source"), "stderr={stderr}");
+    assert!(
+        stderr.contains("lower-case slash-namespaced"),
+        "stderr={stderr}"
+    );
+
+    fs::remove_dir_all(root).expect("remove CLI smoke corpus");
+}

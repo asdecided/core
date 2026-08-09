@@ -18,11 +18,15 @@
       "type": "object",
       "required": [
         "name",
+        "source",
         "rac_version",
         "artifact_count"
       ],
       "properties": {
         "name": {
+          "type": "string"
+        },
+        "source": {
           "type": "string"
         },
         "rac_version": {

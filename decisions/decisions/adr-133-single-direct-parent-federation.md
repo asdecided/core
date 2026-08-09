@@ -84,4 +84,4 @@ a separately ratified extension.
 
 ## Related Requirements
 
-- rac-parent-corpus-inheritance
+- parent-corpus-inheritance

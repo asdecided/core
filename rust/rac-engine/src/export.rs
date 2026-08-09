@@ -8,6 +8,7 @@ use crate::pycompat::py_strip;
 use crate::relationships::{
     corpus_items, edge_spec, relationships_from_corpus, CorpusItem,
 };
+use crate::scaffold::{load_repository_identity, ScaffoldError};
 use crate::spec::ArtifactSpec;
 use crate::validate::load_ticketing_provider;
 
@@ -37,13 +38,33 @@ pub fn export_schema(name: &str) -> Option<&'static str> {
 
 /// `_corpus_name(directory)`.
 fn corpus_name(directory: &str) -> String {
-    let trimmed = directory.trim_end_matches('/');
+    let normalized = crate::walk::normalize_root(directory);
+    let trimmed = normalized.trim_end_matches('/');
     let name = trimmed.rsplit('/').next().unwrap_or("");
     if name.is_empty() || name == "." || name == ".." {
         directory.to_string()
     } else {
         name.to_string()
     }
+}
+
+/// The one non-federated source derivation shared by every JSON projection:
+/// explicit `corpus.source`, then the lower-case repository key, then the
+/// released directory-basename fallback (ADR-135).
+pub fn corpus_source(directory: &str) -> Result<String, ScaffoldError> {
+    let Some(identity) = load_repository_identity(directory)? else {
+        return Ok(corpus_name(directory));
+    };
+    if let Some(source) = identity.corpus_source {
+        return Ok(source);
+    }
+    if let Some(repository_key) = identity.repository_key {
+        return Ok(repository_key
+            .strip_suffix('\n')
+            .unwrap_or(&repository_key)
+            .to_ascii_lowercase());
+    }
+    Ok(corpus_name(directory))
 }
 
 fn first_line(raw: &str) -> String {
@@ -141,6 +162,7 @@ pub struct ExportRelationship {
 
 pub struct CorpusExport {
     pub corpus_name: String,
+    pub corpus_source: String,
     pub rac_version: String,
     pub artifacts: Vec<ExportArtifact>,
     pub relationships: Vec<ExportRelationship>,
@@ -156,6 +178,7 @@ fn build_corpus_export_inner(
     directory: &str,
     rac_version: String,
     include_body_html: bool,
+    corpus_source: String,
 ) -> CorpusExport {
     let items = corpus_items(directory, true);
     let canonical = canonical_by_path(&items);
@@ -202,20 +225,29 @@ fn build_corpus_export_inner(
 
     CorpusExport {
         corpus_name: corpus_name(directory),
+        corpus_source,
         rac_version,
         artifacts,
         relationships: edges,
     }
 }
 
-pub fn build_corpus_export(directory: &str, rac_version: String) -> CorpusExport {
-    build_corpus_export_inner(directory, rac_version, true)
+pub fn build_corpus_export(
+    directory: &str,
+    rac_version: String,
+) -> Result<CorpusExport, ScaffoldError> {
+    Ok(build_corpus_export_inner(
+        directory,
+        rac_version,
+        true,
+        corpus_source(directory)?,
+    ))
 }
 
 /// OKF consumes the source Markdown body directly. Avoid an irrelevant HTML
 /// render over the whole corpus on this path.
 pub fn build_okf_export(directory: &str, rac_version: String) -> CorpusExport {
-    build_corpus_export_inner(directory, rac_version, false)
+    build_corpus_export_inner(directory, rac_version, false, corpus_name(directory))
 }
 
 // --- documents JSONL ---------------------------------------------------------
@@ -233,10 +265,12 @@ pub struct ExportDocument {
 
 pub struct DocumentsExport {
     pub corpus_name: String,
+    pub corpus_source: String,
     pub documents: Vec<ExportDocument>,
 }
 
-pub fn build_documents_export(directory: &str) -> DocumentsExport {
+pub fn build_documents_export(directory: &str) -> Result<DocumentsExport, ScaffoldError> {
+    let source = corpus_source(directory)?;
     let items = corpus_items(directory, true);
     let mut documents: Vec<ExportDocument> = Vec::new();
     for it in &items {
@@ -257,10 +291,11 @@ pub fn build_documents_export(directory: &str) -> DocumentsExport {
             tags: tags_of(&it.artifact),
         });
     }
-    DocumentsExport {
+    Ok(DocumentsExport {
         corpus_name: corpus_name(directory),
+        corpus_source: source,
         documents,
-    }
+    })
 }
 
 // --- graph JSON --------------------------------------------------------------
@@ -284,11 +319,13 @@ pub struct GraphEdge {
 
 pub struct GraphExport {
     pub corpus_name: String,
+    pub corpus_source: String,
     pub nodes: Vec<GraphNode>,
     pub edges: Vec<GraphEdge>,
 }
 
-pub fn build_graph_export(directory: &str) -> GraphExport {
+pub fn build_graph_export(directory: &str) -> Result<GraphExport, ScaffoldError> {
+    let source = corpus_source(directory)?;
     let items = corpus_items(directory, true);
     let provider = load_ticketing_provider(directory);
     let canonical = canonical_by_path(&items);
@@ -338,9 +375,10 @@ pub fn build_graph_export(directory: &str) -> GraphExport {
             .then(a.target.cmp(&b.target))
     });
 
-    GraphExport {
+    Ok(GraphExport {
         corpus_name: corpus_name(directory),
+        corpus_source: source,
         nodes,
         edges,
-    }
+    })
 }

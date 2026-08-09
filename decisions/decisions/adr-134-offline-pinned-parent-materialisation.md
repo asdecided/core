@@ -103,4 +103,4 @@ operational manifest keeps the mechanism visible without making it an artifact.
 
 ## Related Requirements
 
-- rac-parent-corpus-inheritance
+- parent-corpus-inheritance

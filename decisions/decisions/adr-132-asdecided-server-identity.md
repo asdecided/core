@@ -37,6 +37,12 @@ integration and leaves agents with two competing names for the same service.
 - The `decided` CLI and `decided-mcp` server remain the public command surface.
   Compatibility state in old records does not create a supported `rac` command.
 
+These clauses supersede ADR-036's current product, engine, and distribution
+naming and ADR-039's current server identity. ADR-121 alone preserves the
+legacy `lore` handshake bytes. Durable `RAC-*` artifact IDs, published machine
+keys such as `rac_version`, and pre-cutover internal paths remain compatibility
+identifiers; they are not names for new public surfaces.
+
 ## Consequences
 
 Fresh installs and generated agent configuration now have one unambiguous
@@ -44,6 +50,40 @@ server identity. Existing hand-written configurations are not rewritten by
 this decision; operators can migrate their keys explicitly, and the current
 docs show only the native names. The identity change is configuration-only and
 does not alter MCP wire semantics or the read-only serving boundary.
+
+## Code Constraints
+
+```yaml
+version: 1
+eligibility: eligible
+reason: "The generated server keys and current viewer guidance have stable source anchors."
+rules:
+  - id: scaffold-keeps-asdecided-local-key
+    kind: require_pattern
+    path_glob: "rust/rac-engine/src/scaffold.rs"
+    pattern: 'mcpServers.*asdecided.*decided-mcp'
+    message: "Generated local MCP configuration must retain the AsDecided key and native binary."
+  - id: scaffold-keeps-asdecided-org-key
+    kind: require_pattern
+    path_glob: "rust/rac-engine/src/scaffold.rs"
+    pattern: 'const ORG_SERVER_KEY: &str = "asdecided-org";'
+    message: "Generated organisation MCP configuration must retain the AsDecided key."
+  - id: scaffold-does-not-restore-retired-server-keys
+    kind: forbid_pattern
+    path_glob: "rust/rac-engine/src/scaffold.rs"
+    pattern: '(?i)\blore(?:-org)?\b'
+    message: "Generated MCP configuration must not restore retired Lore server keys."
+  - id: viewer-guidance-uses-decided-command
+    kind: forbid_pattern
+    path_glob: "rac-localview/VIEWER_CONTRACT.md"
+    pattern: '(?i)Lore export viewer|`rac export|RAC CLI'
+    message: "Current viewer guidance must use AsDecided and the decided command."
+```
+
+## Supersedes
+
+- adr-036
+- adr-039
 
 ## Related Decisions
 
@@ -54,4 +94,4 @@ does not alter MCP wire semantics or the read-only serving boundary.
 
 ## Related Requirements
 
-- rac-org-endpoint-wiring
+- org-endpoint-wiring

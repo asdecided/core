@@ -8,7 +8,7 @@
  *
  *   asdecided-portal-shell.html   the shell, with a provenance comment
  *                            inserted immediately after the doctype
- *   provenance.json          { lore_web_commit, shell_sha256,
+ *   provenance.json          { viewer_commit, shell_sha256,
  *                              viewer_source_sha256, vendored_with }
  *
  * viewer_source_sha256 — the drift-guard hash over the viewer source
@@ -114,7 +114,7 @@ const shellSha256 = createHash('sha256').update(vendoredShell).digest('hex');
 /* ---- 4. write the manifest --------------------------------------------- */
 
 const provenance = {
-  lore_web_commit: commit,
+  viewer_commit: commit,
   shell_sha256: shellSha256,
   viewer_source_sha256: viewerSourceSha256,
   vendored_with: 'rac-localview/scripts/vendor-portal-shell.mjs',
@@ -124,6 +124,6 @@ writeFileSync(provenancePath, JSON.stringify(provenance, null, 2) + '\n');
 
 console.log(`wrote ${shellPath}`);
 console.log(`wrote ${provenancePath}`);
-console.log(`  lore_web_commit:      ${commit}`);
+console.log(`  viewer_commit:        ${commit}`);
 console.log(`  shell_sha256:         ${shellSha256}`);
 console.log(`  viewer_source_sha256: ${viewerSourceSha256} (${sourceFiles.length} files)`);

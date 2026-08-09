@@ -101,4 +101,4 @@ Rejected. Federation does not get a context-flooding exception to ADR-128.
 
 ## Related Requirements
 
-- rac-federated-resolution-provenance
+- federated-resolution-provenance

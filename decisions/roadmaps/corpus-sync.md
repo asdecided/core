@@ -71,7 +71,7 @@ the engine.
 
 ## Initiatives
 
-### Export contract schemas (`rac-export-contract-schemas`)
+### Export contract schemas (`export-contract-schemas`)
 
 Ship JSON Schema files for the three projections as packaged resources,
 expose them via `decided export --schema <mode>`, validate every golden and
@@ -107,7 +107,7 @@ atomic unit (ADR-004, ADR-010). Settles two open questions from the export
 shape design additively: a `--live-only` ingest filter and outgoing typed
 edges in documents metadata.
 
-### Multi-corpus source identity (`rac-export-source-identity`)
+### Multi-corpus source identity (`corpus-source-identity`)
 
 One shared derivation for corpus identity across all three projections —
 explicit `corpus.source` first, repository key next, directory basename as
@@ -257,11 +257,11 @@ rather than duplicating them.
 
 ## Related Requirements
 
-- rac-export-contract-schemas
+- export-contract-schemas
 - rac-point-in-time-export
 - rac-export-change-feed
 - rac-export-section-anchors
-- rac-export-source-identity
+- corpus-source-identity
 - rac-corpus-documents-export
 - rac-corpus-graph-export
 - rac-grounding-eval-benchmark

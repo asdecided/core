@@ -94,5 +94,5 @@ unambiguously source-aware.
 
 ## Related Requirements
 
-- rac-federated-resolution-provenance
-- rac-parent-corpus-inheritance
+- federated-resolution-provenance
+- parent-corpus-inheritance

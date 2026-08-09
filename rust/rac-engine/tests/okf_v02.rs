@@ -36,6 +36,7 @@ fn exports_truthful_okf_v02_carrier() {
 
     let export = CorpusExport {
         corpus_name: "Test corpus".to_string(),
+        corpus_source: "test/corpus".to_string(),
         rac_version: "0.25.0".to_string(),
         artifacts: vec![
             artifact(
