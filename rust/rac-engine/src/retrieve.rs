@@ -534,15 +534,12 @@ pub fn scope_lookup_value_with_composed(
             let Some(provenance) = decision
                 .key
                 .as_ref()
-                .and_then(|key| corpus.provenance_for(key))
+                .and_then(|key| crate::output::composed_artifact_provenance_value(corpus, key))
             else {
                 continue;
             };
             if let Some(object) = value.as_object_mut() {
-                object.insert(
-                    "provenance".to_string(),
-                    crate::output::composed_provenance_value(&provenance),
-                );
+                object.insert("provenance".to_string(), provenance);
             }
         }
     }
@@ -909,8 +906,99 @@ pub fn retrieve_grounding_from_composed(
     live_only: bool,
     corpus: &crate::composition::ComposedCorpus,
 ) -> Value {
+    retrieve_grounding_from_source(
+        directory, task, scope, top_k, budget, live_only, corpus,
+    )
+}
+
+/// Grounding over the request-current verified graph closure. This shares the
+/// exact ranking and shaping path with v1 composition while sourcing content
+/// and complete ordered override provenance from the v2 snapshot.
+pub fn retrieve_grounding_from_graph(
+    directory: &str,
+    task: &str,
+    scope: Option<&str>,
+    top_k: i64,
+    budget: i64,
+    live_only: bool,
+    corpus: &crate::graph_federated_corpus::VerifiedGraphCorpus,
+) -> Value {
+    retrieve_grounding_from_source(
+        directory, task, scope, top_k, budget, live_only, corpus,
+    )
+}
+
+trait GroundingSource {
+    fn effective(&self) -> Vec<CorpusItem>;
+    fn effective_index(&self) -> Vec<IndexEntry>;
+    fn relationships(&self) -> Vec<crate::relationships::Relationship>;
+    fn content(&self, key: &ArtifactKey) -> Option<&[u8]>;
+    fn override_provenance(&self, key: &ArtifactKey) -> Option<Value>;
+}
+
+impl GroundingSource for crate::composition::ComposedCorpus {
+    fn effective(&self) -> Vec<CorpusItem> {
+        self.effective().cloned().collect()
+    }
+
+    fn effective_index(&self) -> Vec<IndexEntry> {
+        self.effective_index()
+    }
+
+    fn relationships(&self) -> Vec<crate::relationships::Relationship> {
+        self.relationships()
+    }
+
+    fn content(&self, key: &ArtifactKey) -> Option<&[u8]> {
+        self.content(key)
+    }
+
+    fn override_provenance(&self, key: &ArtifactKey) -> Option<Value> {
+        crate::output::composed_artifact_provenance_value(self, key)
+            .and_then(|provenance| provenance.get("overrides").cloned())
+    }
+}
+
+impl GroundingSource for crate::graph_federated_corpus::VerifiedGraphCorpus {
+    fn effective(&self) -> Vec<CorpusItem> {
+        self.composition.effective().cloned().collect()
+    }
+
+    fn effective_index(&self) -> Vec<IndexEntry> {
+        self.composition.effective_index()
+    }
+
+    fn relationships(&self) -> Vec<crate::relationships::Relationship> {
+        self.composition.relationships()
+    }
+
+    fn content(&self, key: &ArtifactKey) -> Option<&[u8]> {
+        self.content(key)
+    }
+
+    fn override_provenance(&self, key: &ArtifactKey) -> Option<Value> {
+        let item = self.composition.item(key)?;
+        crate::output::graph_provenance_value(
+            &item.origin,
+            self.composition.provenance_for(key).unwrap_or(&[]),
+        )
+        .get("overrides")
+        .cloned()
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn retrieve_grounding_from_source<C: GroundingSource>(
+    directory: &str,
+    task: &str,
+    scope: Option<&str>,
+    top_k: i64,
+    budget: i64,
+    live_only: bool,
+    corpus: &C,
+) -> Value {
     let top_k = top_k.max(1);
-    let effective: Vec<_> = corpus.effective().cloned().collect();
+    let effective = corpus.effective();
     let entries = corpus.effective_index();
     let keyword = search_index(&entries, task, None, &[]);
     let scope_rows = scope_rows_from_items(&effective);
@@ -1037,14 +1125,7 @@ pub fn retrieve_grounding_from_composed(
                 .and_then(|bytes| std::str::from_utf8(bytes).ok())
                 .map(|text| text.replace("\r\n", "\n").replace('\r', "\n"))
                 .unwrap_or_default();
-            if let Some(overrides) = corpus
-                .provenance_for(&item.key)
-                .and_then(|provenance| {
-                    crate::output::composed_provenance_value(&provenance)
-                        .get("overrides")
-                        .cloned()
-                })
-            {
+            if let Some(overrides) = corpus.override_provenance(&item.key) {
                 item.provenance.insert("overrides".to_string(), overrides);
             }
             let mut value = Map::new();

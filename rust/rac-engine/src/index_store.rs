@@ -731,6 +731,14 @@ impl GraphStoreMetadata {
                 .collect(),
         }
     }
+
+    /// Confirm that a fresh graph projection is the exact model described by
+    /// this metadata before it can become resident. Store opens perform the
+    /// same check after decoding; exposing the predicate keeps cache-disabled
+    /// graph reads on the identical fail-closed boundary.
+    pub fn matches_derived(&self, derived: &DerivedIndex) -> bool {
+        graph_metadata_matches_derived(self, derived)
+    }
 }
 
 /// Write one graph-federation generation under the isolated `store/v3`

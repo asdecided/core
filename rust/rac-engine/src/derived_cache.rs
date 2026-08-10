@@ -13,8 +13,9 @@ use rayon::prelude::*;
 
 use crate::derived::{DerivedIndex, SCHEMA_VERSION};
 use crate::index_store::{
-    manifest_root_key, open_freshness_manifest, open_store, remove_store, store_dir,
-    write_freshness_manifest, write_store, FileState, MmapIndexReader,
+    manifest_root_key, open_freshness_manifest, open_graph_store, open_store,
+    remove_graph_store, remove_store, store_dir, write_freshness_manifest, write_graph_store,
+    write_store, FileState, GraphStoreMetadata, MmapIndexReader,
 };
 use crate::walk::find_markdown_files;
 
@@ -949,6 +950,564 @@ pub fn compose_logical_generation(
     .map_err(|error| FederatedCacheError::composition(error.stable_code(), error.to_string()))
 }
 
+// ---------------------------------------------------------------------------
+// Version-2 graph generations and request-boundary freshness (ADR-148).
+//
+// This is deliberately parallel to, rather than a modification of, the v1
+// `FederatedCacheTracker`. No-manifest and manifest-v1 callers therefore keep
+// their released generation, marker, and store/v2 paths byte-for-byte.
+// ---------------------------------------------------------------------------
+
+/// One successful graph read. The verified semantic corpus and its model are
+/// borrowed together, so a verification/composition failure cannot hand a
+/// caller the previously resident model.
+pub struct GraphFederatedCacheRead<'a> {
+    pub refresh: FederatedCacheRefresh,
+    pub model: &'a ReadModel,
+    pub generation: &'a str,
+    pub metadata: &'a GraphStoreMetadata,
+    pub corpus: &'a crate::graph_federated_corpus::VerifiedGraphCorpus,
+}
+
+impl GraphFederatedCacheRead<'_> {
+    /// Exact verification-time bytes for one stable graph artifact identity.
+    pub fn content(&self, key: &crate::corpus::ArtifactKey) -> Option<&[u8]> {
+        self.corpus.content(key)
+    }
+}
+
+/// Server-lifetime serving gate for manifest-v2 federation.
+///
+/// Every call first verifies and semantically adapts the complete closure.
+/// Only then may it compare a canonical `sha256-v3:` generation with resident
+/// state or open an exact-metadata `store/v3` generation. A changed generation
+/// always rebuilds the whole projection; no source-blind delta is applied.
+pub struct GraphFederatedCacheTracker {
+    cache_dir: PathBuf,
+    current_generation: Option<String>,
+    model: Option<ReadModel>,
+    metadata: Option<GraphStoreMetadata>,
+    corpus: Option<crate::graph_federated_corpus::VerifiedGraphCorpus>,
+}
+
+impl GraphFederatedCacheTracker {
+    pub fn new(cache_dir: PathBuf) -> Self {
+        Self {
+            cache_dir,
+            current_generation: None,
+            model: None,
+            metadata: None,
+            corpus: None,
+        }
+    }
+
+    fn invalidate(&mut self) {
+        self.current_generation = None;
+        self.model = None;
+        self.metadata = None;
+        self.corpus = None;
+    }
+
+    fn fail<T>(&mut self, error: FederatedCacheError) -> Result<T, FederatedCacheError> {
+        self.invalidate();
+        Err(error)
+    }
+
+    fn persist(
+        &self,
+        corpus: &crate::graph_federated_corpus::VerifiedGraphCorpus,
+        generation: &str,
+        derived: DerivedIndex,
+        metadata: &GraphStoreMetadata,
+    ) -> ReadModel {
+        if write_graph_store(
+            &self.cache_dir,
+            generation,
+            SCHEMA_VERSION,
+            &derived,
+            metadata,
+        ) {
+            if let Some(model) = open_validated_graph_store(
+                &self.cache_dir,
+                generation,
+                metadata,
+                corpus,
+            ) {
+                return ReadModel::View(model);
+            }
+            remove_graph_store(&self.cache_dir, generation);
+        }
+        ReadModel::Fresh(Box::new(derived))
+    }
+
+    /// Verify, adapt, and serve one manifest-v2 graph generation.
+    ///
+    /// `build` is invoked only when a complete derived projection is needed;
+    /// a cold exact-metadata store hit avoids rebuilding it. The closure must
+    /// derive solely from `corpus`, whose parser consumed the just-verified
+    /// byte snapshot without reopening inherited public paths.
+    pub(crate) fn read_or_recompose<F>(
+        &mut self,
+        repository_root: impl AsRef<Path>,
+        root_corpus_relative: &str,
+        recursive: bool,
+        persistent_cache: bool,
+        build: F,
+    ) -> Result<GraphFederatedCacheRead<'_>, FederatedCacheError>
+    where
+        F: FnOnce(
+            &crate::graph_federated_corpus::VerifiedGraphCorpus,
+        ) -> Result<DerivedIndex, FederatedCacheError>,
+    {
+        // Reverification precedes semantic adaptation, resident reuse, and
+        // store lookup on every request. Any failure drops the prior handle.
+        let verified = match crate::federation::verify_federation(
+            repository_root,
+            root_corpus_relative,
+        ) {
+            Ok(Some(verified)) => verified,
+            Ok(None) => {
+                return self.fail(FederatedCacheError::InvalidModel {
+                    message: "graph cache reads require a version-2 federation manifest"
+                        .to_string(),
+                });
+            }
+            Err(error) => return self.fail(error.into()),
+        };
+        let corpus = match crate::graph_federated_corpus::compose_verified_federation(verified) {
+            Ok(corpus) => corpus,
+            Err(error) => {
+                return self.fail(FederatedCacheError::composition(
+                    error.stable_code(),
+                    error.to_string(),
+                ));
+            }
+        };
+        let persistent_cache = persistent_cache
+            && crate::federated_corpus::write_target_within_roots(
+                &self.cache_dir,
+                &corpus.read_only_materialisation_roots,
+            )
+            .is_ok_and(|inside| !inside);
+        let generation = crate::federation_generation::closure_generation_from_verified(
+            &corpus.federation,
+            recursive,
+            &corpus.composition,
+        );
+        let layers = corpus.canonical_layers.values().cloned().collect();
+        let metadata = GraphStoreMetadata::from_composition(
+            generation.clone(),
+            layers,
+            &corpus.composition,
+        );
+
+        if self.current_generation.as_deref() == Some(generation.as_str())
+            && self.metadata.as_ref() == Some(&metadata)
+        {
+            // Replace the semantic handle with the request-current verified
+            // snapshot even when all generation inputs are byte-identical.
+            self.corpus = Some(corpus);
+            self.metadata = Some(metadata);
+            return Ok(GraphFederatedCacheRead {
+                refresh: FederatedCacheRefresh::WarmReuse,
+                model: self.model.as_ref().expect("current graph generation has a model"),
+                generation: self
+                    .current_generation
+                    .as_deref()
+                    .expect("current graph generation is installed"),
+                metadata: self.metadata.as_ref().expect("graph metadata installed"),
+                corpus: self.corpus.as_ref().expect("graph corpus installed"),
+            });
+        }
+
+        let cold = self.current_generation.is_none();
+        let (refresh, model) = if cold && persistent_cache {
+            match open_validated_graph_store(
+                &self.cache_dir,
+                &generation,
+                &metadata,
+                &corpus,
+            ) {
+                Some(model) => (FederatedCacheRefresh::StoreHit, ReadModel::View(model)),
+                None => {
+                    remove_graph_store(&self.cache_dir, &generation);
+                    let derived = match build(&corpus) {
+                        Ok(derived) => derived,
+                        Err(error) => return self.fail(error),
+                    };
+                    if let Err(error) = validate_graph_model(&corpus, &metadata, &derived) {
+                        return self.fail(FederatedCacheError::InvalidModel {
+                            message: error,
+                        });
+                    }
+                    (
+                        FederatedCacheRefresh::Recomposed,
+                        self.persist(&corpus, &generation, derived, &metadata),
+                    )
+                }
+            }
+        } else {
+            // A topology/input change always recomposes, even if an older
+            // process previously persisted this generation. `--no-cache`
+            // differs only by skipping store open/write.
+            let derived = match build(&corpus) {
+                Ok(derived) => derived,
+                Err(error) => return self.fail(error),
+            };
+            if let Err(error) = validate_graph_model(&corpus, &metadata, &derived) {
+                return self.fail(FederatedCacheError::InvalidModel {
+                    message: error,
+                });
+            }
+            let model = if persistent_cache {
+                self.persist(&corpus, &generation, derived, &metadata)
+            } else {
+                ReadModel::Fresh(Box::new(derived))
+            };
+            (FederatedCacheRefresh::Recomposed, model)
+        };
+
+        self.current_generation = Some(generation);
+        self.model = Some(model);
+        self.metadata = Some(metadata);
+        self.corpus = Some(corpus);
+        Ok(GraphFederatedCacheRead {
+            refresh,
+            model: self.model.as_ref().expect("graph model installed"),
+            generation: self
+                .current_generation
+                .as_deref()
+                .expect("graph generation installed"),
+            metadata: self.metadata.as_ref().expect("graph metadata installed"),
+            corpus: self.corpus.as_ref().expect("graph corpus installed"),
+        })
+    }
+
+    pub fn current_generation(&self) -> Option<&str> {
+        self.current_generation.as_deref()
+    }
+
+    /// Public graph serving boundary. Callers cannot inject an alternate or
+    /// partial projection: all persisted and resident models are produced by
+    /// the canonical verified-graph adapter.
+    pub fn read_graph(
+        &mut self,
+        repository_root: impl AsRef<Path>,
+        root_corpus_relative: &str,
+        recursive: bool,
+        persistent_cache: bool,
+    ) -> Result<GraphFederatedCacheRead<'_>, FederatedCacheError> {
+        self.read_or_recompose(
+            repository_root,
+            root_corpus_relative,
+            recursive,
+            persistent_cache,
+            |corpus| {
+                Ok(crate::derived::build_derived_index_from_graph(
+                    corpus, recursive,
+                ))
+            },
+        )
+    }
+}
+
+fn graph_key_projection_complete(
+    expected_effective: &[crate::corpus::ArtifactKey],
+    expected_catalog: &BTreeSet<crate::corpus::ArtifactKey>,
+    derived: &DerivedIndex,
+) -> bool {
+    let searchable = derived
+        .index_entries
+        .iter()
+        .filter_map(|entry| entry.key.clone())
+        .collect::<Vec<_>>();
+    let source_rows = derived
+        .source_artifacts
+        .iter()
+        .map(|artifact| artifact.key.clone())
+        .collect::<Vec<_>>();
+    let identities = derived
+        .resolution
+        .entries
+        .iter()
+        .filter_map(|entry| entry.key.clone())
+        .collect::<BTreeSet<_>>();
+    searchable == expected_effective
+        && source_rows == expected_effective
+        && identities == *expected_catalog
+        && derived.index_entries.len() == expected_effective.len()
+        && derived.source_artifacts.len() == expected_effective.len()
+        && derived.resolution.entries.len() == expected_catalog.len()
+}
+
+fn index_entries_equal(
+    left: &crate::resolve::IndexEntry,
+    right: &crate::resolve::IndexEntry,
+) -> bool {
+    left.key == right.key
+        && left.artifact_path == right.artifact_path
+        && left.origin == right.origin
+        && left.id == right.id
+        && left.artifact_type == right.artifact_type
+        && left.title == right.title
+        && left.path == right.path
+        && left.aliases == right.aliases
+        && left.search_sections == right.search_sections
+        && left.inbound_count == right.inbound_count
+        && left.tags == right.tags
+}
+
+/// Reject incomplete or alternate projections before either resident install
+/// or persistence. Graph metadata proves the stable layers/mappings; these
+/// checks additionally bind the complete effective/catalog identities and all
+/// endpoint-bearing read-model projections to the same semantic composition.
+fn validate_graph_model(
+    corpus: &crate::graph_federated_corpus::VerifiedGraphCorpus,
+    metadata: &GraphStoreMetadata,
+    derived: &DerivedIndex,
+) -> Result<(), String> {
+    if !metadata.matches_derived(derived) {
+        return Err("graph metadata does not match the derived projection".to_string());
+    }
+    let effective = corpus.composition.effective().collect::<Vec<_>>();
+    let expected_effective = effective
+        .iter()
+        .map(|item| item.key.clone())
+        .collect::<Vec<_>>();
+    let expected_catalog = corpus
+        .composition
+        .catalog()
+        .map(|item| item.key.clone())
+        .collect::<BTreeSet<_>>();
+    if !graph_key_projection_complete(&expected_effective, &expected_catalog, derived) {
+        return Err("graph projection omits or duplicates a catalog/effective identity".to_string());
+    }
+    let expected_entries = corpus.composition.effective_index();
+    let expected_identities = corpus.composition.identity_index();
+    if effective
+        .iter()
+        .zip(&derived.source_artifacts)
+        .any(|(item, source)| {
+            source.key != item.key
+                || source.path != item.artifact_path
+                || source.origin != item.origin
+                || source.display_path != item.path
+        })
+        || derived.index_entries.len() != expected_entries.len()
+        || derived
+            .index_entries
+            .iter()
+            .zip(&expected_entries)
+            .any(|(actual, expected)| !index_entries_equal(actual, expected))
+        || derived.resolution.entries.len() != expected_identities.len()
+        || derived
+            .resolution
+            .entries
+            .iter()
+            .zip(&expected_identities)
+            .any(|(actual, expected)| !index_entries_equal(actual, expected))
+    {
+        return Err("graph search projection does not match semantic artifact rows".to_string());
+    }
+    let expected_relationships = corpus
+        .composition
+        .relationships()
+        .into_iter()
+        .map(|row| {
+            (
+                row.source_artifact,
+                row.source_path,
+                row.relationship,
+                row.target,
+                row.resolved_artifact,
+                row.resolved_path,
+                row.issue,
+            )
+        })
+        .collect::<Vec<_>>();
+    let actual_relationships = derived
+        .relationships
+        .iter()
+        .map(|row| {
+            (
+                row.source_artifact.clone(),
+                row.source_path.clone(),
+                row.relationship.clone(),
+                row.target.clone(),
+                row.resolved_artifact.clone(),
+                row.resolved_path.clone(),
+                row.issue.clone(),
+            )
+        })
+        .collect::<Vec<_>>();
+    if actual_relationships != expected_relationships {
+        return Err("graph relationship projection differs from composition".to_string());
+    }
+    let expected_live = effective
+        .iter()
+        .filter(|item| {
+            item.spec
+                .is_some_and(|spec| spec.name == crate::derived::DECISION_TYPE)
+                && crate::resolve::is_live_decision(&item.artifact)
+        })
+        .map(|item| (item.key.clone(), item.path.clone()))
+        .collect::<Vec<_>>();
+    if derived.live_decision_keys.len() != expected_live.len()
+        || derived.live_decision_paths.len() != expected_live.len()
+        || derived
+            .live_decision_keys
+            .iter()
+            .zip(&derived.live_decision_paths)
+            .zip(expected_live.iter())
+            .any(|((key, path), expected)| (key, path) != (&expected.0, &expected.1))
+    {
+        return Err("graph liveness projection differs from composition".to_string());
+    }
+    let effective_items = effective.into_iter().cloned().collect::<Vec<_>>();
+    let expected_scope = crate::retrieve::scope_rows_from_items(&effective_items);
+    if derived.scope_rows.len() != expected_scope.len()
+        || derived.scope_rows.iter().zip(expected_scope).any(|(actual, expected)| {
+            actual.key != expected.key
+                || actual.artifact_path != expected.artifact_path
+                || actual.origin != expected.origin
+                || actual.id != expected.id
+                || actual.title != expected.title
+                || actual.status != expected.status
+                || actual.path != expected.path
+                || actual.scope_entries != expected.scope_entries
+        })
+    {
+        return Err("graph scope projection differs from composition".to_string());
+    }
+    Ok(())
+}
+
+fn validate_graph_store_view(
+    corpus: &crate::graph_federated_corpus::VerifiedGraphCorpus,
+    reader: &MmapIndexReader,
+) -> Result<(), String> {
+    let effective = corpus.composition.effective().collect::<Vec<_>>();
+    if reader.doc_count as usize != effective.len() {
+        return Err("stored graph omits an effective artifact".to_string());
+    }
+    let expected_entries = corpus.composition.effective_index();
+    for (docid, (item, expected)) in effective.iter().zip(&expected_entries).enumerate() {
+        let entry = reader
+            .full_entry(docid as u32)
+            .map_err(|error| error.to_string())?;
+        let source = reader
+            .source_artifact(docid as u32)
+            .map_err(|error| error.to_string())?;
+        if !index_entries_equal(&entry, expected)
+            || source.key != item.key
+            || source.path != item.artifact_path
+            || source.origin != item.origin
+            || source.display_path != item.path
+        {
+            return Err("stored graph search row differs from composition".to_string());
+        }
+    }
+    let expected_identities = corpus.composition.identity_index();
+    let identity_count = reader.identity_count().map_err(|error| error.to_string())?;
+    if identity_count as usize != expected_identities.len() {
+        return Err("stored graph omits or duplicates a catalog identity".to_string());
+    }
+    for (docid, expected) in expected_identities.iter().enumerate() {
+        let entry = reader
+            .identity_entry(docid as u32)
+            .map_err(|error| error.to_string())?;
+        if !index_entries_equal(&entry, expected) {
+            return Err("stored graph identity row differs from composition".to_string());
+        }
+    }
+    let expected_relationships = corpus
+        .composition
+        .relationships()
+        .into_iter()
+        .map(|row| {
+            (
+                row.source_artifact,
+                row.source_path,
+                row.relationship,
+                row.target,
+                row.resolved_artifact,
+                row.resolved_path,
+                row.issue,
+            )
+        })
+        .collect::<Vec<_>>();
+    let stored_relationships = reader
+        .relationships()
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .map(|row| {
+            (
+                row.source_artifact,
+                row.source_path,
+                row.relationship,
+                row.target,
+                row.resolved_artifact,
+                row.resolved_path,
+                row.issue,
+            )
+        })
+        .collect::<Vec<_>>();
+    if stored_relationships != expected_relationships {
+        return Err("stored graph relationships differ from composition".to_string());
+    }
+    let expected_live = effective
+        .iter()
+        .filter(|item| {
+            item.spec
+                .is_some_and(|spec| spec.name == crate::derived::DECISION_TYPE)
+                && crate::resolve::is_live_decision(&item.artifact)
+        })
+        .map(|item| (item.key.clone(), item.path.clone()))
+        .collect::<Vec<_>>();
+    let stored_live = reader
+        .live_decision_keys()
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .zip(
+            reader
+                .live_decision_paths()
+                .map_err(|error| error.to_string())?,
+        )
+        .collect::<Vec<_>>();
+    if stored_live != expected_live {
+        return Err("stored graph liveness differs from composition".to_string());
+    }
+    let effective_items = effective.into_iter().cloned().collect::<Vec<_>>();
+    let expected_scope = crate::retrieve::scope_rows_from_items(&effective_items);
+    let stored_scope = reader.scope_rows().map_err(|error| error.to_string())?;
+    if stored_scope.len() != expected_scope.len()
+        || stored_scope.iter().zip(expected_scope).any(|(actual, expected)| {
+            actual.key != expected.key
+                || actual.artifact_path != expected.artifact_path
+                || actual.origin != expected.origin
+                || actual.id != expected.id
+                || actual.title != expected.title
+                || actual.status != expected.status
+                || actual.path != expected.path
+                || actual.scope_entries != expected.scope_entries
+        })
+    {
+        return Err("stored graph scope rows differ from composition".to_string());
+    }
+    Ok(())
+}
+
+fn open_validated_graph_store(
+    cache_dir: &Path,
+    generation: &str,
+    metadata: &GraphStoreMetadata,
+    corpus: &crate::graph_federated_corpus::VerifiedGraphCorpus,
+) -> Option<MmapIndexReader> {
+    let view = open_graph_store(cache_dir, generation, SCHEMA_VERSION, metadata)?;
+    validate_graph_store_view(corpus, &view.model).ok()?;
+    Some(view.model)
+}
+
 fn stable_public_path(path: &str) -> bool {
     !path.is_empty()
         && !Path::new(path).is_absolute()
@@ -1140,5 +1699,16 @@ mod tests {
             corpus_hash_from_complete_manifest(&manifest),
             corpus_hash_from_complete_manifest(&stat_only_change)
         );
+    }
+
+    #[test]
+    fn graph_key_gate_rejects_a_partial_effective_and_catalog_overlay() {
+        let derived = crate::derived::build_derived_index_from_items("decisions", &[], true);
+        let key = crate::corpus::ArtifactKey::new("acme/root", "APP-KWJ4VMKVSS65");
+        assert!(!graph_key_projection_complete(
+            std::slice::from_ref(&key),
+            &BTreeSet::from([key.clone()]),
+            &derived,
+        ));
     }
 }

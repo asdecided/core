@@ -30,14 +30,24 @@ const TOOLS_LIST_RESULT: &str = include_str!("tools_list_result.json");
 
 pub(crate) struct ServerState {
     repository_root: PathBuf,
-    federation_seen: bool,
+    root_corpus_relative: String,
+    federation_mode: Option<FederationMode>,
+    persistent_cache: bool,
     tracker: Option<rac_engine::freshness::FreshnessTracker>,
     federated_tracker: Option<
         rac_engine::derived_cache::FederatedCacheTracker<
             rac_engine::composition::ComposedCorpus,
         >,
     >,
+    graph_tracker: rac_engine::derived_cache::GraphFederatedCacheTracker,
     graph_cache: graph::GraphCache,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FederationMode {
+    Unknown,
+    V1,
+    V2,
 }
 
 enum RequestRead<'a> {
@@ -55,6 +65,7 @@ enum RequestRead<'a> {
         generation: rac_engine::derived_cache::LogicalGeneration,
         composed: Box<rac_engine::composition::ComposedCorpus>,
     },
+    Graph(rac_engine::derived_cache::GraphFederatedCacheRead<'a>),
 }
 
 impl RequestRead<'_> {
@@ -69,7 +80,7 @@ impl RequestRead<'_> {
         match self {
             Self::FederatedCached(read) => Some(read.composed),
             Self::FederatedFresh { composed, .. } => Some(composed),
-            Self::Legacy { .. } => None,
+            Self::Legacy { .. } | Self::Graph(_) => None,
         }
     }
 
@@ -84,7 +95,14 @@ impl RequestRead<'_> {
         match self {
             Self::FederatedCached(read) => Some(read.generation),
             Self::FederatedFresh { generation, .. } => Some(generation),
-            Self::Legacy { .. } => None,
+            Self::Legacy { .. } | Self::Graph(_) => None,
+        }
+    }
+
+    fn graph(&self) -> Option<&rac_engine::derived_cache::GraphFederatedCacheRead<'_>> {
+        match self {
+            Self::Graph(read) => Some(read),
+            _ => None,
         }
     }
 }
@@ -190,8 +208,8 @@ fn main() {
     if !std::path::Path::new(&root).is_dir() {
         usage_error(&format!("not a directory: {root}"));
     }
-    let mut federation_seen = false;
-    let topology = repository_topology(&root, None, &mut federation_seen)
+    let mut federation_mode = None;
+    let topology = repository_topology(&root, None, &mut federation_mode)
         .unwrap_or_else(|error| usage_error(&error));
     check_corpus(&root, &topology);
     // Server-lifetime freshness (ADR-105/118): one tracker per server keeps
@@ -215,9 +233,14 @@ fn main() {
     };
     let mut state = ServerState {
         repository_root: topology.repository_root,
-        federation_seen,
+        root_corpus_relative: topology.root_corpus_relative,
+        federation_mode,
+        persistent_cache: rac_engine::derived_cache::cache_enabled(cache),
         tracker,
         federated_tracker,
+        graph_tracker: rac_engine::derived_cache::GraphFederatedCacheTracker::new(
+            rac_engine::derived_cache::default_cache_dir(),
+        ),
         graph_cache: graph::GraphCache::default(),
     };
     // Audit recorder (ADR-084): built from the `.decided/config.yaml` audit stanza,
@@ -255,7 +278,19 @@ fn main() {
 
 /// Startup diagnostic (stderr only; declared-normalized in parity, §0).
 fn check_corpus(root: &str, topology: &RepositoryTopology) {
-    let has_artifacts = if topology.federated {
+    let has_artifacts = if topology.federation_mode == Some(FederationMode::V2) {
+        let verified = rac_engine::federation::verify_federation(
+            &topology.repository_root,
+            &topology.root_corpus_relative,
+        )
+        .unwrap_or_else(|error| usage_error(&error.to_string()))
+        .unwrap_or_else(|| usage_error("version-2 federation manifest disappeared"));
+        rac_engine::graph_federated_corpus::compose_verified_federation(verified)
+            .unwrap_or_else(|error| usage_error(&error.to_string()))
+            .composition
+            .effective()
+            .any(|item| item.spec.is_some())
+    } else if topology.federation_mode == Some(FederationMode::V1) {
         let generation = rac_engine::derived_cache::capture_logical_generation(
             &topology.repository_root,
             root,
@@ -284,7 +319,8 @@ a new repository. The server is running; get_summary will report the empty state
 
 struct RepositoryTopology {
     repository_root: PathBuf,
-    federated: bool,
+    root_corpus_relative: String,
+    federation_mode: Option<FederationMode>,
 }
 
 fn marker_present(path: &Path) -> Result<bool, String> {
@@ -309,16 +345,16 @@ fn marker_present(path: &Path) -> Result<bool, String> {
 fn repository_topology(
     root: &str,
     pinned_root: Option<&Path>,
-    federation_seen: &mut bool,
+    federation_mode: &mut Option<FederationMode>,
 ) -> Result<RepositoryTopology, String> {
+    let resolved_root = std::fs::canonicalize(root).map_err(|error| {
+        format!("cannot resolve MCP corpus root {}: {error}", Path::new(root).display())
+    })?;
     let repository_root = if let Some(pinned) = pinned_root {
         pinned.to_path_buf()
     } else {
-        let resolved = std::fs::canonicalize(root).map_err(|error| {
-            format!("cannot resolve MCP corpus root {}: {error}", Path::new(root).display())
-        })?;
         let mut selected = None;
-        for ancestor in resolved.ancestors() {
+        for ancestor in resolved_root.ancestors() {
             let config = ancestor.join(rac_engine::federation::CONFIG_RELATIVE_PATH);
             let manifest = ancestor.join(rac_engine::federation::MANIFEST_RELATIVE_PATH);
             if marker_present(&config)? || marker_present(&manifest)? {
@@ -326,26 +362,70 @@ fn repository_topology(
                 break;
             }
         }
-        selected.unwrap_or(resolved)
+        selected.unwrap_or_else(|| resolved_root.clone())
+    };
+    let relative = resolved_root.strip_prefix(&repository_root).map_err(|_| {
+        format!(
+            "parent-corpus-path-escape: MCP corpus root {} escaped pinned repository root {}",
+            resolved_root.display(),
+            repository_root.display()
+        )
+    })?;
+    let root_corpus_relative = if relative.as_os_str().is_empty() {
+        ".".to_string()
+    } else {
+        relative
+            .components()
+            .map(|component| component.as_os_str().to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("/")
     };
 
     let manifest_path = repository_root.join(rac_engine::federation::MANIFEST_RELATIVE_PATH);
     let present = marker_present(&manifest_path)?;
-    if present {
-        // Presence itself is sticky. A malformed addition cannot be removed
-        // to make the next request fall back to a legacy corpus.
-        *federation_seen = true;
+    if present && federation_mode.is_none() {
+        // Presence becomes sticky before parsing. A malformed live addition
+        // therefore cannot be removed to regain a local-only fallback.
+        *federation_mode = Some(FederationMode::Unknown);
     }
-    let manifest = rac_engine::federation::load_manifest(&repository_root)
-        .map_err(|error| error.to_string())?;
-    let federated = manifest.is_some();
-    if *federation_seen && !federated {
+    if !present && federation_mode.is_some() {
         return Err(format!(
             "parent-corpus-malformed-manifest: federation manifest disappeared after this server observed federation: {}",
             manifest_path.display()
         ));
     }
-    if *federation_seen {
+    let observed = if present {
+        if rac_engine::federation::load_graph_manifest(&repository_root)
+            .map_err(|error| error.to_string())?
+            .is_some()
+        {
+            Some(FederationMode::V2)
+        } else if rac_engine::federation::load_manifest(&repository_root)
+            .map_err(|error| error.to_string())?
+            .is_some()
+        {
+            Some(FederationMode::V1)
+        } else {
+            return Err(format!(
+                "parent-corpus-malformed-manifest: federation manifest has no supported version: {}",
+                manifest_path.display()
+            ));
+        }
+    } else {
+        None
+    };
+    match (*federation_mode, observed) {
+        (Some(FederationMode::Unknown), Some(actual)) => *federation_mode = Some(actual),
+        (Some(expected), Some(actual)) if expected != actual => {
+            return Err(format!(
+                "parent-corpus-malformed-manifest: federation manifest version changed after this server pinned {expected:?}: {}",
+                manifest_path.display()
+            ));
+        }
+        (None, Some(actual)) => *federation_mode = Some(actual),
+        _ => {}
+    }
+    if federation_mode.is_some() {
         let config_path = repository_root.join(rac_engine::federation::CONFIG_RELATIVE_PATH);
         let metadata = std::fs::symlink_metadata(&config_path).map_err(|error| {
             format!(
@@ -368,7 +448,8 @@ fn repository_topology(
     }
     Ok(RepositoryTopology {
         repository_root,
-        federated,
+        root_corpus_relative,
+        federation_mode: *federation_mode,
     })
 }
 
@@ -614,23 +695,44 @@ fn a_bool(args: &[Arg], i: usize, default: bool) -> bool {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn read_request<'a>(
     root: &str,
     repository_root: &Path,
-    federation_seen: &mut bool,
+    root_corpus_relative: &str,
+    federation_mode: &mut Option<FederationMode>,
+    persistent_cache: bool,
     tracker: &'a mut Option<rac_engine::freshness::FreshnessTracker>,
     federated_tracker: &'a mut Option<
         rac_engine::derived_cache::FederatedCacheTracker<
             rac_engine::composition::ComposedCorpus,
         >,
     >,
+    graph_tracker: &'a mut rac_engine::derived_cache::GraphFederatedCacheTracker,
 ) -> Result<RequestRead<'a>, String> {
     // Every recognized tool enters the same strict topology boundary after
     // its allowlisted arguments have been normalized for audit. Cache-off
     // skips persistence only; it never skips topology, parent verification,
     // or exact-byte composition.
-    let topology = repository_topology(root, Some(repository_root), federation_seen)?;
-    if topology.federated {
+    let topology = repository_topology(root, Some(repository_root), federation_mode)?;
+    if topology.root_corpus_relative != root_corpus_relative {
+        return Err(format!(
+            "parent-corpus-path-escape: MCP corpus root changed after topology was pinned (expected {root_corpus_relative}, got {})",
+            topology.root_corpus_relative
+        ));
+    }
+    if topology.federation_mode == Some(FederationMode::V2) {
+        Ok(RequestRead::Graph(
+            graph_tracker
+                .read_graph(
+                    &topology.repository_root,
+                    root_corpus_relative,
+                    true,
+                    persistent_cache,
+                )
+                .map_err(|error| error.to_string())?,
+        ))
+    } else if topology.federation_mode == Some(FederationMode::V1) {
         match federated_tracker.as_mut() {
             Some(tracker) => Ok(RequestRead::FederatedCached(
                 tracker
@@ -694,9 +796,12 @@ fn dispatch(
     }
     let ServerState {
         repository_root,
-        federation_seen,
+        root_corpus_relative,
+        federation_mode,
+        persistent_cache,
         tracker,
         federated_tracker,
+        graph_tracker,
         graph_cache,
     } = state;
     // Audit args mirror server.py's per-tool `observed(...)` shapes exactly
@@ -719,12 +824,22 @@ fn dispatch(
                     let request = read_request(
                         root,
                         repository_root,
-                        federation_seen,
+                        root_corpus_relative,
+                        federation_mode,
+                        *persistent_cache,
                         tracker,
                         federated_tracker,
+                        graph_tracker,
                     )?;
                     let (_, model) = request.legacy();
-                    Ok(if let Some(corpus) = request.composed() {
+                    Ok(if let Some(read) = request.graph() {
+                        tools::get_artifact_graph(
+                            root,
+                            read.corpus,
+                            &a_str(&a, 0, ""),
+                            effective,
+                        )
+                    } else if let Some(corpus) = request.composed() {
                         tools::get_artifact_composed(
                             root,
                             corpus,
@@ -764,12 +879,26 @@ fn dispatch(
                     let request = read_request(
                         root,
                         repository_root,
-                        federation_seen,
+                        root_corpus_relative,
+                        federation_mode,
+                        *persistent_cache,
                         tracker,
                         federated_tracker,
+                        graph_tracker,
                     )?;
                     let (_, model) = request.legacy();
-                    Ok(if let Some(corpus) = request.composed() {
+                    Ok(if let Some(read) = request.graph() {
+                        tools::search_artifacts_graph(
+                            root,
+                            read.model,
+                            read.corpus,
+                            &query,
+                            artifact_type.as_deref(),
+                            &tags,
+                            live_only,
+                            server_budget,
+                        )
+                    } else if let Some(corpus) = request.composed() {
                         tools::search_artifacts_composed(
                             root,
                             request.cached_model(),
@@ -830,12 +959,25 @@ fn dispatch(
                     let request = read_request(
                         root,
                         repository_root,
-                        federation_seen,
+                        root_corpus_relative,
+                        federation_mode,
+                        *persistent_cache,
                         tracker,
                         federated_tracker,
+                        graph_tracker,
                     )?;
                     let (_, model) = request.legacy();
-                    Ok(if let Some(corpus) = request.composed() {
+                    Ok(if let Some(read) = request.graph() {
+                        tools::retrieve_grounding_graph(
+                            root,
+                            read.corpus,
+                            &task,
+                            &scope,
+                            top_k,
+                            effective,
+                            live_only,
+                        )
+                    } else if let Some(corpus) = request.composed() {
                         tools::retrieve_grounding_composed(
                             root, corpus, &task, &scope, top_k, effective, live_only,
                         )
@@ -866,12 +1008,24 @@ fn dispatch(
                     let request = read_request(
                         root,
                         repository_root,
-                        federation_seen,
+                        root_corpus_relative,
+                        federation_mode,
+                        *persistent_cache,
                         tracker,
                         federated_tracker,
+                        graph_tracker,
                     )?;
                     let (_, model) = request.legacy();
-                    Ok(if let Some(corpus) = request.composed() {
+                    Ok(if let Some(read) = request.graph() {
+                        tools::find_decisions_tool_graph(
+                            root,
+                            read.model,
+                            read.corpus,
+                            &topic,
+                            path.as_deref(),
+                            server_budget,
+                        )
+                    } else if let Some(corpus) = request.composed() {
                         tools::find_decisions_tool_composed(
                             root,
                             corpus,
@@ -905,13 +1059,18 @@ fn dispatch(
                     let request = read_request(
                         root,
                         repository_root,
-                        federation_seen,
+                        root_corpus_relative,
+                        federation_mode,
+                        *persistent_cache,
                         tracker,
                         federated_tracker,
+                        graph_tracker,
                     )?;
                     let (generation, model) = request.legacy();
                     let fresh_graph;
-                    let graph_view = if let (Some(corpus), Some(logical)) =
+                    let graph_view = if let Some(read) = request.graph() {
+                        graph_cache.view_for_graph(read.generation, &read.corpus.composition)
+                    } else if let (Some(corpus), Some(logical)) =
                         (request.composed(), request.logical_generation())
                     {
                         graph_cache.view_for_composed(logical.cache_key(), corpus)
@@ -926,7 +1085,15 @@ fn dispatch(
                             }
                         }
                     };
-                    Ok(if let Some(corpus) = request.composed() {
+                    Ok(if let Some(read) = request.graph() {
+                        tools::get_related_graph(
+                            graph_view,
+                            read.corpus,
+                            &id,
+                            depth,
+                            server_budget,
+                        )
+                    } else if let Some(corpus) = request.composed() {
                         tools::get_related_composed(
                             graph_view,
                             corpus,
@@ -949,12 +1116,17 @@ fn dispatch(
                     let request = read_request(
                         root,
                         repository_root,
-                        federation_seen,
+                        root_corpus_relative,
+                        federation_mode,
+                        *persistent_cache,
                         tracker,
                         federated_tracker,
+                        graph_tracker,
                     )?;
                     let (_, model) = request.legacy();
-                    Ok(if let (Some(corpus), Some(generation)) =
+                    Ok(if let Some(read) = request.graph() {
+                        tools::get_summary_graph(read.model, server_budget)
+                    } else if let (Some(corpus), Some(generation)) =
                         (request.composed(), request.logical_generation())
                     {
                         tools::get_summary_composed(
@@ -1019,13 +1191,18 @@ mod tests {
     fn unknown_tool_does_not_freshen_tracker() {
         let mut state = ServerState {
             repository_root: PathBuf::from("/definitely-not-a-decided-corpus"),
-            federation_seen: false,
+            root_corpus_relative: ".".to_string(),
+            federation_mode: None,
+            persistent_cache: true,
             tracker: Some(rac_engine::freshness::FreshnessTracker::new(
                 std::path::PathBuf::from("/definitely-not-a-decided-cache"),
                 "/definitely-not-a-decided-corpus",
                 None,
             )),
             federated_tracker: None,
+            graph_tracker: rac_engine::derived_cache::GraphFederatedCacheTracker::new(
+                PathBuf::from("/definitely-not-a-decided-cache"),
+            ),
             graph_cache: graph::GraphCache::default(),
         };
         let result = dispatch(
@@ -1050,13 +1227,18 @@ mod tests {
         let root = corpus.to_string_lossy().into_owned();
         let mut state = ServerState {
             repository_root: corpus.clone(),
-            federation_seen: false,
+            root_corpus_relative: ".".to_string(),
+            federation_mode: None,
+            persistent_cache: true,
             tracker: Some(rac_engine::freshness::FreshnessTracker::new(
                 cache.clone(),
                 &root,
                 Some(10),
             )),
             federated_tracker: None,
+            graph_tracker: rac_engine::derived_cache::GraphFederatedCacheTracker::new(
+                cache.clone(),
+            ),
             graph_cache: graph::GraphCache::default(),
         };
         let arguments = json!({"id": "FIX-0DEC1GRAPH00", "depth": 2});

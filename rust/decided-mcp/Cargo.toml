@@ -16,3 +16,6 @@ publish = ["crates-io"]
 rac-engine = { package = "asdecided-core", version = "=0.28.0", path = "../rac-engine" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
+
+[dev-dependencies]
+sha2 = "0.10"
