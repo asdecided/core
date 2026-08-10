@@ -112,7 +112,7 @@ historical endpoints from effective redirected endpoints.
 
 ## Status
 
-Proposed
+Accepted
 
 ## Category
 
@@ -151,7 +151,6 @@ ambiguous even though A cannot see or edit B in its own composition.
 - adr-078
 - adr-089
 - adr-135
-- adr-136
 - adr-139
 - adr-141
 - adr-144

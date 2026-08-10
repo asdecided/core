@@ -155,7 +155,7 @@ stricter than semantic YAML hashing and keeps verification portable.
 
 ## Status
 
-Proposed
+Accepted
 
 ## Category
 

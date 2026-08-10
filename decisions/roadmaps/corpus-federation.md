@@ -10,15 +10,14 @@ type: roadmap
 Planned
 
 The intended v0.29.0 release target is graph-complete corpus federation, not
-only the one-parent foundation. The accepted ADR-133 through ADR-143 set and its
-implementation establish the source-aware substrate and exact v1 compatibility.
-The proposed ADR-144 through ADR-148 set adds a bounded multi-parent DAG,
-topology-binding pins, global source qualification, explicit override chains,
-and closure-wide serving state. Engine work outside the accepted one-parent
-boundary waits for explicit human ratification of those five decisions.
+only the one-parent foundation. The historical ADR-133 through ADR-143 set and
+its implementation establish the source-aware substrate and exact v1
+compatibility. Accepted ADR-144 through ADR-148 authorize a bounded multi-parent
+DAG, topology-binding pins, global source qualification, explicit override
+chains, and closure-wide serving state.
 
 Execution order and task state remain in GitHub under ADR-093. This roadmap
-records durable intent and does not claim that proposed graph behavior has
+records durable intent and does not claim that accepted graph behavior has
 shipped.
 
 ## Context
@@ -78,17 +77,15 @@ anchors do not block federation.
 
 ### Graph authority and contract
 
-Review ADR-144 through ADR-148 separately. On explicit acceptance, mark
-ADR-133, ADR-136, and ADR-143 Superseded atomically and record the narrower
-amendments to ADR-134, ADR-137, ADR-138, ADR-141, and ADR-142. Keep ADR-135,
-ADR-139, and ADR-140 substantively active while recording ADR-144's
-same-source/same-digest physical-route clarification to ADR-135. Move the graph
-design to Accepted in that transition. Amend accepted
-`corpus-source-identity` REQ-005/007/008 to reference the new authority set,
-unique logical nodes, same-digest diamond routes, and version-2 equal-id
-ambiguity. Keep the implementation requirements Proposed until evidence is
-complete and the roadmap Planned. The accepted one-parent design remains
-historical foundation.
+ADR-144 through ADR-148 are Accepted. ADR-133, ADR-136, and ADR-143 are
+Superseded for version 2; the narrower amendments to ADR-134, ADR-137, ADR-138,
+ADR-141, and ADR-142 are recorded; ADR-135 carries the same-source/same-digest
+physical-route clarification; and ADR-139 and ADR-140 remain substantively
+active. The graph design is Accepted and `corpus-source-identity`
+REQ-005/007/008 reference the new authority set, unique logical nodes,
+same-digest diamond routes, and version-2 equal-id ambiguity. The implementation
+requirements remain Proposed until evidence is complete and the roadmap remains
+Planned. The accepted one-parent design remains historical foundation.
 
 ### Version-2 manifest and verified closure
 
@@ -176,7 +173,7 @@ source, or changing ordinary init/profile bytes.
   bypassed by a local-only mode.
 - Fixed graph resource limits fail before overlay and never truncate.
 - No-manifest and v1 compatibility are load-bearing release gates.
-- The graph ADRs must be accepted before their engine implementation begins.
+- Engine implementation MUST remain within accepted ADR-144 through ADR-148.
 
 ## Non-Goals
 
@@ -228,8 +225,8 @@ source, or changing ordinary init/profile bytes.
   the graph materialisation model.
 - Source identity and export schemas remain available before graph output is
   published.
-- ADR-144 through ADR-148 are explicitly ratified and status transitions are
-  recorded before engine work leaves the accepted v1 boundary.
+- ADR-144 through ADR-148 are explicitly ratified and their authority
+  transitions are recorded before engine work leaves the v1 boundary.
 
 ## Risks
 
@@ -245,8 +242,8 @@ source, or changing ordinary init/profile bytes.
   logical-byte, physical-byte, and filesystem-entry limits with boundary tests.
 - History leaks into live ranking or enforcement. Mitigation: separate catalog
   and effective artifacts and relationship endpoints.
-- Pressure to ship causes proposed ADRs to be treated as accepted. Mitigation:
-  the ratification gate is explicit and engine PRs stack only after it.
+- Implementation drifts beyond the accepted graph contract. Mitigation: each
+  engine PR traces behavior to ADR-144 through ADR-148 and the ratified design.
 
 ## Related Decisions
 
@@ -265,17 +262,14 @@ source, or changing ordinary init/profile bytes.
 - adr-123
 - adr-127
 - adr-128
-- adr-133
 - adr-134
 - adr-135
-- adr-136
 - adr-137
 - adr-138
 - adr-139
 - adr-140
 - adr-141
 - adr-142
-- adr-143
 - adr-144
 - adr-145
 - adr-146

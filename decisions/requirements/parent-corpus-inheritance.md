@@ -33,7 +33,7 @@ preserving the deterministic, offline, root-only write boundary.
 - [REQ-004] Validation MUST emit deterministic, distinct, stable-coded errors for missing materialisation, missing parent corpus or config, malformed declaration, source mismatch, containment failure, digest mismatch, snapshot change, duplicate parent, cycle, divergent pin, invalid node, overlapping roots, override divergence, and exceeded limits. No inherited artifact may enter the effective corpus after any verification failure, and partial overlays are forbidden.
 - [REQ-005] The declaration MUST remain backward-compatible under ADR-089. Engines predating federation continue to ignore `.decided/corpus.md`; no-manifest repositories MUST retain contemporaneous single-corpus output byte-for-byte. A version-1 manifest MUST retain its exact one-parent/leaf-only semantics, `sha256:` digest and known vector, stable findings, transitivity rejection, and observable output.
 - [REQ-006] Optional configuration defaults MAY assist materialisation discovery only through the established section-loader pattern. The Markdown manifest MUST remain the inheritance and pin source of truth, and configuration MUST NOT silently create, update, reorder, fetch, or repin it (ADR-089).
-- [REQ-007] The capability MUST remain available to every user and MUST NOT be enterprise-gated (ADR-085, ADR-089). Graph implementation MUST begin only after ADR-144 through ADR-148 are human-accepted; this requirement does not substitute for that ratification.
+- [REQ-007] The capability MUST remain available to every user and MUST NOT be enterprise-gated (ADR-085, ADR-089). Graph implementation MUST conform to accepted ADR-144 through ADR-148; this Proposed requirement does not substitute for or amend that authority.
 - [REQ-008] Under ADR-088, `decided init --parent-corpus` MUST emit deterministic v2-first guidance only when explicitly requested, with or without a profile and for fresh or already-initialised repositories. It MUST name `.decided/corpus.md`, the exact lowercase `## inherits` and `## overrides` headings, materialisation before pinning, and `decided corpus digest --version 2`; it MUST NOT create a manifest, fetch anything, or write parent bytes. Init/profile human and JSON output without the flag MUST remain byte-identical, and JSON MUST add the guidance field only when requested.
 - [REQ-009] A v1 declaration MUST retain its exact `version`, `alias`, `source`, `root`, `corpus`, and full `sha256` fields. A v2 declaration MUST contain `version: 2` and one to 32 strict parent records, each with exactly `alias`, `source`, `root`, `corpus`, and a full lowercase `sha256-v2` digest. The `## inherits` version MUST select the whole manifest semantic mode; a present `## overrides` mapping MUST use the same version, and mixed versions or overrides without valid inheritance MUST fail. Every graph node MUST declare an explicit valid `corpus.source`; aliases MUST be unique and source-local, and duplicate direct sources MUST fail.
 - [REQ-010] A v1 root MUST accept exactly one direct leaf parent and retain current multiple/transitive findings. A v2 root MUST accept the bounded acyclic graph in ADR-144. Active-ancestry source recurrence MUST be a cycle; a completed source MAY deduplicate only when every independently verified route has the same canonical v2 node digest, and the same source with a different digest MUST be a divergent-pin error.
@@ -104,7 +104,7 @@ preserving the deterministic, offline, root-only write boundary.
   repository root.
 - `corpus-source-identity` remains the stable global node identity and
   `repository_key` remains only the artifact-id generation namespace.
-- ADR-144 and ADR-145 are accepted before recursive loader work begins.
+- ADR-144 and ADR-145 are accepted authority for recursive loader work.
 
 ## Related Decisions
 
@@ -115,11 +115,9 @@ preserving the deterministic, offline, root-only write boundary.
 - adr-085
 - adr-088
 - adr-089
-- adr-133
 - adr-134
 - adr-135
 - adr-138
-- adr-143
 - adr-144
 - adr-145
 - adr-148

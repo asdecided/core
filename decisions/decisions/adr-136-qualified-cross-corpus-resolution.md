@@ -51,7 +51,11 @@ unqualified surfaces.
 
 ## Status
 
-Accepted
+Superseded
+
+Superseded by ADR-146 for manifest-version-2 graph resolution. This ADR's
+alias-qualified references, canonical-collision finding, and direct-override
+behavior remain the exact compatibility contract for a version-1 root.
 
 ## Category
 
@@ -87,10 +91,12 @@ unambiguously source-aware.
 - adr-078
 - adr-089
 - adr-135
+- adr-146
 
 ## Related Designs
 
 - corpus-federation-mechanism
+- corpus-federation-graph-composition
 
 ## Related Requirements
 

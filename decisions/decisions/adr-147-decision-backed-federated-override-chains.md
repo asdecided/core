@@ -132,7 +132,7 @@ chain rather than an incomplete explanation.
 
 ## Status
 
-Proposed
+Accepted
 
 ## Category
 

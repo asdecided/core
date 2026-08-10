@@ -188,7 +188,7 @@ atomicity boundary; later acceleration must preserve this generation contract.
 
 ## Status
 
-Proposed
+Accepted
 
 ## Category
 
@@ -233,7 +233,6 @@ acceleration may be accepted only with cold/warm/delta byte parity.
 - adr-135
 - adr-138
 - adr-141
-- adr-143
 - adr-144
 - adr-145
 - adr-147
@@ -247,6 +246,7 @@ acceleration may be accepted only with cold/warm/delta byte parity.
 
 - parent-corpus-inheritance
 - federated-resolution-provenance
+- corpus-source-identity
 
 ## Related Roadmaps
 

@@ -7,6 +7,10 @@ type: decision
 
 ## Context
 
+> **Amended by ADR-147.** Version-2 composed exports retain the complete
+> deterministically ordered override chain, including the additive `lineage`
+> role. Version-1 direct-mapping provenance remains exact.
+
 Downstream viewers, document stores, and graph consumers need the same corpus an
 agent and gate used. Exporting only the child by default would make a successful
 federated validation produce an incomplete external record. Flattening parent
@@ -87,10 +91,12 @@ audit and historical reconstruction.
 - adr-135
 - adr-137
 - adr-138
+- adr-147
 
 ## Related Designs
 
 - corpus-federation-mechanism
+- corpus-federation-graph-composition
 
 ## Related Requirements
 
