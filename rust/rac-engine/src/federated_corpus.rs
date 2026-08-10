@@ -422,9 +422,30 @@ pub fn local_writable_items(
     recursive: bool,
 ) -> Result<Vec<CorpusItem>, FederatedCorpusError> {
     match load_composed_corpus(directory, recursive)? {
-        Some(corpus) => Ok(corpus.local_items().cloned().collect()),
+        Some(corpus) => Ok(local_writable_projection(directory, &corpus)),
         None => Ok(crate::relationships::corpus_items(directory, recursive)),
     }
+}
+
+/// Adapt the composed child layer to the released writable-path convention.
+/// Stable `artifact_path` identity stays corpus-relative, while mutation and
+/// source-copy consumers receive the same root-prefixed `path` that a direct
+/// local walk would have produced. Physical provenance remains in `locator`.
+pub fn local_writable_projection(
+    directory: &str,
+    corpus: &ComposedCorpus,
+) -> Vec<CorpusItem> {
+    corpus
+        .local_items()
+        .cloned()
+        .map(|mut item| {
+            item.path = crate::walk::py_join(
+                directory,
+                &[item.artifact_path.relative_path.as_str()],
+            );
+            item
+        })
+        .collect()
 }
 
 /// Compose from an already-verified logical generation without re-running

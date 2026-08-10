@@ -30,6 +30,141 @@ fn run(args: &[&str]) -> Output {
         .expect("run decided")
 }
 
+fn empty_scratch_root(label: &str) -> PathBuf {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock after epoch")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "asdecided-cli-{label}-{}-{nonce}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).expect("create empty CLI scratch repository");
+    root
+}
+
+#[test]
+fn init_parent_corpus_emits_guidance_without_creating_a_manifest() {
+    let root = empty_scratch_root("parent-guidance");
+    let root_text = root.to_string_lossy().into_owned();
+    let output = run(&["init", &root_text, "--parent-corpus"]);
+
+    assert!(
+        output.status.success(),
+        "stdout={}, stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for expected in [
+        "Parent corpus setup:",
+        "Materialise the parent inside this repository",
+        "decided corpus digest --root <parent-root> --corpus <parent-corpus>",
+        ".decided/corpus.md",
+        "## inherits",
+        "## overrides",
+    ] {
+        assert!(stdout.contains(expected), "missing {expected:?}: {stdout}");
+    }
+    assert!(root.join(".decided/config.yaml").is_file());
+    assert!(!root.join(".decided/corpus.md").exists());
+    assert_eq!(
+        fs::read_dir(root.join(".decided"))
+            .expect("read .decided")
+            .count(),
+        1,
+        "the guidance flag must not create another .decided file"
+    );
+
+    fs::remove_dir_all(root).expect("remove parent-guidance scratch repository");
+}
+
+#[test]
+fn init_parent_corpus_is_profile_composable_and_idempotent() {
+    let root = empty_scratch_root("parent-profile");
+    let root_text = root.to_string_lossy().into_owned();
+    let fresh = run(&[
+        "init",
+        &root_text,
+        "--profile",
+        "default",
+        "--parent-corpus",
+        "--json",
+    ]);
+    assert!(
+        fresh.status.success(),
+        "stdout={}, stderr={}",
+        String::from_utf8_lossy(&fresh.stdout),
+        String::from_utf8_lossy(&fresh.stderr)
+    );
+    let fresh_stdout = String::from_utf8_lossy(&fresh.stdout);
+    assert!(fresh_stdout.contains("\"profile\": \"default\""));
+    assert!(fresh_stdout.contains("\"parent_corpus_guidance\": {"));
+    assert!(root.join(".mcp.json").is_file());
+    assert!(root.join(".cursor/mcp.json").is_file());
+    assert!(!root.join(".decided/corpus.md").exists());
+
+    let before = fs::read(root.join(".decided/config.yaml")).expect("read config before re-init");
+    let idempotent = run(&["init", &root_text, "--parent-corpus"]);
+    assert!(
+        idempotent.status.success(),
+        "stdout={}, stderr={}",
+        String::from_utf8_lossy(&idempotent.stdout),
+        String::from_utf8_lossy(&idempotent.stderr)
+    );
+    let idempotent_stdout = String::from_utf8_lossy(&idempotent.stdout);
+    assert!(idempotent_stdout.starts_with("Already initialized: repository key RAC\n"));
+    assert!(idempotent_stdout.contains("Parent corpus setup:"));
+    assert_eq!(
+        fs::read(root.join(".decided/config.yaml")).expect("read config after re-init"),
+        before
+    );
+    assert!(!root.join(".decided/corpus.md").exists());
+
+    fs::remove_dir_all(root).expect("remove parent-profile scratch repository");
+}
+
+#[test]
+fn init_parent_corpus_preserves_an_existing_non_default_key() {
+    let root = empty_scratch_root("parent-existing-key");
+    fs::create_dir_all(root.join(".decided")).expect("create existing config directory");
+    let config = b"repository_key: APP\ncorpus:\n  source: acme/app\n";
+    fs::write(root.join(".decided/config.yaml"), config).expect("write existing config");
+    let root_text = root.to_string_lossy().into_owned();
+
+    let guidance = run(&["init", &root_text, "--parent-corpus", "--json"]);
+    assert!(
+        guidance.status.success(),
+        "stdout={}, stderr={}",
+        String::from_utf8_lossy(&guidance.stdout),
+        String::from_utf8_lossy(&guidance.stderr)
+    );
+    let guidance_stdout = String::from_utf8_lossy(&guidance.stdout);
+    assert!(guidance_stdout.contains("\"repository_key\": \"APP\""));
+    assert!(guidance_stdout.contains("\"created\": false"));
+    assert!(guidance_stdout.contains("\"parent_corpus_guidance\": {"));
+    assert_eq!(
+        fs::read(root.join(".decided/config.yaml")).expect("read preserved config"),
+        config
+    );
+    assert!(!root.join(".decided/corpus.md").exists());
+
+    let explicit_conflict = run(&[
+        "init",
+        &root_text,
+        "--parent-corpus",
+        "--key",
+        "RAC",
+        "--json",
+    ]);
+    assert_eq!(explicit_conflict.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&explicit_conflict.stderr).contains(
+        "repository already initialized with key 'APP'"
+    ));
+
+    fs::remove_dir_all(root).expect("remove existing-key scratch repository");
+}
+
 #[test]
 fn find_accepts_a_literal_hyphen_query() {
     let root = scratch_root();

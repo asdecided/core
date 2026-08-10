@@ -3889,6 +3889,22 @@ pub fn render_new_json(created: &crate::scaffold::CreatedArtifact) -> String {
 /// Human `decided init`: the established identity namespace. The idempotent
 /// verb carries its own colon (`Already initialized:`).
 pub fn render_init_human(result: &crate::scaffold::InitResult) -> String {
+    render_init_human_with_parent_corpus(result, false)
+}
+
+const PARENT_CORPUS_MANIFEST: &str = ".decided/corpus.md";
+const PARENT_CORPUS_INHERITS_HEADING: &str = "## inherits";
+const PARENT_CORPUS_OVERRIDES_HEADING: &str = "## overrides";
+const PARENT_CORPUS_DIGEST_COMMAND: &str =
+    "decided corpus digest --root <parent-root> --corpus <parent-corpus>";
+
+/// Human init with the explicit ADR-088/134 setup guidance request. The
+/// ordinary renderer above stays byte-identical and the guidance never writes
+/// a manifest or parent bytes.
+pub(crate) fn render_init_human_with_parent_corpus(
+    result: &crate::scaffold::InitResult,
+    parent_corpus: bool,
+) -> String {
     let verb = if result.created {
         "Initialized"
     } else {
@@ -3905,12 +3921,37 @@ pub fn render_init_human(result: &crate::scaffold::InitResult) -> String {
         lines.push(format!("Org endpoint: {url}"));
     }
     lines.extend(result.files_written.iter().map(|p| format!("Wrote: {p}")));
+    if parent_corpus {
+        lines.extend([
+            "Parent corpus setup:".to_string(),
+            "1. Materialise the parent inside this repository before calculating its digest; AsDecided does not fetch or refresh it."
+                .to_string(),
+            format!("2. Calculate its digest: {PARENT_CORPUS_DIGEST_COMMAND}"),
+            format!(
+                "3. Declare the verified parent in {} under {}.",
+                PARENT_CORPUS_MANIFEST, PARENT_CORPUS_INHERITS_HEADING
+            ),
+            format!(
+                "4. Record explicit replacements under {}.",
+                PARENT_CORPUS_OVERRIDES_HEADING
+            ),
+        ]);
+    }
     lines.join("\n")
 }
 
 /// JSON `decided init` (stable contract, ADR-007).
 pub fn render_init_json(result: &crate::scaffold::InitResult) -> String {
-    dumps_indent2(&json!({
+    render_init_json_with_parent_corpus(result, false)
+}
+
+/// JSON init with one additive field only for the explicit parent guidance
+/// request. The ordinary renderer above retains the released bytes.
+pub(crate) fn render_init_json_with_parent_corpus(
+    result: &crate::scaffold::InitResult,
+    parent_corpus: bool,
+) -> String {
+    let mut payload = json!({
         "schema_version": "1",
         "repository_key": result.repository_key,
         "config_path": result.config_path,
@@ -3918,7 +3959,23 @@ pub fn render_init_json(result: &crate::scaffold::InitResult) -> String {
         "profile": result.profile,
         "files_written": result.files_written,
         "org_endpoint": result.org_endpoint,
-    }))
+    });
+    if parent_corpus {
+        payload
+            .as_object_mut()
+            .expect("init JSON payload is an object")
+            .insert(
+                "parent_corpus_guidance".to_string(),
+                json!({
+                    "materialise_first": true,
+                    "manifest": PARENT_CORPUS_MANIFEST,
+                    "inherits_heading": PARENT_CORPUS_INHERITS_HEADING,
+                    "overrides_heading": PARENT_CORPUS_OVERRIDES_HEADING,
+                    "digest_command": PARENT_CORPUS_DIGEST_COMMAND,
+                }),
+            );
+    }
+    dumps_indent2(&payload)
 }
 
 /// Human `decided quickstart`: identity (`Initialized`/`Using`), first
@@ -4715,4 +4772,50 @@ pub fn watchkeeper_annotations(report: &WatchkeeperReport) -> Vec<String> {
         ));
     }
     lines
+}
+
+#[cfg(test)]
+mod init_output_tests {
+    use super::{
+        render_init_human, render_init_human_with_parent_corpus, render_init_json,
+        render_init_json_with_parent_corpus,
+    };
+    use crate::scaffold::InitResult;
+
+    fn init_result() -> InitResult {
+        InitResult {
+            repository_key: "RAC".to_string(),
+            config_path: "repo/.decided/config.yaml".to_string(),
+            created: true,
+            profile: None,
+            files_written: Vec::new(),
+            org_endpoint: None,
+        }
+    }
+
+    #[test]
+    fn unrequested_parent_guidance_preserves_init_output_bytes() {
+        let result = init_result();
+        assert_eq!(
+            render_init_human(&result),
+            "Initialized repository key RAC\nConfig: repo/.decided/config.yaml"
+        );
+        assert_eq!(
+            render_init_json(&result),
+            "{\n  \"schema_version\": \"1\",\n  \"repository_key\": \"RAC\",\n  \"config_path\": \"repo/.decided/config.yaml\",\n  \"created\": true,\n  \"profile\": null,\n  \"files_written\": [],\n  \"org_endpoint\": null\n}"
+        );
+    }
+
+    #[test]
+    fn requested_parent_guidance_has_one_deterministic_human_and_json_contract() {
+        let result = init_result();
+        assert_eq!(
+            render_init_human_with_parent_corpus(&result, true),
+            "Initialized repository key RAC\nConfig: repo/.decided/config.yaml\nParent corpus setup:\n1. Materialise the parent inside this repository before calculating its digest; AsDecided does not fetch or refresh it.\n2. Calculate its digest: decided corpus digest --root <parent-root> --corpus <parent-corpus>\n3. Declare the verified parent in .decided/corpus.md under ## inherits.\n4. Record explicit replacements under ## overrides."
+        );
+        assert_eq!(
+            render_init_json_with_parent_corpus(&result, true),
+            "{\n  \"schema_version\": \"1\",\n  \"repository_key\": \"RAC\",\n  \"config_path\": \"repo/.decided/config.yaml\",\n  \"created\": true,\n  \"profile\": null,\n  \"files_written\": [],\n  \"org_endpoint\": null,\n  \"parent_corpus_guidance\": {\n    \"materialise_first\": true,\n    \"manifest\": \".decided/corpus.md\",\n    \"inherits_heading\": \"## inherits\",\n    \"overrides_heading\": \"## overrides\",\n    \"digest_command\": \"decided corpus digest --root <parent-root> --corpus <parent-corpus>\"\n  }\n}"
+        );
+    }
 }

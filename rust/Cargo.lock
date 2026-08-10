@@ -131,6 +131,7 @@ name = "decided"
 version = "0.28.0"
 dependencies = [
  "asdecided-core",
+ "serde_json",
 ]
 
 [[package]]
