@@ -2906,7 +2906,7 @@ pub struct InitArgs {
     pub profile: Option<String>,
     /// Org endpoint URL (ADR-117); http(s)-validated in the service layer.
     pub org_endpoint: Option<String>,
-    /// Emit deterministic setup guidance for one materialised parent corpus.
+    /// Emit deterministic v2-first setup guidance for materialised parents.
     pub parent_corpus: bool,
     pub json: bool,
 }

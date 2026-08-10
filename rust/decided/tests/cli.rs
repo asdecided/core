@@ -95,9 +95,12 @@ fn init_parent_corpus_emits_guidance_without_creating_a_manifest() {
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     for expected in [
-        "Parent corpus setup:",
-        "Materialise the parent inside this repository",
+        "Parent corpus setup (manifest version 2):",
+        "Materialise every parent inside this repository",
+        "decided corpus digest --version 2 --root <parent-root> --corpus <parent-corpus>",
         "decided corpus digest --root <parent-root> --corpus <parent-corpus>",
+        "one to 32 verified parents",
+        "version: 2 parents sequence",
         ".decided/corpus.md",
         "## inherits",
         "## overrides",
@@ -138,6 +141,12 @@ fn init_parent_corpus_is_profile_composable_and_idempotent() {
     let fresh_stdout = String::from_utf8_lossy(&fresh.stdout);
     assert!(fresh_stdout.contains("\"profile\": \"default\""));
     assert!(fresh_stdout.contains("\"parent_corpus_guidance\": {"));
+    assert!(fresh_stdout.contains("\"recommended_manifest_version\": 2"));
+    assert!(fresh_stdout.contains("\"parents_field\": \"parents\""));
+    assert!(fresh_stdout.contains("\"multiple_parents\": true"));
+    assert!(fresh_stdout.contains(
+        "\"digest_command_v2\": \"decided corpus digest --version 2 --root <parent-root> --corpus <parent-corpus>\""
+    ));
     assert!(root.join(".mcp.json").is_file());
     assert!(root.join(".cursor/mcp.json").is_file());
     assert!(!root.join(".decided/corpus.md").exists());
@@ -152,7 +161,7 @@ fn init_parent_corpus_is_profile_composable_and_idempotent() {
     );
     let idempotent_stdout = String::from_utf8_lossy(&idempotent.stdout);
     assert!(idempotent_stdout.starts_with("Already initialized: repository key RAC\n"));
-    assert!(idempotent_stdout.contains("Parent corpus setup:"));
+    assert!(idempotent_stdout.contains("Parent corpus setup (manifest version 2):"));
     assert_eq!(
         fs::read(root.join(".decided/config.yaml")).expect("read config after re-init"),
         before
@@ -160,6 +169,26 @@ fn init_parent_corpus_is_profile_composable_and_idempotent() {
     assert!(!root.join(".decided/corpus.md").exists());
 
     fs::remove_dir_all(root).expect("remove parent-profile scratch repository");
+}
+
+#[test]
+fn init_profile_without_parent_request_keeps_guidance_absent() {
+    let root = empty_scratch_root("profile-without-parent-guidance");
+    let root_text = root.to_string_lossy().into_owned();
+    let output = run(&["init", &root_text, "--profile", "enterprise", "--json"]);
+    assert!(
+        output.status.success(),
+        "stdout={}, stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let payload: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("profile init JSON");
+    assert_eq!(payload["profile"], "enterprise");
+    assert!(payload.get("parent_corpus_guidance").is_none());
+    assert!(!root.join(".decided/corpus.md").exists());
+
+    fs::remove_dir_all(root).expect("remove profile-without-guidance scratch repository");
 }
 
 #[test]

@@ -1,0 +1,37 @@
+{
+  "description": "DecisionGrounding graph track: three direct parents, nested v1 and v2 ancestry, a large transitive standards corpus, and lexical hard negatives without source preference.",
+  "cases": [
+    {
+      "id": "GQ01",
+      "tool": "search_artifacts",
+      "category": "graph_large_parent",
+      "query": "quantum ledger compaction anchor",
+      "relevant": ["FEDEVAL-000000000001"],
+      "must_not_return": ["FEDEVAL-000000000002"]
+    },
+    {
+      "id": "GQ02",
+      "tool": "search_artifacts",
+      "category": "graph_large_parent",
+      "query": "signed anchor checkpoint pruning",
+      "relevant": ["FEDEVAL-000000000001"],
+      "must_not_return": ["FEDEVAL-000000000002", "FEDEVAL-000000000003"]
+    },
+    {
+      "id": "GQ03",
+      "tool": "search_artifacts",
+      "category": "graph_transitive_inheritance",
+      "query": "cerulean quorum rollback reconciliation signed epoch ledger",
+      "relevant": ["FEDEVAL-000000000004"],
+      "must_not_return": ["FEDEVAL-000000000006", "FEDEVAL-000000000007"]
+    },
+    {
+      "id": "GQ04",
+      "tool": "get_related",
+      "category": "graph_transitive_inheritance",
+      "query": "eval/deep-standards::FEDEVAL-000000000004",
+      "relevant": ["FEDEVAL-000000000005"],
+      "must_not_return": []
+    }
+  ]
+}
