@@ -3,17 +3,22 @@
 use std::fs;
 use std::path::PathBuf;
 use std::process::{Command, Output};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-fn scratch_root() -> PathBuf {
+static SCRATCH_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+fn scratch_suffix() -> String {
+    let sequence = SCRATCH_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("clock after epoch")
         .as_nanos();
-    let root = std::env::temp_dir().join(format!(
-        "asdecided-cli-positional-{}-{nonce}",
-        std::process::id()
-    ));
+    format!("{}-{nonce}-{sequence}", std::process::id())
+}
+
+fn scratch_root() -> PathBuf {
+    let root = std::env::temp_dir().join(format!("asdecided-cli-positional-{}", scratch_suffix()));
     fs::create_dir_all(&root).expect("create CLI smoke corpus");
     fs::write(
         root.join("decision.md"),
@@ -31,14 +36,7 @@ fn run(args: &[&str]) -> Output {
 }
 
 fn empty_scratch_root(label: &str) -> PathBuf {
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("clock after epoch")
-        .as_nanos();
-    let root = std::env::temp_dir().join(format!(
-        "asdecided-cli-{label}-{}-{nonce}",
-        std::process::id()
-    ));
+    let root = std::env::temp_dir().join(format!("asdecided-cli-{label}-{}", scratch_suffix()));
     fs::create_dir_all(&root).expect("create empty CLI scratch repository");
     root
 }
