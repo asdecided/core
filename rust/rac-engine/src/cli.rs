@@ -2160,6 +2160,7 @@ fn run_export(rest: &[&String]) -> u8 {
     let mut check = false;
     let mut client: Vec<String> = Vec::new();
     let mut out: Option<String> = None;
+    let mut local_only = false;
     let mut extras: Vec<String> = Vec::new();
     let mut positional_only = false;
 
@@ -2263,6 +2264,7 @@ fn run_export(rest: &[&String]) -> u8 {
                 }
             }
             "--check" => check = true,
+            "--local-only" => local_only = true,
             "--client" => {
                 i += 1;
                 match rest.get(i) {
@@ -2318,6 +2320,7 @@ fn run_export(rest: &[&String]) -> u8 {
         check,
         client,
         out,
+        local_only,
     }) as u8
 }
 

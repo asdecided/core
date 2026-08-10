@@ -845,16 +845,24 @@ artifacts — existing output is overwritten.
 
 - **Input:** `decided export [directory]` — scanned recursively for `*.md` (default: current directory).
 - **Modes:** *(default)* viewer JSON to stdout · `--html` (self-contained Portal file) · `--okf` (OKF v0.2 Markdown bundle) · `--documents` (JSONL for memory/RAG backends) · `--graph` (typed node+edge JSON for graph backends) · `--schema <viewer|documents|graph>` (the packaged JSON Schema, without reading a corpus) · `--agent-rules` (per-client agent-context files; see its own behaviour)
-- **Options:** `--out <path>` (only `--html`/`--okf`/`--agent-rules`; the stdout modes are pipeable) · `--json` (no-op for the default mode)
+- **Options:** `--out <path>` (only `--html`/`--okf`/`--agent-rules`; the stdout modes are pipeable) · `--json` (no-op for the default mode) · `--local-only` (viewer/HTML, documents, and graph projections only)
 - **Exit codes:** `0` success · `2` not a directory, or `--out` given to a stdout mode
 
 ```bash
 decided export decisions/                      # viewer JSON to stdout
 decided export decisions/ --documents          # JSONL, one record per artifact
 decided export decisions/ --graph              # typed node+edge graph
+decided export decisions/ --local-only         # writable child records only
 decided export --schema documents              # Draft 2020-12 record schema
 decided export decisions/ --html --out asdecided.html
 ```
+
+When `.decided/corpus.md` declares a verified parent, viewer, documents, and
+graph exports include inherited records by default. Records and edges carry
+their own source, layer, and verified-pin provenance; explicit overrides retain
+both the parent history and local replacement. `--local-only` is a human
+diagnostic/export projection of the writable child records. OKF bundles and
+generated agent rules remain local-only and do not accept the flag.
 
 The three machine-readable payload contracts, compatibility rules, and direct
 schema links are documented on the [Export contracts](export-contracts.md)

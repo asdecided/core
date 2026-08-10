@@ -64,21 +64,24 @@ export function App() {
     () => (data ? buildIndex(data) : null),
     [data],
   );
+  const indexRef = useRef<CorpusIndex | null>(index);
+  indexRef.current = index;
 
   // Editor-host bridge (v0.21.7): announce readiness and apply the host's
   // reveal requests. Inert in a standalone Portal (no host).
   useEffect(() => {
     const unsubscribe = onRevealArtifact((id) => {
-      setActiveId(id);
+      const key = indexRef.current?.citationLookup.get(id.toLowerCase()) ?? id;
+      setActiveId(key);
       // In the graph view a reveal just roots/highlights the node; it does not
       // navigate away. Elsewhere it opens the detail page, as before.
       if (viewRef.current === 'graph') return;
-      const target = `#/artifact/${encodeURIComponent(id)}`;
+      const target = `#/artifact/${encodeURIComponent(key)}`;
       if (window.location.hash === target) {
         revealedRef.current = null; // already here — nothing to suppress
         return;
       }
-      revealedRef.current = id;
+      revealedRef.current = key;
       window.location.hash = target;
     });
     postReady();

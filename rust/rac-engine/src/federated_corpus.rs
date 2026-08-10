@@ -7,7 +7,7 @@
 //! materialisation subtree before any derived model is built.
 
 use std::fmt;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use serde::Deserialize;
 
@@ -28,6 +28,8 @@ use crate::validate::{apply_overrides, has_errors, SeverityOverrides};
 
 pub const PARENT_CORPUS_INVALID: &str = "parent-corpus-invalid";
 pub const FEDERATED_CORPUS_SNAPSHOT_FAILED: &str = "federated-corpus-snapshot-failed";
+pub const FEDERATED_WRITE_TARGET_RESOLUTION_FAILED: &str =
+    "federated-write-target-resolution-failed";
 
 /// One stable, displayable failure at the verification/composition boundary.
 #[derive(Debug)]
@@ -39,6 +41,10 @@ pub enum FederatedCorpusError {
         detail: String,
     },
     LocalSnapshot {
+        path: PathBuf,
+        message: String,
+    },
+    WriteTarget {
         path: PathBuf,
         message: String,
     },
@@ -55,6 +61,7 @@ impl FederatedCorpusError {
             Self::Parent(error) => error.stable_code(),
             Self::ParentInvalid { .. } => PARENT_CORPUS_INVALID,
             Self::LocalSnapshot { .. } => FEDERATED_CORPUS_SNAPSHOT_FAILED,
+            Self::WriteTarget { .. } => FEDERATED_WRITE_TARGET_RESOLUTION_FAILED,
             Self::Composition { code, .. } => code,
         }
     }
@@ -63,7 +70,7 @@ impl FederatedCorpusError {
         match self {
             Self::Parent(error) => error.path.as_deref(),
             Self::ParentInvalid { path, .. } | Self::Composition { path, .. } => Some(path),
-            Self::LocalSnapshot { path, .. } => Some(path),
+            Self::LocalSnapshot { path, .. } | Self::WriteTarget { path, .. } => Some(path),
         }
     }
 }
@@ -92,6 +99,11 @@ impl fmt::Display for FederatedCorpusError {
             Self::LocalSnapshot { path, message } => write!(
                 formatter,
                 "{FEDERATED_CORPUS_SNAPSHOT_FAILED}: cannot snapshot {}: {message}",
+                path.display()
+            ),
+            Self::WriteTarget { path, message } => write!(
+                formatter,
+                "{FEDERATED_WRITE_TARGET_RESOLUTION_FAILED}: cannot safely resolve write target {}: {message}",
                 path.display()
             ),
             Self::Composition { code, message, .. } => write!(formatter, "{code}: {message}"),
@@ -471,33 +483,113 @@ pub fn compose_verified_generation_from_snapshot(
     Ok(corpus)
 }
 
+fn absolute_write_target(path: &Path) -> Result<PathBuf, FederatedCorpusError> {
+    if path.is_absolute() {
+        Ok(path.to_path_buf())
+    } else {
+        Ok(std::env::current_dir()
+            .map_err(|error| FederatedCorpusError::WriteTarget {
+                path: path.to_path_buf(),
+                message: error.to_string(),
+            })?
+            .join(path))
+    }
+}
+
+fn lexical_normalize(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+            Component::RootDir => normalized.push(component.as_os_str()),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            Component::Normal(part) => normalized.push(part),
+        }
+    }
+    normalized
+}
+
+fn manifest_root(path: &Path) -> Option<&Path> {
+    path.ancestors().find(|ancestor| {
+        ancestor
+            .join(crate::federation::MANIFEST_RELATIVE_PATH)
+            .is_file()
+    })
+}
+
+/// Resolve existing path components in traversal order so a symlink followed
+/// by `..` has filesystem semantics, while still retaining a normalized
+/// suffix for a not-yet-created output. A `..` after a missing component is
+/// deliberately ambiguous and therefore rejected for configured corpora.
+fn resolve_write_target(path: &Path) -> Result<PathBuf, String> {
+    let mut resolved = PathBuf::new();
+    let mut missing_components = 0usize;
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix) => resolved.push(prefix.as_os_str()),
+            Component::RootDir => resolved.push(component.as_os_str()),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if missing_components != 0 {
+                    return Err(
+                        "a '..' component follows a nonexistent path component".to_string()
+                    );
+                }
+                resolved.pop();
+            }
+            Component::Normal(part) if missing_components != 0 => {
+                resolved.push(part);
+                missing_components += 1;
+            }
+            Component::Normal(part) => {
+                let candidate = resolved.join(part);
+                match std::fs::symlink_metadata(&candidate) {
+                    Ok(_) => {
+                        resolved = std::fs::canonicalize(&candidate)
+                            .map_err(|error| error.to_string())?;
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                        resolved.push(part);
+                        missing_components = 1;
+                    }
+                    Err(error) => return Err(error.to_string()),
+                }
+            }
+        }
+    }
+    Ok(resolved)
+}
+
 /// Whether a mutation target lies in a configured parent's read-only
-/// materialisation. The manifest search is path-ancestor based (rather than
-/// nearest-config based) so a target inside the parent checkout still finds
-/// the child repository's governing manifest.
+/// materialisation. Existing ancestors are canonicalized before containment
+/// is checked, and missing suffixes remain lexical, so neither `..` nor a
+/// symlink ancestor can disguise a new output inside the inherited tree.
 pub fn is_read_only_materialised_path(
     target: impl AsRef<Path>,
 ) -> Result<bool, FederatedCorpusError> {
     let target = target.as_ref();
-    let absolute = if target.is_absolute() {
-        target.to_path_buf()
-    } else {
-        std::env::current_dir()
-            .unwrap_or_else(|_| PathBuf::from("."))
-            .join(target)
+    let absolute = absolute_write_target(target)?;
+    let lexical = lexical_normalize(&absolute);
+    let resolved = match resolve_write_target(&absolute) {
+        Ok(resolved) => resolved,
+        Err(message) => {
+            if manifest_root(&lexical).is_none() {
+                return Ok(false);
+            }
+            return Err(FederatedCorpusError::WriteTarget {
+                path: target.to_path_buf(),
+                message,
+            });
+        }
     };
-    let start = if absolute.is_dir() {
-        absolute.as_path()
-    } else {
-        absolute.parent().unwrap_or(absolute.as_path())
-    };
-    let Some(child_root) = start.ancestors().find(|ancestor| {
-        ancestor
-            .join(crate::federation::MANIFEST_RELATIVE_PATH)
-            .is_file()
-    }) else {
+    let Some(child_root) = manifest_root(&resolved).or_else(|| manifest_root(&lexical)) else {
         return Ok(false);
     };
-    Ok(verify_parent(child_root)?
-        .is_some_and(|verified| verified.contains_materialised_path(&absolute)))
+    Ok(verify_parent(child_root)?.is_some_and(|verified| {
+        resolved == verified.materialisation_root
+            || resolved.starts_with(&verified.materialisation_root)
+    }))
 }

@@ -1,17 +1,17 @@
 //! Portal HTML assembly (`decided.output.portal`) — inject the export payload
 //! into the vendored shell, per PORT-CONTRACT.d/17 §2.
 //!
-//! The shell is the exact packaged asset the oracle ships
-//! (`src/asdecided/templates/portal/asdecided-portal-shell.html`, vendored from
-//! lore-web @ ed4dd42, 182669 bytes), embedded at compile time so the
-//! emitted HTML is byte-identical. The unit test below pins the embed to
-//! the Python package file: re-vendor `assets/portal/` in lockstep
-//! whenever the oracle's shell changes.
+//! The legacy shell is retained byte-for-byte for repositories without a
+//! federation manifest. Federated exports use the source-aware shell. Both
+//! assets are embedded at compile time and share the same payload seam.
 
 use crate::export::CorpusExport;
 
-/// The packaged Portal shell, embedded verbatim.
-pub const SHELL: &str = include_str!("../assets/portal/asdecided-portal-shell.html");
+/// The prerequisite Portal shell, embedded verbatim for no-manifest output.
+pub const SHELL: &str = include_str!("../assets/portal/asdecided-portal-legacy-shell.html");
+
+/// The source-aware Portal shell used only for a composed federated export.
+pub const FEDERATED_SHELL: &str = include_str!("../assets/portal/asdecided-portal-shell.html");
 
 /// The exact empty data seam the shell-only viewer build emits (no
 /// whitespace inside the element); the populated form replaces it verbatim.
@@ -32,8 +32,8 @@ fn escape_for_script(payload: &str) -> String {
 /// `PortalSeamMissing` guard is retained for contract fidelity (its message
 /// bytes feed `decided: <msg>`, exit 2). Both are operational errors in the
 /// oracle, not caller errors.
-pub fn render_export_html(export: &CorpusExport) -> Result<String, String> {
-    if SHELL.matches(SEAM).count() != 1 {
+fn render_export_html_with_shell(export: &CorpusExport, shell: &str) -> Result<String, String> {
+    if shell.matches(SEAM).count() != 1 {
         return Err(format!(
             "packaged portal shell has no usable data seam \
              ({SEAM}); re-vendor it: cd decided-localview && npm run vendor:shell"
@@ -43,7 +43,15 @@ pub fn render_export_html(export: &CorpusExport) -> Result<String, String> {
     let populated =
         format!(r#"<script type="application/json" id="lore-export">{payload}</script>"#);
     // `str.replace` on a count-1 needle: a single substitution.
-    Ok(SHELL.replacen(SEAM, &populated, 1))
+    Ok(shell.replacen(SEAM, &populated, 1))
+}
+
+pub fn render_export_html(export: &CorpusExport) -> Result<String, String> {
+    render_export_html_with_shell(export, SHELL)
+}
+
+pub fn render_federated_export_html(export: &CorpusExport) -> Result<String, String> {
+    render_export_html_with_shell(export, FEDERATED_SHELL)
 }
 
 #[cfg(test)]
@@ -53,6 +61,8 @@ mod tests {
     #[test]
     fn shell_carries_exactly_one_empty_seam() {
         assert_eq!(SHELL.matches(SEAM).count(), 1);
+        assert_eq!(FEDERATED_SHELL.matches(SEAM).count(), 1);
+        assert_ne!(SHELL, FEDERATED_SHELL);
     }
 
     /// The two escapes in the oracle's order; the comment-open rewrite must

@@ -32,7 +32,11 @@ A single JSON document, as emitted by `decided export --json`.
       "status": "Accepted",
       "title": "ADR-027: CI test topology",
       "path": "decisions/decisions/adr-027-ci-test-topology.md",
-      "body_html": "<p>…</p>"
+      "body_html": "<p>…</p>",
+      "provenance": {
+        "source": "asdecided/core",
+        "layer": "local"
+      }
     }
   ],
   "relationships": [
@@ -68,13 +72,14 @@ Ordered by `path`.
 
 | field       | type     | meaning                                                |
 | ----------- | -------- | ------------------------------------------------------ |
-| `id`        | string   | Opaque stable artifact ID, unique within the corpus (`RAC-KTQ63DSC8SZW`). |
+| `id`        | string   | Opaque stable artifact ID, unique within its owning source (`RAC-KTQ63DSC8SZW`). |
 | `aliases`   | string[] | Human aliases as emitted by Core identity, e.g. `["adr-027", "adr-027-ci-test-topology"]`. May be empty. |
 | `type`      | string   | Artifact family (`decision`, `requirement`, …). Open set; the viewer derives its type filter from the values present. |
 | `status`    | string   | Lifecycle status in its authored casing (`Accepted`, `Proposed`, `Superseded`, …). Open set — see case handling below. |
 | `title`     | string   | Plain text.                                            |
 | `path`      | string   | Source path within the repository. Shown as a muted provenance line on the detail view. |
 | `body_html` | string   | The artifact body **rendered to HTML at export time** (see trust model). |
+| `provenance` | object  | Optional on legacy/no-manifest payloads. Manifest-backed records carry owning `source`, `layer`, inherited `pin`, and any ordered override mappings. |
 
 #### Alias display
 
@@ -83,7 +88,10 @@ a **display name**: deterministically, the first alias that differs
 from the `id`, else the `id` itself. The display name is used on list
 rows, the detail heading, and related-artifact links; the opaque `id`
 stays visible on the detail view's provenance line (alongside `path`)
-and remains the routing key (`#/artifact/<id>`).
+and remains the legacy routing key (`#/artifact/<id>`). For manifest-backed
+records, the viewer keys and routes on `(provenance.source, id)`, encoded as one
+`<source>::<id>` hash segment. This retains both records in a valid same-ID
+override. A payload without provenance keeps its exact bare-ID routes.
 
 #### Status case handling
 
@@ -96,11 +104,14 @@ render plain.
 
 ### `relationships[]` — edges
 
-Each edge is `{ "from": ID, "to": ID-or-alias, "type": string }` and
-reads "`from` `type` `to`". Ordered by (from, to). Core emits **only**
-`relates-to`; richer edge typing is a future Core decision. `to` may be
-an unresolved alias preserved verbatim — the viewer renders those as
-"(not in corpus)" rather than dropping them.
+Each edge retains `{ "from": ID, "to": ID-or-alias, "type": string }` and
+reads "`from` `type` `to`". A manifest-backed edge also carries
+`from_identity` and nullable `to_identity` `{source,id}` objects plus the
+declaring artifact's provenance. The viewer uses those identities for graph,
+inbound/outbound, and detail links. Ordered by source-aware endpoint identity.
+Core emits **only** `relates-to`; richer edge typing is a future Core decision.
+`to` may be an unresolved alias preserved verbatim — the viewer renders those
+as "(not in corpus)" rather than dropping them.
 
 The type set stays open for forward compatibility. The viewer keeps
 inverse labels for types a future Core might emit (accepted if they
@@ -216,7 +227,7 @@ cited ids and aliases in text nodes are linkified). The viewer performs
 ## 4. Viewer behaviour summary
 
 - Read-only; no router dependency — state is hash-based
-  (`#/` list, `#/artifact/<id>` detail) so deep links work from
+  (`#/` list, `#/artifact/<id-or-source-key>` detail) so deep links work from
   `file://`.
 - List view: every artifact as a row (display name + title + chips);
   filter toggles for type and status derived from the corpus (status

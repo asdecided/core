@@ -2,7 +2,7 @@ import { memo, useEffect, useMemo, useState } from 'react';
 import type { RefObject } from 'react';
 import { KeyboardHint } from '../components';
 import type { CorpusIndex } from './data';
-import { displayName } from './data';
+import { artifactKey, displayName } from './data';
 import type { Artifact } from './types';
 import { ArtifactChips } from './chips';
 
@@ -38,7 +38,7 @@ const Row = memo(function Row({ artifact }: { artifact: Artifact }) {
     <li className="viewer-rowitem">
       <a
         className="viewer-row"
-        href={`#/artifact/${encodeURIComponent(artifact.id)}`}
+        href={`#/artifact/${encodeURIComponent(artifactKey(artifact))}`}
       >
         <span className="viewer-row__id">{displayName(artifact)}</span>
         <span className="viewer-row__title">{artifact.title}</span>
@@ -149,7 +149,7 @@ export function ListView({ index, filters, onFilters, searchRef }: ListViewProps
       {visible.length > 0 ? (
         <ul className="viewer-rows">
           {visible.map((artifact) => (
-            <Row key={artifact.id} artifact={artifact} />
+            <Row key={artifactKey(artifact)} artifact={artifact} />
           ))}
         </ul>
       ) : (
