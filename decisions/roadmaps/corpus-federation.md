@@ -150,11 +150,25 @@ isolation, YAML structural bombs, overlong paths, hard links, mount/reparse
 boundaries, unsupported filesystem identity, cold/warm/no-cache parity, MCP
 budgets/audit, exports/Portal, and Linux/macOS/Windows containment.
 
+Implementation evidence now includes a committed track using the existing
+DecisionGrounding scorer and metric gate: three direct parents, nested v1 and
+v2 ancestry, a 40-artifact transitive standards source, a 32-inbound weak hard
+negative, combined source-neutral ranking, and transitive search/relationship
+retrieval. The broader certification matrix above remains open; this evidence
+does not change the Proposed implementation requirements or this roadmap's
+Planned status.
+
 ### Profile guidance
 
 Update explicit `decided init --parent-corpus` guidance to show the v2 manifest
 and `decided corpus digest --version 2` without creating a manifest, fetching a
 source, or changing ordinary init/profile bytes.
+
+The opt-in guidance now recommends manifest version 2, the bounded `parents`
+sequence, and the explicit version-2 digest command while retaining the
+version-1 command for existing single-parent manifests. Focused CLI contracts
+prove fresh, idempotent, profiled, and unrequested flows; no manifest or parent
+bytes are written. This narrow evidence does not complete the programme.
 
 ## Constraints
 

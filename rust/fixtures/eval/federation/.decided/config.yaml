@@ -1,0 +1,3 @@
+repository_key: GRAPH
+corpus:
+  source: eval/graph-root
