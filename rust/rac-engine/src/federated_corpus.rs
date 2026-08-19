@@ -17,7 +17,13 @@ use crate::composition::{
     FINDING_INVALID_OVERRIDE,
 };
 use crate::corpus::{CorpusLayer, PhysicalArtifactLocator, PhysicalCorpusLocator};
-use crate::federation::{verify_parent, ParentCorpusError, SnapshotFile, VerifiedParent};
+use crate::federation::{
+    direct_graph_materialisation_roots, load_graph_manifest, verify_federation, verify_parent,
+    ParentCorpusError, SnapshotFile, VerifiedParent,
+};
+use crate::graph_federated_corpus::{
+    compose_verified_federation, GraphFederatedCorpusError,
+};
 use crate::parse::parse_bytes;
 use crate::relationships::{
     relationship_severity, validation_from_rows, validation_row_from_item, CorpusItem,
@@ -35,6 +41,7 @@ pub const FEDERATED_WRITE_TARGET_RESOLUTION_FAILED: &str =
 #[derive(Debug)]
 pub enum FederatedCorpusError {
     Parent(ParentCorpusError),
+    Graph(GraphFederatedCorpusError),
     ParentInvalid {
         source: String,
         path: PathBuf,
@@ -59,6 +66,7 @@ impl FederatedCorpusError {
     pub fn stable_code(&self) -> &str {
         match self {
             Self::Parent(error) => error.stable_code(),
+            Self::Graph(error) => error.stable_code(),
             Self::ParentInvalid { .. } => PARENT_CORPUS_INVALID,
             Self::LocalSnapshot { .. } => FEDERATED_CORPUS_SNAPSHOT_FAILED,
             Self::WriteTarget { .. } => FEDERATED_WRITE_TARGET_RESOLUTION_FAILED,
@@ -69,8 +77,38 @@ impl FederatedCorpusError {
     pub fn path(&self) -> Option<&Path> {
         match self {
             Self::Parent(error) => error.path.as_deref(),
+            Self::Graph(error) => error.relative_path.as_deref().map(Path::new),
             Self::ParentInvalid { path, .. } | Self::Composition { path, .. } => Some(path),
             Self::LocalSnapshot { path, .. } | Self::WriteTarget { path, .. } => Some(path),
+        }
+    }
+
+    /// Stable source ownership for a graph-topology or inherited-node
+    /// validation failure. Version-1 failures which predate this carrier leave
+    /// it absent and retain their released rendering path.
+    pub fn validation_origin(&self) -> Option<&crate::federation::FederationValidationOrigin> {
+        match self {
+            Self::Parent(error) => error.validation_origin.as_deref(),
+            Self::Graph(error) => error.validation_origin.as_deref(),
+            _ => None,
+        }
+    }
+
+    /// Lexicographically minimal source route for a graph-topology finding.
+    pub fn source_route(&self) -> Option<&[String]> {
+        match self {
+            Self::Parent(error) => error.source_route.as_deref().map(Vec::as_slice),
+            Self::Graph(error) => error.source_route.as_deref().map(Vec::as_slice),
+            _ => None,
+        }
+    }
+
+    /// Exact number of verified physical routes represented by the finding.
+    pub fn route_count(&self) -> Option<usize> {
+        match self {
+            Self::Parent(error) => error.route_count.as_deref().copied(),
+            Self::Graph(error) => error.route_count.as_deref().copied(),
+            _ => None,
         }
     }
 }
@@ -92,6 +130,7 @@ impl fmt::Display for FederatedCorpusError {
                 }
                 write!(formatter, "{}: {message}", error.stable_code())
             }
+            Self::Graph(error) => write!(formatter, "{error}"),
             Self::ParentInvalid { source, detail, .. } => write!(
                 formatter,
                 "{PARENT_CORPUS_INVALID}: parent source '{source}' is invalid: {detail}"
@@ -116,6 +155,12 @@ impl std::error::Error for FederatedCorpusError {}
 impl From<ParentCorpusError> for FederatedCorpusError {
     fn from(error: ParentCorpusError) -> Self {
         Self::Parent(error)
+    }
+}
+
+impl From<GraphFederatedCorpusError> for FederatedCorpusError {
+    fn from(error: GraphFederatedCorpusError) -> Self {
+        Self::Graph(error)
     }
 }
 
@@ -396,6 +441,80 @@ fn local_items_from_snapshot(
     (items, contents)
 }
 
+/// Locate a configured repository even when its config is invalid or has
+/// disappeared. A present manifest is authoritative topology and must not be
+/// bypassed by falling back to a local-only corpus walk.
+fn composition_repository_root(directory: &str) -> PathBuf {
+    let input = Path::new(directory);
+    let absolute = if input.is_absolute() {
+        input.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map(|current| current.join(input))
+            .unwrap_or_else(|_| input.to_path_buf())
+    };
+    let search = std::fs::canonicalize(&absolute).unwrap_or(absolute);
+    for ancestor in search.ancestors() {
+        let manifest = ancestor.join(crate::federation::MANIFEST_RELATIVE_PATH);
+        let config = ancestor.join(crate::federation::CONFIG_RELATIVE_PATH);
+        if std::fs::symlink_metadata(&manifest).is_ok()
+            || std::fs::symlink_metadata(&config).is_ok()
+        {
+            return ancestor.to_path_buf();
+        }
+    }
+    crate::validate::repository_root(directory)
+}
+
+fn graph_corpus_relative(
+    directory: &str,
+    repository_root: &Path,
+) -> Result<String, FederatedCorpusError> {
+    let corpus = std::fs::canonicalize(directory).map_err(|error| {
+        FederatedCorpusError::LocalSnapshot {
+            path: PathBuf::from(directory),
+            message: error.to_string(),
+        }
+    })?;
+    let root = std::fs::canonicalize(repository_root).map_err(|error| {
+        FederatedCorpusError::LocalSnapshot {
+            path: repository_root.to_path_buf(),
+            message: error.to_string(),
+        }
+    })?;
+    let relative = corpus.strip_prefix(&root).map_err(|_| {
+        FederatedCorpusError::LocalSnapshot {
+            path: PathBuf::from(directory),
+            message: "corpus path escapes the configured repository root".to_string(),
+        }
+    })?;
+    let text = relative.to_string_lossy().replace('\\', "/");
+    if text.is_empty() {
+        return Err(FederatedCorpusError::LocalSnapshot {
+            path: PathBuf::from(directory),
+            message: "version-2 federation requires a repository-relative corpus path"
+                .to_string(),
+        });
+    }
+    Ok(text)
+}
+
+/// Locate a configured version-2 graph for cache-backed read consumers.
+///
+/// `None` preserves the released no-manifest and manifest-v1 paths. A present
+/// malformed v2 manifest remains an error, and callers receive the exact
+/// repository/corpus pair consumed by [`verify_federation`].
+pub fn graph_cache_location(
+    directory: &str,
+) -> Result<Option<(PathBuf, String)>, FederatedCorpusError> {
+    let repository_root = composition_repository_root(directory);
+    if load_graph_manifest(&repository_root)?.is_none() {
+        return Ok(None);
+    }
+    let corpus_relative = graph_corpus_relative(directory, &repository_root)?;
+    Ok(Some((repository_root, corpus_relative)))
+}
+
 /// Load the central federated read model for `directory`.
 ///
 /// `Ok(None)` is the deliberate no-manifest compatibility result. Every
@@ -405,12 +524,39 @@ pub fn load_composed_corpus(
     directory: &str,
     recursive: bool,
 ) -> Result<Option<ComposedCorpus>, FederatedCorpusError> {
-    let child_root = crate::validate::repository_root(directory);
+    if let Some(corpus) = load_graph_composed_corpus(directory, recursive)? {
+        return Ok(Some(corpus));
+    }
+    let child_root = composition_repository_root(directory);
     let Some(verified) = verify_parent(&child_root)? else {
         return Ok(None);
     };
 
     compose_verified_generation(directory, recursive, &verified).map(Some)
+}
+
+/// Load only a version-2 graph composition. A version-1 or unconfigured
+/// repository returns `Ok(None)` without entering its verification path, so
+/// consumers which are additive only for graph federation can preserve the
+/// released version-1/no-manifest behaviour byte for byte.
+pub fn load_graph_composed_corpus(
+    directory: &str,
+    _recursive: bool,
+) -> Result<Option<ComposedCorpus>, FederatedCorpusError> {
+    let child_root = composition_repository_root(directory);
+    if load_graph_manifest(&child_root)?.is_none() {
+        return Ok(None);
+    }
+    let corpus_relative = graph_corpus_relative(directory, &child_root)?;
+    let verified = verify_federation(&child_root, &corpus_relative)?.ok_or_else(|| {
+        FederatedCorpusError::LocalSnapshot {
+            path: child_root.join(crate::federation::MANIFEST_RELATIVE_PATH),
+            message: "version-2 manifest changed during verification".to_string(),
+        }
+    })?;
+    compose_verified_federation(verified)
+        .map(|corpus| Some(corpus.into_composed_corpus()))
+        .map_err(Into::into)
 }
 
 /// Return the writable local layer for a configured corpus, or the released
@@ -533,12 +679,26 @@ fn lexical_normalize(path: &Path) -> PathBuf {
     normalized
 }
 
-fn manifest_root(path: &Path) -> Option<&Path> {
-    path.ancestors().find(|ancestor| {
-        ancestor
-            .join(crate::federation::MANIFEST_RELATIVE_PATH)
-            .is_file()
-    })
+fn manifest_roots(path: &Path) -> Result<Vec<PathBuf>, String> {
+    let mut roots = Vec::new();
+    let start = match std::fs::symlink_metadata(path) {
+        Ok(metadata) if !metadata.is_dir() => path.parent().unwrap_or(path),
+        _ => path,
+    };
+    for ancestor in start.ancestors() {
+        let manifest = ancestor.join(crate::federation::MANIFEST_RELATIVE_PATH);
+        match std::fs::symlink_metadata(&manifest) {
+            Ok(_) => roots.push(ancestor.to_path_buf()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(format!(
+                    "cannot inspect federation manifest {}: {error}",
+                    manifest.display()
+                ))
+            }
+        }
+    }
+    Ok(roots)
 }
 
 /// Resolve existing path components in traversal order so a symlink followed
@@ -584,6 +744,76 @@ fn resolve_write_target(path: &Path) -> Result<PathBuf, String> {
     Ok(resolved)
 }
 
+/// Traversal-safe containment for an output path against already-verified
+/// read-only roots. Ambiguous nonexistent `..` traversals are errors so cache
+/// callers can safely degrade to a non-persistent in-memory model.
+pub(crate) fn write_target_within_roots(
+    target: impl AsRef<Path>,
+    roots: &[PathBuf],
+) -> Result<bool, FederatedCorpusError> {
+    let target = target.as_ref();
+    let absolute = absolute_write_target(target)?;
+    let lexical = lexical_normalize(&absolute);
+    let resolved = resolve_write_target(&absolute).map_err(|message| {
+        FederatedCorpusError::WriteTarget {
+            path: target.to_path_buf(),
+            message,
+        }
+    })?;
+    Ok(roots.iter().any(|root| {
+        resolved == *root
+            || resolved.starts_with(root)
+            || lexical == *root
+            || lexical.starts_with(root)
+    }))
+}
+
+/// Whether a diagnostic target is inside any manifest-v2 materialisation.
+///
+/// Version 1 is deliberately excluded so its released physical `inspect`
+/// behaviour stays unchanged. In version 2, a nearer parent config must not
+/// hide the governing child graph when a user names `vendor/parent/...`
+/// directly.
+pub fn is_read_only_graph_materialised_path(
+    target: impl AsRef<Path>,
+) -> Result<bool, FederatedCorpusError> {
+    let target = target.as_ref();
+    let absolute = absolute_write_target(target)?;
+    let lexical = lexical_normalize(&absolute);
+    let resolved = resolve_write_target(&absolute).map_err(|message| {
+        FederatedCorpusError::WriteTarget {
+            path: target.to_path_buf(),
+            message,
+        }
+    })?;
+    let discover = |path: &Path| {
+        manifest_roots(path).map_err(|message| FederatedCorpusError::WriteTarget {
+            path: target.to_path_buf(),
+            message,
+        })
+    };
+    let mut child_roots = discover(&resolved)?;
+    for root in discover(&lexical)? {
+        if !child_roots.iter().any(|existing| existing == &root) {
+            child_roots.push(root);
+        }
+    }
+    for child_root in child_roots {
+        let Some(roots) = direct_graph_materialisation_roots(&child_root)? else {
+            continue;
+        };
+        if roots.iter().any(|root| {
+            resolved == *root
+                || resolved.starts_with(root)
+                || lexical == *root
+                || lexical.starts_with(root)
+        }) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 /// Whether a mutation target lies in a configured parent's read-only
 /// materialisation. Existing ancestors are canonicalized before containment
 /// is checked, and missing suffixes remain lexical, so neither `..` nor a
@@ -597,7 +827,13 @@ pub fn is_read_only_materialised_path(
     let resolved = match resolve_write_target(&absolute) {
         Ok(resolved) => resolved,
         Err(message) => {
-            if manifest_root(&lexical).is_none() {
+            let roots = manifest_roots(&lexical).map_err(|manifest_error| {
+                FederatedCorpusError::WriteTarget {
+                    path: target.to_path_buf(),
+                    message: manifest_error,
+                }
+            })?;
+            if roots.is_empty() {
                 return Ok(false);
             }
             return Err(FederatedCorpusError::WriteTarget {
@@ -606,11 +842,36 @@ pub fn is_read_only_materialised_path(
             });
         }
     };
-    let Some(child_root) = manifest_root(&resolved).or_else(|| manifest_root(&lexical)) else {
-        return Ok(false);
+    let discover = |path: &Path| {
+        manifest_roots(path).map_err(|message| FederatedCorpusError::WriteTarget {
+            path: target.to_path_buf(),
+            message,
+        })
     };
-    Ok(verify_parent(child_root)?.is_some_and(|verified| {
-        resolved == verified.materialisation_root
-            || resolved.starts_with(&verified.materialisation_root)
-    }))
+    let mut child_roots = discover(&resolved)?;
+    for root in discover(&lexical)? {
+        if !child_roots.iter().any(|existing| existing == &root) {
+            child_roots.push(root);
+        }
+    }
+    if child_roots.is_empty() {
+        return Ok(false);
+    }
+    let mut read_only = false;
+    for child_root in child_roots {
+        if let Some(roots) = direct_graph_materialisation_roots(&child_root)? {
+            read_only |= roots.iter().any(|root| {
+                resolved == *root
+                    || resolved.starts_with(root)
+                    || lexical == *root
+                    || lexical.starts_with(root)
+            });
+        } else if let Some(verified) = verify_parent(&child_root)? {
+            read_only |= resolved == verified.materialisation_root
+                || resolved.starts_with(&verified.materialisation_root)
+                || lexical == verified.materialisation_root
+                || lexical.starts_with(&verified.materialisation_root);
+        }
+    }
+    Ok(read_only)
 }

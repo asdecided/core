@@ -1,3 +1,4 @@
+use rac_engine::corpus::Layer;
 use rac_engine::federation::{
     calculate_parent_digest_v2, digest_snapshot_v2, load_graph_manifest, load_manifest,
     verify_federation, ParentCorpusErrorCode, SnapshotFile,
@@ -128,6 +129,12 @@ fn verifies_every_diamond_route_then_deduplicates_the_logical_source() {
     assert_eq!(closure.materialisation_roots.len(), 4);
     assert_eq!(closure.node("acme/a").unwrap().manifest_version, Some(2));
     assert!(closure.node("acme/a").unwrap().overrides.is_some());
+    let shared = closure.node("acme/shared").unwrap();
+    assert_eq!(
+        shared.source_route,
+        ["acme/root", "acme/a", "acme/shared"]
+    );
+    assert_eq!(shared.route_count, 2);
     assert_eq!(
         closure
             .root_files
@@ -160,10 +167,17 @@ fn a_tampered_second_diamond_route_fails_instead_of_trusting_the_first_copy() {
 fn same_source_with_distinct_verified_v2_digests_is_a_divergent_pin() {
     let root = scratch("divergent");
     diamond(&root, "different\n");
+    let error = verify_federation(&root, "decisions").unwrap_err();
+    assert_eq!(error.code, ParentCorpusErrorCode::DivergentPin);
     assert_eq!(
-        verify_federation(&root, "decisions").unwrap_err().code,
-        ParentCorpusErrorCode::DivergentPin
+        error.source_route.as_deref().unwrap(),
+        &["acme/root", "acme/a", "acme/shared"]
     );
+    assert_eq!(error.route_count.as_deref().copied(), Some(2));
+    let origin = error.validation_origin.unwrap();
+    assert_eq!(origin.source, "acme/root");
+    assert_eq!(origin.layer, Layer::Local);
+    assert_eq!(origin.pin, None);
     fs::remove_dir_all(root).unwrap();
 }
 
@@ -194,10 +208,14 @@ fn active_root_source_recurrence_is_a_cycle_after_pin_verification() {
         &root,
         &[("branch", "acme/branch", "vendor/branch", &branch_pin)],
     );
+    let error = verify_federation(&root, "decisions").unwrap_err();
+    assert_eq!(error.code, ParentCorpusErrorCode::Cycle);
     assert_eq!(
-        verify_federation(&root, "decisions").unwrap_err().code,
-        ParentCorpusErrorCode::Cycle
+        error.source_route.as_deref().unwrap(),
+        &["acme/root", "acme/branch", "acme/root"]
     );
+    assert_eq!(error.route_count.as_deref().copied(), Some(1));
+    assert_eq!(error.validation_origin.unwrap().source, "acme/root");
     fs::remove_dir_all(root).unwrap();
 }
 
@@ -261,6 +279,60 @@ fn version_one_stays_on_the_existing_loader_path() {
     fs::remove_dir_all(root).unwrap();
 }
 
+#[test]
+fn malformed_version_one_retains_the_exact_v1_diagnostic() {
+    let root = scratch("v1-diagnostic");
+    node(&root, "acme/root", "root\n");
+    fs::write(
+        root.join(".decided/corpus.md"),
+        "# Corpus\n\n## inherits\n\n```yaml\nversion: 1\n```\n\n```yaml\nversion: 1\n```\n",
+    )
+    .unwrap();
+    assert!(load_graph_manifest(&root).unwrap().is_none());
+    let first = load_manifest(&root).unwrap_err();
+    let second = load_manifest(&root).unwrap_err();
+    assert_eq!(first, second);
+    assert_eq!(first.code, ParentCorpusErrorCode::MultipleParents);
+    assert_eq!(
+        first.message,
+        "## inherits must contain exactly one fenced YAML mapping"
+    );
+    assert_eq!(first.validation_origin, None);
+    assert_eq!(first.source_route, None);
+    assert_eq!(first.route_count, None);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn v2_restrictions_are_scanned_before_value_construction() {
+    let root = scratch("restricted-events");
+    node(&root, "acme/root", "root\n");
+    let digest = "sha256-v2:0000000000000000000000000000000000000000000000000000000000000000";
+    fs::write(
+        root.join(".decided/corpus.md"),
+        format!(
+            "# Corpus\n\n## inherits\n\n```yaml\nversion: &mode 2\nparents:\n  - alias: one\n    source: acme/shared\n    root: vendor/one\n    corpus: decisions\n    digest: {digest}\n```\n"
+        ),
+    )
+    .unwrap();
+    let error = load_graph_manifest(&root).unwrap_err();
+    assert_eq!(error.code, ParentCorpusErrorCode::MalformedManifest);
+    assert!(error.message.contains("forbids anchors"));
+
+    let nested = format!("{}0{}", "[".repeat(33), "]".repeat(33));
+    fs::write(
+        root.join(".decided/corpus.md"),
+        format!(
+            "# Corpus\n\n## inherits\n\n```yaml\nversion: 2\nparents:\n  - alias: one\n    source: acme/shared\n    root: vendor/one\n    corpus: decisions\n    digest: {digest}\nbomb: {nested}\n```\n"
+        ),
+    )
+    .unwrap();
+    let error = load_graph_manifest(&root).unwrap_err();
+    assert_eq!(error.code, ParentCorpusErrorCode::LimitExceeded);
+    assert!(error.message.contains("dimension=yaml-depth"));
+    fs::remove_dir_all(root).unwrap();
+}
+
 #[cfg(unix)]
 #[test]
 fn inherited_hard_links_fail_closed() {
@@ -285,4 +357,75 @@ fn inherited_hard_links_fail_closed() {
         ParentCorpusErrorCode::UnsupportedFilesystem
     );
     fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn every_inherited_regular_entry_is_checked_for_hard_links() {
+    for location in ["config", "manifest", "ignored"] {
+        let root = scratch(&format!("hard-link-{location}"));
+        node(&root, "acme/root", "root\n");
+        let parent = root.join("vendor/parent");
+        node(&parent, "acme/parent", "parent\n");
+        let target = match location {
+            "config" => parent.join(".decided/config.yaml"),
+            "manifest" => {
+                v2_manifest(&parent, &[("leaf", "acme/leaf", "vendor/leaf", "sha256-v2:0000000000000000000000000000000000000000000000000000000000000000")]);
+                parent.join(".decided/corpus.md")
+            }
+            _ => {
+                fs::write(parent.join("decisions/ignored.txt"), "ignored\n").unwrap();
+                parent.join("decisions/ignored.txt")
+            }
+        };
+        fs::hard_link(&target, target.with_extension("hardlink")).unwrap();
+        v2_manifest(
+            &root,
+            &[(
+                "parent",
+                "acme/parent",
+                "vendor/parent",
+                "sha256-v2:0000000000000000000000000000000000000000000000000000000000000000",
+            )],
+        );
+        let error = verify_federation(&root, "decisions").unwrap_err();
+        assert_eq!(error.code, ParentCorpusErrorCode::UnsupportedFilesystem);
+        assert_eq!(error.validation_origin.as_ref().unwrap().source, "acme/root");
+        assert_eq!(
+            error.source_route.as_deref().unwrap(),
+            &["acme/root", "acme/parent"]
+        );
+        assert_eq!(error.route_count.as_deref().copied(), Some(1));
+        fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn root_v2_regular_entries_are_also_checked_for_hard_links() {
+    for location in ["config", "manifest", "markdown", "ignored"] {
+        let root = scratch(&format!("root-hard-link-{location}"));
+        node(&root, "acme/root", "root\n");
+        let parent = root.join("vendor/parent");
+        node(&parent, "acme/parent", "parent\n");
+        let pin = calculate_parent_digest_v2(&parent, "decisions")
+            .unwrap()
+            .digest;
+        v2_manifest(&root, &[("parent", "acme/parent", "vendor/parent", &pin)]);
+        let target = match location {
+            "config" => root.join(".decided/config.yaml"),
+            "manifest" => root.join(".decided/corpus.md"),
+            "markdown" => root.join("decisions/policy.md"),
+            _ => {
+                fs::write(root.join("decisions/ignored.txt"), "ignored\n").unwrap();
+                root.join("decisions/ignored.txt")
+            }
+        };
+        fs::hard_link(&target, target.with_extension("hardlink")).unwrap();
+        assert_eq!(
+            verify_federation(&root, "decisions").unwrap_err().code,
+            ParentCorpusErrorCode::UnsupportedFilesystem
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
 }

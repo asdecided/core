@@ -23,7 +23,6 @@
       "type": "object",
       "required": [
         "state",
-        "parent",
         "replacement",
         "rationale"
       ],
@@ -31,8 +30,15 @@
         "state": {
           "enum": [
             "overridden",
-            "replacement"
+            "replacement",
+            "lineage"
           ]
+        },
+        "owner_source": {
+          "type": "string"
+        },
+        "target": {
+          "$ref": "#/$defs/identity"
         },
         "parent": {
           "$ref": "#/$defs/identity"
@@ -44,6 +50,19 @@
           "$ref": "#/$defs/identity"
         }
       },
+      "anyOf": [
+        {
+          "required": [
+            "parent"
+          ]
+        },
+        {
+          "required": [
+            "owner_source",
+            "target"
+          ]
+        }
+      ],
       "additionalProperties": true
     },
     "provenance": {
@@ -64,7 +83,7 @@
         },
         "pin": {
           "type": "string",
-          "pattern": "^sha256:[0-9a-f]{64}$"
+          "pattern": "^sha256(?:-v2)?:[0-9a-f]{64}$"
         },
         "overrides": {
           "type": "array",
