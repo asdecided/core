@@ -1,0 +1,3 @@
+repository_key: POLICY
+corpus:
+  source: eval/policy-tree

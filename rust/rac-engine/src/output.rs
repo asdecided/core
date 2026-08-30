@@ -4116,10 +4116,12 @@ pub fn render_init_human(result: &crate::scaffold::InitResult) -> String {
 const PARENT_CORPUS_MANIFEST: &str = ".decided/corpus.md";
 const PARENT_CORPUS_INHERITS_HEADING: &str = "## inherits";
 const PARENT_CORPUS_OVERRIDES_HEADING: &str = "## overrides";
-const PARENT_CORPUS_DIGEST_COMMAND: &str =
+const PARENT_CORPUS_DIGEST_COMMAND_V1: &str =
     "decided corpus digest --root <parent-root> --corpus <parent-corpus>";
+const PARENT_CORPUS_DIGEST_COMMAND_V2: &str =
+    "decided corpus digest --version 2 --root <parent-root> --corpus <parent-corpus>";
 
-/// Human init with the explicit ADR-088/134 setup guidance request. The
+/// Human init with the explicit ADR-088/145 setup guidance request. The
 /// ordinary renderer above stays byte-identical and the guidance never writes
 /// a manifest or parent bytes.
 pub(crate) fn render_init_human_with_parent_corpus(
@@ -4144,17 +4146,20 @@ pub(crate) fn render_init_human_with_parent_corpus(
     lines.extend(result.files_written.iter().map(|p| format!("Wrote: {p}")));
     if parent_corpus {
         lines.extend([
-            "Parent corpus setup:".to_string(),
-            "1. Materialise the parent inside this repository before calculating its digest; AsDecided does not fetch or refresh it."
+            "Parent corpus setup (manifest version 2):".to_string(),
+            "1. Materialise every parent inside this repository before calculating its digest; AsDecided does not fetch or refresh it."
                 .to_string(),
-            format!("2. Calculate its digest: {PARENT_CORPUS_DIGEST_COMMAND}"),
+            format!("2. Calculate each topology-binding digest: {PARENT_CORPUS_DIGEST_COMMAND_V2}"),
             format!(
-                "3. Declare the verified parent in {} under {}.",
+                "3. Declare one to 32 verified parents in {} under {} using a version: 2 parents sequence.",
                 PARENT_CORPUS_MANIFEST, PARENT_CORPUS_INHERITS_HEADING
             ),
             format!(
-                "4. Record explicit replacements under {}.",
+                "4. Record explicit replacements under {} using version: 2.",
                 PARENT_CORPUS_OVERRIDES_HEADING
+            ),
+            format!(
+                "Version 1 compatibility: existing single-parent manifests keep using {PARENT_CORPUS_DIGEST_COMMAND_V1}"
             ),
         ]);
     }
@@ -4192,7 +4197,11 @@ pub(crate) fn render_init_json_with_parent_corpus(
                     "manifest": PARENT_CORPUS_MANIFEST,
                     "inherits_heading": PARENT_CORPUS_INHERITS_HEADING,
                     "overrides_heading": PARENT_CORPUS_OVERRIDES_HEADING,
-                    "digest_command": PARENT_CORPUS_DIGEST_COMMAND,
+                    "digest_command": PARENT_CORPUS_DIGEST_COMMAND_V1,
+                    "recommended_manifest_version": 2,
+                    "parents_field": "parents",
+                    "multiple_parents": true,
+                    "digest_command_v2": PARENT_CORPUS_DIGEST_COMMAND_V2,
                 }),
             );
     }
@@ -5032,11 +5041,11 @@ mod init_output_tests {
         let result = init_result();
         assert_eq!(
             render_init_human_with_parent_corpus(&result, true),
-            "Initialized repository key RAC\nConfig: repo/.decided/config.yaml\nParent corpus setup:\n1. Materialise the parent inside this repository before calculating its digest; AsDecided does not fetch or refresh it.\n2. Calculate its digest: decided corpus digest --root <parent-root> --corpus <parent-corpus>\n3. Declare the verified parent in .decided/corpus.md under ## inherits.\n4. Record explicit replacements under ## overrides."
+            "Initialized repository key RAC\nConfig: repo/.decided/config.yaml\nParent corpus setup (manifest version 2):\n1. Materialise every parent inside this repository before calculating its digest; AsDecided does not fetch or refresh it.\n2. Calculate each topology-binding digest: decided corpus digest --version 2 --root <parent-root> --corpus <parent-corpus>\n3. Declare one to 32 verified parents in .decided/corpus.md under ## inherits using a version: 2 parents sequence.\n4. Record explicit replacements under ## overrides using version: 2.\nVersion 1 compatibility: existing single-parent manifests keep using decided corpus digest --root <parent-root> --corpus <parent-corpus>"
         );
         assert_eq!(
             render_init_json_with_parent_corpus(&result, true),
-            "{\n  \"schema_version\": \"1\",\n  \"repository_key\": \"RAC\",\n  \"config_path\": \"repo/.decided/config.yaml\",\n  \"created\": true,\n  \"profile\": null,\n  \"files_written\": [],\n  \"org_endpoint\": null,\n  \"parent_corpus_guidance\": {\n    \"materialise_first\": true,\n    \"manifest\": \".decided/corpus.md\",\n    \"inherits_heading\": \"## inherits\",\n    \"overrides_heading\": \"## overrides\",\n    \"digest_command\": \"decided corpus digest --root <parent-root> --corpus <parent-corpus>\"\n  }\n}"
+            "{\n  \"schema_version\": \"1\",\n  \"repository_key\": \"RAC\",\n  \"config_path\": \"repo/.decided/config.yaml\",\n  \"created\": true,\n  \"profile\": null,\n  \"files_written\": [],\n  \"org_endpoint\": null,\n  \"parent_corpus_guidance\": {\n    \"materialise_first\": true,\n    \"manifest\": \".decided/corpus.md\",\n    \"inherits_heading\": \"## inherits\",\n    \"overrides_heading\": \"## overrides\",\n    \"digest_command\": \"decided corpus digest --root <parent-root> --corpus <parent-corpus>\",\n    \"recommended_manifest_version\": 2,\n    \"parents_field\": \"parents\",\n    \"multiple_parents\": true,\n    \"digest_command_v2\": \"decided corpus digest --version 2 --root <parent-root> --corpus <parent-corpus>\"\n  }\n}"
         );
     }
 }

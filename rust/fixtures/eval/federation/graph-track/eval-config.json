@@ -1,0 +1,15 @@
+{
+  "description": "Graph DecisionGrounding gate: retain precise transitive matches, source-neutral combined ranking, and zero hard negatives in the top-five window.",
+  "tolerance": 0.02,
+  "floors": {
+    "negative_violations": 0,
+    "overall": {
+      "p_at_1": 0.9,
+      "r_at_5": 0.95
+    },
+    "by_category": {
+      "graph_large_parent": {"p_at_1": 0.9, "r_at_5": 0.95},
+      "graph_transitive_inheritance": {"p_at_1": 0.9, "r_at_5": 0.95}
+    }
+  }
+}

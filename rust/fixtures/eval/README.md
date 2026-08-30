@@ -27,11 +27,17 @@ is part of the repository's product-knowledge corpus.
   category's `p_at_1` / `r_at_5`. Per-tool figures are diagnostic.
 - `baseline.json` — the committed `metrics` baseline, written by
   `decided eval --update-baseline` (human-only; CI never rebaselines).
-- `federation/` — the ADR-139 DecisionGrounding track. Its child inherits a
-  40-artifact standards parent containing a precise inherited match, six
-  lexical near-matches, and a 32-inbound-edge hard negative. The hard negative
-  has graph rank 1 but remains outside the top-five window because the v0.28
-  lexical floor clamps its graph contribution.
+- `federation/child/` — the version-1 ADR-139 DecisionGrounding track. Its
+  child inherits a 40-artifact standards parent containing a precise inherited
+  match, six lexical near-matches, and a 32-inbound-edge hard negative. The hard
+  negative has graph rank 1 but remains outside the top-five window because the
+  v0.28 lexical floor clamps its graph contribution.
+- `federation/graph-decisions/` plus `federation/graph-track/` — the version-2
+  extension of that same benchmark family. The root has three direct parents,
+  reaches the 40-artifact standards corpus through a nested version-1 node, and
+  reaches another Decision through a nested version-2 node. It measures the
+  combined source-neutral BM25 index, the same lexical graph-floor hard
+  negative, and transitive inherited search and relationship retrieval.
 
 ## Running
 
@@ -47,6 +53,13 @@ decided eval --check \
   --queries rust/fixtures/eval/federation/queries.json \
   --baseline rust/fixtures/eval/federation/baseline.json \
   --config rust/fixtures/eval/federation/eval-config.json
+
+# ADR-139 version-2 graph track (same scorer and metric family)
+decided eval --check \
+  --root rust/fixtures/eval/federation/graph-decisions \
+  --queries rust/fixtures/eval/federation/graph-track/queries.json \
+  --baseline rust/fixtures/eval/federation/graph-track/baseline.json \
+  --config rust/fixtures/eval/federation/graph-track/eval-config.json
 ```
 
 ## Calibration

@@ -42,6 +42,7 @@ repin the parent.
 
 ```bash
 decided corpus digest --root vendor/standards --corpus decisions
+decided corpus digest --version 2 --root vendor/standards --corpus decisions
 ```
 
 `--root` is the parent repository root and bounds configuration discovery to
@@ -69,6 +70,14 @@ non-`.md` files do not enter the digest. Absolute or `..` corpus paths, path
 escape, and traversed symlinks are rejected with stable `parent-corpus-*`
 errors. Exit `0` means the digest was calculated; exit `1` means the bounded
 materialisation could not be safely snapshotted.
+
+Manifest version 2 uses the explicit `--version 2` command. Its
+`sha256-v2:<64 lowercase hex>` digest also commits to whether
+`.decided/corpus.md` is present and, when present, its exact bytes. Those bytes
+bind the parent's own outgoing edges and pins, so graph updates are repinned
+bottom-up. The owned Markdown snapshot excludes every direct materialisation
+subtree declared by that manifest. The default command, version-1 digest,
+`sha256:` prefix, and single-parent workflow remain unchanged.
 
 ---
 
@@ -1159,12 +1168,32 @@ for fallback and aggregation behaviour.
   [Org Grounding](org-grounding.md).
 - **`--parent-corpus`** prints deterministic setup guidance for the operational
   `.decided/corpus.md` manifest, including the exact `## inherits` and
-  `## overrides` headings. It tells you to materialise the parent inside the
-  repository first, then calculate its pin with `decided corpus digest --root
-  <parent-root> --corpus <parent-corpus>`. The flag works on fresh and
-  already-initialized repositories, with or without a profile. It is guidance
-  only: it never creates the manifest, fetches a parent, or writes parent bytes.
-  Without the flag, init files and human/JSON output are unchanged.
+  `## overrides` headings. Its recommended version-2 flow tells you to
+  materialise every parent inside the repository first, calculate each pin with
+  `decided corpus digest --version 2 --root <parent-root> --corpus
+  <parent-corpus>`, and declare one to 32 records in the `parents` sequence.
+  It also retains the original version-1 digest command for existing
+  single-parent manifests. The flag works on fresh and already-initialized
+  repositories, with or without a profile. It is guidance only: it never
+  creates the manifest, fetches a parent, or writes parent bytes. Without the
+  flag, init files and human/JSON output are unchanged.
+
+  The version-2 manifest it describes has this shape (repeat the parent record
+  as needed; list order grants no precedence):
+
+  ````markdown
+  ## inherits
+
+  ```yaml
+  version: 2
+  parents:
+    - alias: standards
+      source: acme/standards
+      root: vendor/standards
+      corpus: decisions
+      digest: sha256-v2:<64-lowercase-hex>
+  ```
+  ````
 - **Exit codes:** `0` initialized, or already initialized with the same key
   (idempotent) · `1` a different key is already established (never silently
   rewritten), or a client config exists but cannot be merged into (malformed
@@ -1207,7 +1236,11 @@ With `--parent-corpus --json`, the response additionally includes:
     "manifest": ".decided/corpus.md",
     "inherits_heading": "## inherits",
     "overrides_heading": "## overrides",
-    "digest_command": "decided corpus digest --root <parent-root> --corpus <parent-corpus>"
+    "digest_command": "decided corpus digest --root <parent-root> --corpus <parent-corpus>",
+    "recommended_manifest_version": 2,
+    "parents_field": "parents",
+    "multiple_parents": true,
+    "digest_command_v2": "decided corpus digest --version 2 --root <parent-root> --corpus <parent-corpus>"
   }
 }
 ```
