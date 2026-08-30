@@ -219,8 +219,6 @@ jobs:
             cosign sign --yes "$reference"
           done
 
-  # crates-publish.yml follows this workflow through workflow_run so its OIDC
-  # token carries the filename registered with crates.io trusted publishing.
   mcp-registry:
     name: Publish to MCP Registry
     needs: [evidence, image]
@@ -230,3 +228,21 @@ jobs:
     uses: ./.github/workflows/mcp-registry-publish.yml
     with:
       version: ${{ github.event.release.tag_name }}
+
+  crates:
+    name: Dispatch crates.io publication
+    needs: [mcp-registry]
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ github.event.release.tag_name }}
+    steps:
+      - name: Dispatch trusted publisher workflow
+        run: >-
+          gh workflow run crates-publish.yml
+          --repo "$GITHUB_REPOSITORY"
+          --ref "${{ github.event.repository.default_branch }}"
+          -f version="$RELEASE_TAG"
