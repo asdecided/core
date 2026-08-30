@@ -12,7 +12,7 @@ use crate::classify::{TypeScore, CONFIDENCE_THRESHOLD};
 use crate::commands::{DirectoryValidation, StdinCorpusValidation, STATUS_INVALID};
 use crate::diff::Diff;
 use crate::doctor::{DoctorFinding, DoctorReport};
-use crate::export::{CorpusExport, DocumentsExport, GraphExport};
+use crate::export::{CorpusExport, DocumentsExport, ExportIdentity, GraphExport};
 use crate::gate::{GateFinding, GateReport};
 use crate::improve::ImprovementResult;
 use crate::inspect::{DirectoryInspection, InspectionResult};
@@ -2866,6 +2866,13 @@ pub fn render_doctor_json(report: &DoctorReport) -> String {
 
 // --- export ------------------------------------------------------------------
 
+fn export_identity_value(identity: &ExportIdentity) -> Value {
+    let mut value = Map::new();
+    value.insert("source".into(), json!(identity.source));
+    value.insert("id".into(), json!(identity.id));
+    Value::Object(value)
+}
+
 pub fn render_export_json(export: &CorpusExport) -> String {
     let mut corpus = Map::new();
     corpus.insert("name".into(), json!(export.corpus_name));
@@ -2887,6 +2894,9 @@ pub fn render_export_json(export: &CorpusExport) -> String {
             m.insert("title".into(), json!(a.title));
             m.insert("path".into(), json!(a.path));
             m.insert("body_html".into(), json!(a.body_html));
+            if let Some(provenance) = &a.provenance {
+                m.insert("provenance".into(), composed_provenance_value(provenance));
+            }
             Value::Object(m)
         })
         .collect();
@@ -2899,6 +2909,17 @@ pub fn render_export_json(export: &CorpusExport) -> String {
             m.insert("from".into(), json!(e.from));
             m.insert("to".into(), json!(e.to));
             m.insert("type".into(), json!(e.edge_type));
+            if let Some(identity) = &e.from_identity {
+                m.insert("from_identity".into(), export_identity_value(identity));
+            }
+            if let Some(identity) = &e.to_identity {
+                m.insert("to_identity".into(), export_identity_value(identity));
+            } else if e.provenance.is_some() {
+                m.insert("to_identity".into(), Value::Null);
+            }
+            if let Some(provenance) = &e.provenance {
+                m.insert("provenance".into(), composed_provenance_value(provenance));
+            }
             Value::Object(m)
         })
         .collect();
@@ -3015,7 +3036,15 @@ pub fn render_documents_jsonl(export: &DocumentsExport) -> String {
             meta.insert("path".into(), json!(d.path));
             meta.insert("aliases".into(), json!(d.aliases));
             meta.insert("tags".into(), json!(d.tags));
-            meta.insert("source".into(), json!(export.corpus_source));
+            let source = d
+                .provenance
+                .as_ref()
+                .map(|provenance| provenance.origin.source.as_str())
+                .unwrap_or(&export.corpus_source);
+            meta.insert("source".into(), json!(source));
+            if let Some(provenance) = &d.provenance {
+                meta.insert("provenance".into(), composed_provenance_value(provenance));
+            }
             let mut m = Map::new();
             m.insert("schema_version".into(), json!("1"));
             m.insert("id".into(), json!(d.id));
@@ -3040,6 +3069,9 @@ pub fn render_graph_json(export: &GraphExport) -> String {
             m.insert("type".into(), json!(n.artifact_type));
             m.insert("status".into(), json!(n.status));
             m.insert("title".into(), json!(n.title));
+            if let Some(provenance) = &n.provenance {
+                m.insert("provenance".into(), composed_provenance_value(provenance));
+            }
             Value::Object(m)
         })
         .collect();
@@ -3055,6 +3087,17 @@ pub fn render_graph_json(export: &GraphExport) -> String {
             m.insert("resolved".into(), json!(e.resolved));
             m.insert("external".into(), json!(e.external));
             m.insert("provider".into(), json!(e.provider));
+            if let Some(identity) = &e.source_identity {
+                m.insert("source_identity".into(), export_identity_value(identity));
+            }
+            if let Some(identity) = &e.target_identity {
+                m.insert("target_identity".into(), export_identity_value(identity));
+            } else if e.provenance.is_some() {
+                m.insert("target_identity".into(), Value::Null);
+            }
+            if let Some(provenance) = &e.provenance {
+                m.insert("provenance".into(), composed_provenance_value(provenance));
+            }
             Value::Object(m)
         })
         .collect();

@@ -1486,11 +1486,18 @@ pub struct ExportArgs {
     pub check: bool,
     pub client: Vec<String>,
     pub out: Option<String>,
+    /// Human diagnostic projection of the writable child layer only.
+    pub local_only: bool,
 }
 
 pub fn cmd_export(args: &ExportArgs) -> i32 {
     if args.schema.is_none() && !Path::new(&args.directory).is_dir() {
         return usage_error(&format!("not a directory: {}", args.directory));
+    }
+    if args.local_only && (args.okf || args.agent_rules || args.schema.is_some()) {
+        return usage_error(
+            "--local-only is available only for viewer, documents, and graph exports",
+        );
     }
     // Agent-rules is a distinct mode (ADR-067) owning --out/--client/--check
     // and --json; it dispatches before the export-payload guards.
@@ -1518,11 +1525,25 @@ pub fn cmd_export(args: &ExportArgs) -> i32 {
         emit_exact(schema);
         return EXIT_OK;
     }
+    let composed = match load_composed_or_exit(&args.directory, true) {
+        Ok(corpus) => corpus,
+        Err(code) => return code,
+    };
     if args.documents {
-        let export = match crate::export::build_documents_export(&args.directory) {
+        let export = match composed.as_ref() {
+            Some(corpus) => crate::export::build_documents_export_from_composed(
+                &args.directory,
+                corpus,
+                args.local_only,
+            )
+            .map_err(|error| error.message().to_string()),
+            None => crate::export::build_documents_export(&args.directory)
+                .map_err(|error| error.message().to_string()),
+        };
+        let export = match export {
             Ok(export) => export,
-            Err(error) => {
-                eprintln!("decided: {}", error.message());
+            Err(message) => {
+                eprintln!("decided: {message}");
                 return EXIT_VALIDATION_FAILED;
             }
         };
@@ -1530,10 +1551,20 @@ pub fn cmd_export(args: &ExportArgs) -> i32 {
         return EXIT_OK;
     }
     if args.graph {
-        let export = match crate::export::build_graph_export(&args.directory) {
+        let export = match composed.as_ref() {
+            Some(corpus) => crate::export::build_graph_export_from_composed(
+                &args.directory,
+                corpus,
+                args.local_only,
+            )
+            .map_err(|error| error.message().to_string()),
+            None => crate::export::build_graph_export(&args.directory)
+                .map_err(|error| error.message().to_string()),
+        };
+        let export = match export {
             Ok(export) => export,
-            Err(error) => {
-                eprintln!("decided: {}", error.message());
+            Err(message) => {
+                eprintln!("decided: {message}");
                 return EXIT_VALIDATION_FAILED;
             }
         };
@@ -1543,7 +1574,18 @@ pub fn cmd_export(args: &ExportArgs) -> i32 {
     // OKF consumes source Markdown directly, so its projection skips the
     // unrelated HTML rendering used by the viewer export.
     if args.okf {
-        let export = crate::export::build_okf_export(&args.directory, output::rac_version());
+        let export = match composed.as_ref() {
+            Some(corpus) => crate::export::build_okf_export_from_composed(
+                &args.directory,
+                output::rac_version(),
+                corpus,
+            ),
+            None => crate::export::build_okf_export(&args.directory, output::rac_version()),
+        };
+        let out = args.out.as_deref().unwrap_or("okf-bundle");
+        if let Some(code) = refuse_read_only_target(out) {
+            return code;
+        }
         let recency = crate::okf::artifact_recency(&args.directory, &export);
         let bundle = match crate::okf::render_okf_bundle(&export, &recency, &args.directory) {
             Ok(bundle) => bundle,
@@ -1556,7 +1598,6 @@ pub fn cmd_export(args: &ExportArgs) -> i32 {
                 return EXIT_VALIDATION_FAILED;
             }
         };
-        let out = args.out.as_deref().unwrap_or("okf-bundle");
         for (rel, content) in &bundle {
             let dest = std::path::Path::new(out).join(rel);
             let written = dest
@@ -1575,10 +1616,21 @@ pub fn cmd_export(args: &ExportArgs) -> i32 {
         ));
         return EXIT_OK;
     }
-    let export = match crate::export::build_corpus_export(&args.directory, output::rac_version()) {
+    let export = match composed.as_ref() {
+        Some(corpus) => crate::export::build_corpus_export_from_composed(
+            &args.directory,
+            output::rac_version(),
+            corpus,
+            args.local_only,
+        )
+        .map_err(|error| error.message().to_string()),
+        None => crate::export::build_corpus_export(&args.directory, output::rac_version())
+            .map_err(|error| error.message().to_string()),
+    };
+    let export = match export {
         Ok(export) => export,
-        Err(error) => {
-            eprintln!("decided: {}", error.message());
+        Err(message) => {
+            eprintln!("decided: {message}");
             return EXIT_VALIDATION_FAILED;
         }
     };
@@ -1589,11 +1641,18 @@ pub fn cmd_export(args: &ExportArgs) -> i32 {
         return EXIT_OK;
     }
 
-    let html = match crate::portal::render_export_html(&export) {
+    let out = args.out.as_deref().unwrap_or("lore-export.html");
+    if let Some(code) = refuse_read_only_target(out) {
+        return code;
+    }
+    let html = match if composed.is_some() {
+        crate::portal::render_federated_export_html(&export)
+    } else {
+        crate::portal::render_export_html(&export)
+    } {
         Ok(html) => html,
         Err(msg) => return usage_error(&msg), // PortalSeamMissing (unreachable)
     };
-    let out = args.out.as_deref().unwrap_or("lore-export.html");
     // Path(out).write_text: no parent mkdir — a missing directory is the
     // OSError path (exit 2).
     if let Err(exc) = std::fs::write(out, html) {

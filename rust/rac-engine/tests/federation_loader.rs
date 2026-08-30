@@ -1,6 +1,7 @@
 use rac_engine::federation::{
     calculate_parent_digest, load_manifest, verify_parent, ParentCorpusErrorCode,
 };
+use rac_engine::federated_corpus::is_read_only_materialised_path;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -43,6 +44,55 @@ fn child_manifest(root: &Path, source: &str, pin: &str, parent_source: &str) {
         ),
     )
     .unwrap();
+}
+
+#[test]
+fn nonexistent_traversal_targets_resolve_inside_the_read_only_parent() {
+    let child = scratch("write-target-traversal");
+    let parent = child.join("vendor/standards");
+    parent_at(&parent, "acme/standards");
+    let pin = calculate_parent_digest(&parent, "decisions")
+        .unwrap()
+        .digest;
+    child_manifest(&child, "acme/app", &pin, "acme/standards");
+    fs::create_dir_all(child.join("vendor/sibling")).unwrap();
+
+    for target in [
+        child.join("vendor/sibling/../standards/new.html"),
+        child.join("vendor/sibling/../standards/new-okf"),
+    ] {
+        assert!(is_read_only_materialised_path(&target).unwrap(), "{target:?}");
+        assert!(!target.exists());
+    }
+    fs::remove_dir_all(child).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn symlinked_parent_subdir_then_parent_component_stays_read_only() {
+    use std::os::unix::fs::symlink;
+
+    let child = scratch("write-target-symlink-parent");
+    let parent = child.join("vendor/standards");
+    parent_at(&parent, "acme/standards");
+    let pin = calculate_parent_digest(&parent, "decisions")
+        .unwrap()
+        .digest;
+    child_manifest(&child, "acme/app", &pin, "acme/standards");
+    symlink(
+        "standards/decisions",
+        child.join("vendor/parent-subdir-link"),
+    )
+    .unwrap();
+
+    for target in [
+        child.join("vendor/parent-subdir-link/../new.html"),
+        child.join("vendor/parent-subdir-link/../new-okf"),
+    ] {
+        assert!(is_read_only_materialised_path(&target).unwrap(), "{target:?}");
+        assert!(!target.exists());
+    }
+    fs::remove_dir_all(child).unwrap();
 }
 
 #[test]

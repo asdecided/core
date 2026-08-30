@@ -1,7 +1,12 @@
 import { useEffect, useRef } from 'react';
 import { KeyboardHint, Panel } from '../components';
 import type { CorpusIndex } from './data';
-import { displayName, linkifyCitations } from './data';
+import {
+  displayName,
+  linkifyCitations,
+  relationshipSourceKey,
+  relationshipTargetKey,
+} from './data';
 import type { Relationship } from './types';
 import { ArtifactChips } from './chips';
 
@@ -55,10 +60,14 @@ function RelatedGroup({ heading, edges, index, direction }: RelatedGroupProps) {
       <ul className="viewer-related__list">
       {edges.map((edge) => {
         const otherId = direction === 'out' ? edge.to : edge.from;
-        const other = index.byId.get(otherId);
+        const otherKey =
+          direction === 'out'
+            ? relationshipTargetKey(edge)
+            : relationshipSourceKey(edge);
+        const other = index.byId.get(otherKey);
         return (
-          <li key={`${edge.from}-${edge.type}-${edge.to}`}>
-            <a href={`#/artifact/${encodeURIComponent(otherId)}`}>
+          <li key={`${relationshipSourceKey(edge)}-${edge.type}-${relationshipTargetKey(edge)}`}>
+            <a href={`#/artifact/${encodeURIComponent(otherKey)}`}>
               {other ? displayName(other) : otherId}
             </a>{' '}
             <span className="viewer-related__title">
@@ -135,6 +144,7 @@ export function DetailView({ index, id }: DetailViewProps) {
               {artifact.id} {'·'}{' '}
             </>
           ) : null}
+          {artifact.provenance ? <>{artifact.provenance.source} {'·'} </> : null}
           {artifact.path}
         </p>
       </header>

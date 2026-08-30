@@ -1,13 +1,16 @@
 //! Corpus export (`decided.services.export`) — deterministic viewer/graph/documents
 //! projections of a corpus. One walk, shared across projections; no timestamps.
 
+use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
+
+use crate::composition::{ComposedCorpus, ComposedProvenance};
+use crate::corpus::{ArtifactKey, ArtifactPath, Layer};
 use crate::identity::{artifact_identifier, artifact_identifiers};
 use crate::markdown::split_frontmatter;
 use crate::parse::Artifact;
 use crate::pycompat::py_strip;
-use crate::relationships::{
-    corpus_items, edge_spec, relationships_from_corpus, CorpusItem,
-};
+use crate::relationships::{corpus_items, edge_spec, relationships_from_corpus, CorpusItem};
 use crate::scaffold::ScaffoldError;
 use crate::spec::ArtifactSpec;
 use crate::validate::load_ticketing_provider;
@@ -16,6 +19,13 @@ pub const EDGE_TYPE: &str = "relates-to";
 pub const STATUS_ABSENT: &str = "unknown";
 
 pub const EXPORT_SCHEMA_NAMES: [&str; 3] = ["viewer", "documents", "graph"];
+
+const ERROR_RECORD_CONFLICT: &str = "federated-export-record-conflict";
+const ERROR_SNAPSHOT_MISSING: &str = "federated-export-snapshot-missing";
+const ERROR_INVALID_UTF8: &str = "federated-export-invalid-utf8";
+const ERROR_MISSING_PIN: &str = "federated-export-missing-pin";
+const ERROR_MISSING_PROVENANCE: &str = "federated-export-missing-provenance";
+const ERROR_MISSING_CHILD_SOURCE: &str = "federated-export-missing-child-source";
 
 const VIEWER_SCHEMA: &str =
     include_str!("../assets/schemas/export-viewer-v1.schema.json");
@@ -47,6 +57,40 @@ pub fn export_schema(name: &str) -> Option<&'static str> {
 /// released directory-basename fallback (ADR-135).
 pub fn corpus_source(directory: &str) -> Result<String, ScaffoldError> {
     crate::corpus::compatible_corpus_source(directory)
+}
+
+/// A deterministic failure while projecting an already-verified composed
+/// corpus. Parent verification and composition findings retain their own
+/// stable codes; export-specific snapshot failures use the codes above.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FederatedExportError {
+    message: String,
+}
+
+impl FederatedExportError {
+    fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+}
+
+impl fmt::Display for FederatedExportError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for FederatedExportError {}
+
+impl From<ScaffoldError> for FederatedExportError {
+    fn from(error: ScaffoldError) -> Self {
+        Self::new(error.message())
+    }
 }
 
 fn first_line(raw: &str) -> String {
@@ -101,6 +145,105 @@ fn body_markdown(path: &str) -> String {
     split_frontmatter(&text).body
 }
 
+fn normalize_newlines(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n")
+}
+
+struct ProjectedItem<'a> {
+    item: &'a CorpusItem,
+    content_digest: String,
+    body_markdown: String,
+}
+
+fn full_sha256_pin(pin: &str) -> bool {
+    pin.len() == 71
+        && pin.starts_with("sha256:")
+        && pin[7..]
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn snapshot_text(
+    corpus: &ComposedCorpus,
+    item: &CorpusItem,
+) -> Result<String, FederatedExportError> {
+    let bytes = match corpus.content(&item.key) {
+        Some(bytes) => bytes.to_vec(),
+        None => {
+            return Err(FederatedExportError::new(format!(
+                "{ERROR_SNAPSHOT_MISSING}: verified content is unavailable for {}::{}",
+                item.key.source, item.key.canonical_id
+            )))
+        }
+    };
+    let text = String::from_utf8(bytes).map_err(|_| {
+        FederatedExportError::new(format!(
+            "{ERROR_INVALID_UTF8}: content for {}::{} is not valid UTF-8",
+            item.key.source, item.key.canonical_id
+        ))
+    })?;
+    Ok(normalize_newlines(&text))
+}
+
+fn projected_items<'a>(
+    corpus: &'a ComposedCorpus,
+    local_only: bool,
+) -> Result<Vec<ProjectedItem<'a>>, FederatedExportError> {
+    if let Some(finding) = corpus.findings().first() {
+        return Err(FederatedExportError::new(format!(
+            "{}: {}",
+            finding.code, finding.message
+        )));
+    }
+
+    let candidates: Vec<&CorpusItem> = if local_only {
+        corpus.local_items().collect()
+    } else {
+        corpus.catalog().collect()
+    };
+    let mut projected = Vec::new();
+    let mut by_key: BTreeMap<ArtifactKey, usize> = BTreeMap::new();
+    for item in candidates {
+        if item.origin.layer == Layer::Inherited {
+            let Some(pin) = item.origin.pin.as_deref() else {
+                return Err(FederatedExportError::new(format!(
+                    "{ERROR_MISSING_PIN}: inherited record {}::{} has no verified pin",
+                    item.key.source, item.key.canonical_id
+                )));
+            };
+            if !full_sha256_pin(pin) {
+                return Err(FederatedExportError::new(format!(
+                    "{ERROR_MISSING_PIN}: inherited record {}::{} does not carry a full lowercase SHA-256 pin",
+                    item.key.source, item.key.canonical_id
+                )));
+            }
+        }
+        let full_text = snapshot_text(corpus, item)?;
+        let content_digest = crate::sha256::hexdigest(full_text.as_bytes());
+        if let Some(existing_index) = by_key.get(&item.key) {
+            let existing: &ProjectedItem<'_> = &projected[*existing_index];
+            if existing.item.artifact_path != item.artifact_path
+                || existing.content_digest != content_digest
+                || existing.item.origin.pin != item.origin.pin
+            {
+                return Err(FederatedExportError::new(format!(
+                    "{ERROR_RECORD_CONFLICT}: {}::{} has disagreeing path, body, or pin",
+                    item.key.source, item.key.canonical_id
+                )));
+            }
+            continue;
+        }
+        let body = split_frontmatter(&full_text).body;
+        by_key.insert(item.key.clone(), projected.len());
+        projected.push(ProjectedItem {
+            item,
+            content_digest,
+            body_markdown: body,
+        });
+    }
+    Ok(projected)
+}
+
 fn tags_of(artifact: &Artifact) -> Vec<String> {
     artifact
         .metadata
@@ -123,6 +266,84 @@ fn canonical_by_path(items: &[CorpusItem]) -> std::collections::HashMap<String, 
 
 // --- viewer JSON -------------------------------------------------------------
 
+/// Public source-aware endpoint identity. The field stays `id` on the wire so
+/// consumers can lift existing export identifiers into the global
+/// `(source, id)` namespace without learning the engine's internal key name.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ExportIdentity {
+    pub source: String,
+    pub id: String,
+}
+
+impl From<&ArtifactKey> for ExportIdentity {
+    fn from(key: &ArtifactKey) -> Self {
+        Self {
+            source: key.source.clone(),
+            id: key.canonical_id.clone(),
+        }
+    }
+}
+
+fn composed_provenance(
+    corpus: &ComposedCorpus,
+    item: &CorpusItem,
+) -> Result<ComposedProvenance, FederatedExportError> {
+    corpus.provenance_for(&item.key).ok_or_else(|| {
+        FederatedExportError::new(format!(
+            "{ERROR_MISSING_PROVENANCE}: composed record {}::{} has no provenance",
+            item.key.source, item.key.canonical_id
+        ))
+    })
+}
+
+fn composed_child_source(corpus: &ComposedCorpus) -> Result<String, FederatedExportError> {
+    corpus.child_source().map(str::to_string).ok_or_else(|| {
+        FederatedExportError::new(format!(
+            "{ERROR_MISSING_CHILD_SOURCE}: verified composition has no child source"
+        ))
+    })
+}
+
+fn item_by_artifact_path(
+    corpus: &ComposedCorpus,
+) -> BTreeMap<ArtifactPath, &CorpusItem> {
+    let mut items = BTreeMap::new();
+    for item in corpus.catalog() {
+        items.entry(item.artifact_path.clone()).or_insert(item);
+    }
+    items
+}
+
+fn included_keys(items: &[ProjectedItem<'_>]) -> BTreeSet<ArtifactKey> {
+    items.iter().map(|item| item.item.key.clone()).collect()
+}
+
+fn relationship_endpoints<'a>(
+    relationship: &crate::relationships::Relationship,
+    by_path: &'a BTreeMap<ArtifactPath, &'a CorpusItem>,
+) -> Result<(&'a CorpusItem, Option<&'a CorpusItem>), FederatedExportError> {
+    let source = relationship
+        .source_artifact
+        .as_ref()
+        .and_then(|path| by_path.get(path).copied())
+        .ok_or_else(|| {
+            FederatedExportError::new(format!(
+                "{ERROR_SNAPSHOT_MISSING}: relationship source has no composed artifact identity: {}",
+                relationship.source_path
+            ))
+        })?;
+    let target = match &relationship.resolved_artifact {
+        Some(path) => Some(by_path.get(path).copied().ok_or_else(|| {
+            FederatedExportError::new(format!(
+                "{ERROR_SNAPSHOT_MISSING}: resolved relationship target has no composed artifact identity: {}",
+                relationship.target
+            ))
+        })?),
+        None => None,
+    };
+    Ok((source, target))
+}
+
 pub struct ExportArtifact {
     pub id: String,
     pub aliases: Vec<String>,
@@ -134,12 +355,17 @@ pub struct ExportArtifact {
     /// OKF-reserved descriptive labels (ADR-050): carried for the OKF
     /// bundle projection, deliberately NOT in the viewer JSON (ADR-007).
     pub tags: Vec<String>,
+    /// Present only when a federation manifest activated the composed model.
+    pub provenance: Option<ComposedProvenance>,
 }
 
 pub struct ExportRelationship {
     pub from: String,
     pub to: String,
     pub edge_type: String,
+    pub from_identity: Option<ExportIdentity>,
+    pub to_identity: Option<ExportIdentity>,
+    pub provenance: Option<ComposedProvenance>,
 }
 
 pub struct CorpusExport {
@@ -186,6 +412,7 @@ fn build_corpus_export_inner(
                 String::new()
             },
             tags: tags_of(&it.artifact),
+            provenance: None,
         });
     }
 
@@ -200,6 +427,9 @@ fn build_corpus_export_inner(
                 from: canonical[&rel.source_path].clone(),
                 to,
                 edge_type: EDGE_TYPE.to_string(),
+                from_identity: None,
+                to_identity: None,
+                provenance: None,
             }
         })
         .collect();
@@ -226,10 +456,157 @@ pub fn build_corpus_export(
     ))
 }
 
+/// Build the viewer projection from the one verified composed read model.
+/// The catalog retains overridden parent history; `--local-only` selects only
+/// the writable child records without constructing a second overlay.
+pub fn build_corpus_export_from_composed(
+    directory: &str,
+    rac_version: String,
+    corpus: &ComposedCorpus,
+    local_only: bool,
+) -> Result<CorpusExport, FederatedExportError> {
+    if corpus.parent().is_none() {
+        return build_corpus_export(directory, rac_version).map_err(Into::into);
+    }
+
+    let projected = projected_items(corpus, local_only)?;
+    let mut artifacts = Vec::new();
+    for projected_item in &projected {
+        let item = projected_item.item;
+        let Some(spec) = item.spec else { continue };
+        let id = item.key.canonical_id.clone();
+        let title = match &item.artifact.product.title {
+            Some(title) if !title.is_empty() => title.clone(),
+            _ => id.clone(),
+        };
+        artifacts.push(ExportArtifact {
+            id,
+            aliases: artifact_identifiers(
+                &item.artifact,
+                item.spec,
+                &item.artifact_path.relative_path,
+            ),
+            artifact_type: spec.name.clone(),
+            status: status(&item.artifact, spec),
+            title,
+            path: item.artifact_path.relative_path.clone(),
+            body_html: crate::mdhtml::render(&projected_item.body_markdown),
+            tags: tags_of(&item.artifact),
+            provenance: Some(composed_provenance(corpus, item)?),
+        });
+    }
+
+    let included = included_keys(&projected);
+    let by_path = item_by_artifact_path(corpus);
+    let mut relationships = Vec::new();
+    for relationship in corpus.catalog_relationships() {
+        let (source, target) = relationship_endpoints(&relationship, &by_path)?;
+        if !included.contains(&source.key) {
+            continue;
+        }
+        let target_id = target
+            .map(|item| item.key.canonical_id.clone())
+            .unwrap_or_else(|| relationship.target.clone());
+        relationships.push(ExportRelationship {
+            from: source.key.canonical_id.clone(),
+            to: target_id,
+            edge_type: EDGE_TYPE.to_string(),
+            from_identity: Some(ExportIdentity::from(&source.key)),
+            to_identity: target.map(|item| ExportIdentity::from(&item.key)),
+            provenance: Some(composed_provenance(corpus, source)?),
+        });
+    }
+    relationships.sort_by(|left, right| {
+        left.from_identity
+            .cmp(&right.from_identity)
+            .then(left.to_identity.cmp(&right.to_identity))
+            .then(left.to.cmp(&right.to))
+    });
+
+    Ok(CorpusExport {
+        corpus_name: corpus_name(directory),
+        corpus_source: composed_child_source(corpus)?,
+        rac_version,
+        artifacts,
+        relationships,
+    })
+}
+
 /// OKF consumes the source Markdown body directly. Avoid an irrelevant HTML
 /// render over the whole corpus on this path.
 pub fn build_okf_export(directory: &str, rac_version: String) -> CorpusExport {
     build_corpus_export_inner(directory, rac_version, false, corpus_name(directory))
+}
+
+/// Keep the first federation increment's OKF carrier local-only while using
+/// the verified composition to exclude a vendored parent beneath `directory`.
+/// Physical child paths are retained because the OKF writer copies their
+/// Markdown bodies and derives repository-local bundle paths.
+pub fn build_okf_export_from_composed(
+    directory: &str,
+    rac_version: String,
+    corpus: &ComposedCorpus,
+) -> CorpusExport {
+    if corpus.parent().is_none() {
+        return build_okf_export(directory, rac_version);
+    }
+
+    let items: Vec<CorpusItem> = corpus.local_items().cloned().collect();
+    let canonical = canonical_by_path(&items);
+    let mut artifacts = Vec::new();
+    for item in &items {
+        let Some(spec) = item.spec else { continue };
+        let id = canonical[&item.path].clone();
+        let title = match &item.artifact.product.title {
+            Some(title) if !title.is_empty() => title.clone(),
+            _ => id.clone(),
+        };
+        artifacts.push(ExportArtifact {
+            id,
+            aliases: artifact_identifiers(&item.artifact, item.spec, &item.path),
+            artifact_type: spec.name.clone(),
+            status: status(&item.artifact, spec),
+            title,
+            path: item.path.clone(),
+            body_html: String::new(),
+            tags: tags_of(&item.artifact),
+            provenance: None,
+        });
+    }
+
+    let mut relationships = Vec::new();
+    for relationship in corpus.catalog_relationships() {
+        let Some(from) = canonical.get(&relationship.source_path) else {
+            continue;
+        };
+        let to = relationship
+            .resolved_path
+            .as_ref()
+            .and_then(|path| canonical.get(path))
+            .cloned()
+            .unwrap_or(relationship.target);
+        relationships.push(ExportRelationship {
+            from: from.clone(),
+            to,
+            edge_type: EDGE_TYPE.to_string(),
+            from_identity: None,
+            to_identity: None,
+            provenance: None,
+        });
+    }
+    relationships.sort_by(|left, right| {
+        left.from
+            .cmp(&right.from)
+            .then(left.to.cmp(&right.to))
+    });
+
+    CorpusExport {
+        corpus_name: corpus_name(directory),
+        corpus_source: corpus_name(directory),
+        rac_version,
+        artifacts,
+        relationships,
+    }
 }
 
 // --- documents JSONL ---------------------------------------------------------
@@ -243,6 +620,7 @@ pub struct ExportDocument {
     pub aliases: Vec<String>,
     pub path: String,
     pub tags: Vec<String>,
+    pub provenance: Option<ComposedProvenance>,
 }
 
 pub struct DocumentsExport {
@@ -271,11 +649,54 @@ pub fn build_documents_export(directory: &str) -> Result<DocumentsExport, Scaffo
             aliases: artifact_identifiers(&it.artifact, it.spec, &it.path),
             path: it.path.clone(),
             tags: tags_of(&it.artifact),
+            provenance: None,
         });
     }
     Ok(DocumentsExport {
         corpus_name: corpus_name(directory),
         corpus_source: source,
+        documents,
+    })
+}
+
+pub fn build_documents_export_from_composed(
+    directory: &str,
+    corpus: &ComposedCorpus,
+    local_only: bool,
+) -> Result<DocumentsExport, FederatedExportError> {
+    if corpus.parent().is_none() {
+        return build_documents_export(directory).map_err(Into::into);
+    }
+
+    let projected = projected_items(corpus, local_only)?;
+    let mut documents = Vec::new();
+    for projected_item in projected {
+        let item = projected_item.item;
+        let Some(spec) = item.spec else { continue };
+        let id = item.key.canonical_id.clone();
+        let title = match &item.artifact.product.title {
+            Some(title) if !title.is_empty() => title.clone(),
+            _ => id.clone(),
+        };
+        documents.push(ExportDocument {
+            id,
+            artifact_type: spec.name.clone(),
+            status: status(&item.artifact, spec),
+            title,
+            text: projected_item.body_markdown,
+            aliases: artifact_identifiers(
+                &item.artifact,
+                item.spec,
+                &item.artifact_path.relative_path,
+            ),
+            path: item.artifact_path.relative_path.clone(),
+            tags: tags_of(&item.artifact),
+            provenance: Some(composed_provenance(corpus, item)?),
+        });
+    }
+    Ok(DocumentsExport {
+        corpus_name: corpus_name(directory),
+        corpus_source: composed_child_source(corpus)?,
         documents,
     })
 }
@@ -287,6 +708,7 @@ pub struct GraphNode {
     pub artifact_type: String,
     pub status: String,
     pub title: String,
+    pub provenance: Option<ComposedProvenance>,
 }
 
 pub struct GraphEdge {
@@ -297,6 +719,9 @@ pub struct GraphEdge {
     pub resolved: bool,
     pub external: bool,
     pub provider: Option<String>,
+    pub source_identity: Option<ExportIdentity>,
+    pub target_identity: Option<ExportIdentity>,
+    pub provenance: Option<ComposedProvenance>,
 }
 
 pub struct GraphExport {
@@ -325,6 +750,7 @@ pub fn build_graph_export(directory: &str) -> Result<GraphExport, ScaffoldError>
             artifact_type: spec.name.clone(),
             status: status(&it.artifact, spec),
             title,
+            provenance: None,
         });
     }
 
@@ -348,6 +774,9 @@ pub fn build_graph_export(directory: &str) -> Result<GraphExport, ScaffoldError>
             resolved: rel.resolved_path.is_some(),
             external,
             provider: provider_tag,
+            source_identity: None,
+            target_identity: None,
+            provenance: None,
         });
     }
     edges.sort_by(|a, b| {
@@ -360,6 +789,79 @@ pub fn build_graph_export(directory: &str) -> Result<GraphExport, ScaffoldError>
     Ok(GraphExport {
         corpus_name: corpus_name(directory),
         corpus_source: source,
+        nodes,
+        edges,
+    })
+}
+
+pub fn build_graph_export_from_composed(
+    directory: &str,
+    corpus: &ComposedCorpus,
+    local_only: bool,
+) -> Result<GraphExport, FederatedExportError> {
+    if corpus.parent().is_none() {
+        return build_graph_export(directory).map_err(Into::into);
+    }
+
+    let projected = projected_items(corpus, local_only)?;
+    let mut nodes = Vec::new();
+    for projected_item in &projected {
+        let item = projected_item.item;
+        let Some(spec) = item.spec else { continue };
+        let id = item.key.canonical_id.clone();
+        let title = match &item.artifact.product.title {
+            Some(title) if !title.is_empty() => title.clone(),
+            _ => id.clone(),
+        };
+        nodes.push(GraphNode {
+            id,
+            artifact_type: spec.name.clone(),
+            status: status(&item.artifact, spec),
+            title,
+            provenance: Some(composed_provenance(corpus, item)?),
+        });
+    }
+
+    let included = included_keys(&projected);
+    let by_path = item_by_artifact_path(corpus);
+    let provider = load_ticketing_provider(directory);
+    let mut edges = Vec::new();
+    for relationship in corpus.catalog_relationships() {
+        let (source, target) = relationship_endpoints(&relationship, &by_path)?;
+        if !included.contains(&source.key) {
+            continue;
+        }
+        let kind = edge_spec(&relationship.relationship);
+        let target_id = target
+            .map(|item| item.key.canonical_id.clone())
+            .unwrap_or_else(|| relationship.target.clone());
+        edges.push(GraphEdge {
+            source: source.key.canonical_id.clone(),
+            target: target_id,
+            edge_type: relationship.relationship,
+            directed: kind.map(|spec| spec.directional).unwrap_or(false),
+            resolved: target.is_some(),
+            external: kind.map(|spec| spec.external).unwrap_or(false),
+            provider: match kind {
+                Some(spec) if spec.external_provider => provider.clone(),
+                _ => None,
+            },
+            source_identity: Some(ExportIdentity::from(&source.key)),
+            target_identity: target.map(|item| ExportIdentity::from(&item.key)),
+            provenance: Some(composed_provenance(corpus, source)?),
+        });
+    }
+    edges.sort_by(|left, right| {
+        left.source_identity
+            .cmp(&right.source_identity)
+            .then(left.edge_type.cmp(&right.edge_type))
+            .then(left.target_identity.cmp(&right.target_identity))
+            .then(left.target.cmp(&right.target))
+    });
+
+    Ok(GraphExport {
+        corpus_name: corpus_name(directory),
+        corpus_source: composed_child_source(corpus)?,
         nodes,
         edges,
     })

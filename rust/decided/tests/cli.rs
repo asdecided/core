@@ -150,6 +150,53 @@ fn export_schema_rejects_an_unknown_projection() {
 }
 
 #[test]
+fn export_local_only_is_additive_for_the_three_read_projections() {
+    let root = scratch_root();
+    let root_text = root.to_string_lossy().into_owned();
+    for mode in [None, Some("--documents"), Some("--graph")] {
+        let mut baseline_args = vec!["export", &root_text];
+        if let Some(mode) = mode {
+            baseline_args.push(mode);
+        }
+        let baseline = run(&baseline_args);
+        assert!(baseline.status.success());
+
+        let mut local_args = baseline_args;
+        local_args.push("--local-only");
+        let local = run(&local_args);
+        assert!(
+            local.status.success(),
+            "{mode:?} local projection failed: {}",
+            String::from_utf8_lossy(&local.stderr)
+        );
+        assert_eq!(local.stdout, baseline.stdout);
+        assert_eq!(local.stderr, baseline.stderr);
+    }
+    fs::remove_dir_all(root).expect("remove local-only export corpus");
+}
+
+#[test]
+fn export_local_only_rejects_non_composed_modes() {
+    let root = scratch_root();
+    let root_text = root.to_string_lossy().into_owned();
+    for args in [
+        vec!["export", &root_text, "--okf", "--local-only"],
+        vec!["export", &root_text, "--agent-rules", "--local-only"],
+        vec!["export", "--schema", "viewer", "--local-only"],
+    ] {
+        let output = run(&args);
+        assert_eq!(output.status.code(), Some(2));
+        assert!(
+            String::from_utf8_lossy(&output.stderr)
+                .contains("--local-only is available only for viewer, documents, and graph exports"),
+            "stderr={}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    fs::remove_dir_all(root).expect("remove local-only refusal corpus");
+}
+
+#[test]
 fn export_rejects_an_invalid_configured_corpus_source() {
     let root = scratch_root();
     fs::create_dir_all(root.join(".decided")).unwrap();
