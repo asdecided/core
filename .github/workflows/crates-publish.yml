@@ -1,12 +1,12 @@
 name: Publish crates.io packages
 
+# crates.io trusted publishing binds the OIDC claim to this workflow filename.
+# Keep publication in this top-level workflow rather than invoking it as a
+# reusable workflow from native-publish.yml.
 on:
-  workflow_call:
-    inputs:
-      version:
-        description: Exact workspace version to publish (X.Y.Z or vX.Y.Z)
-        required: true
-        type: string
+  workflow_run:
+    workflows: ["Publish native release"]
+    types: [completed]
   workflow_dispatch:
     inputs:
       version:
@@ -21,6 +21,11 @@ permissions:
 jobs:
   version:
     name: Resolve release version
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'release' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
     outputs:
       number: ${{ steps.normalize.outputs.number }}
@@ -29,7 +34,7 @@ jobs:
       - name: Normalize and validate version
         id: normalize
         env:
-          REQUESTED_VERSION: ${{ inputs.version }}
+          REQUESTED_VERSION: ${{ github.event.workflow_run.head_branch || inputs.version }}
         run: |
           VERSION="$REQUESTED_VERSION"
           case "$VERSION" in

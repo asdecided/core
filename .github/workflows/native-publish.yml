@@ -219,16 +219,8 @@ jobs:
             cosign sign --yes "$reference"
           done
 
-  crates:
-    name: Publish crates.io packages
-    needs: [evidence, image]
-    permissions:
-      contents: read
-      id-token: write
-    uses: ./.github/workflows/crates-publish.yml
-    with:
-      version: ${{ github.event.release.tag_name }}
-
+  # crates-publish.yml follows this workflow through workflow_run so its OIDC
+  # token carries the filename registered with crates.io trusted publishing.
   mcp-registry:
     name: Publish to MCP Registry
     needs: [evidence, image]
