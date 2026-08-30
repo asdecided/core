@@ -52,6 +52,16 @@ fn targets_for(clients: &[String]) -> Vec<&'static AgentRulesTarget> {
         .collect()
 }
 
+/// Concrete output files selected for a generate run, in stable target order.
+/// Exposing the paths lets the command preflight the complete write set before
+/// the first managed block is created or updated.
+pub fn output_targets(root: &str, clients: &[String]) -> Vec<String> {
+    targets_for(clients)
+        .into_iter()
+        .map(|target| py_path_join(root, target.path))
+        .collect()
+}
+
 /// One distilled live-decision pointer.
 struct AgentRulesEntry {
     identifier: String,

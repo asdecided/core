@@ -146,6 +146,14 @@ impl GraphView {
         )
     }
 
+    pub fn from_graph(corpus: &rac_engine::graph_composition::GraphComposition) -> Self {
+        Self::new_with_history(
+            corpus.identity_index(),
+            corpus.relationships(),
+            Some(corpus.catalog_relationships_compatible()),
+        )
+    }
+
     pub fn new(entries: Vec<IndexEntry>, relationships: Vec<Relationship>) -> Self {
         Self::new_with_history(entries, relationships, None)
     }
@@ -701,6 +709,34 @@ impl GraphCache {
             self.builds += 1;
         }
         self.view.as_ref().expect("federated graph view built")
+    }
+
+    pub fn view_for_graph(
+        &mut self,
+        generation: &str,
+        corpus: &rac_engine::graph_composition::GraphComposition,
+    ) -> &GraphView {
+        if self.federated_generation.as_deref() != Some(generation)
+            || self.generation.is_some()
+            || self.view.is_none()
+        {
+            let started = rac_engine::timing::start();
+            let replacement = GraphView::from_graph(corpus);
+            rac_engine::timing::emit_since(
+                "graph.view_build",
+                started,
+                &[
+                    ("entries", replacement.entry_count() as u64),
+                    ("relationships", replacement.relationship_count() as u64),
+                    ("payload_bytes", replacement.estimated_payload_bytes() as u64),
+                ],
+            );
+            self.view = Some(replacement);
+            self.generation = None;
+            self.federated_generation = Some(generation.to_string());
+            self.builds += 1;
+        }
+        self.view.as_ref().expect("graph federation view built")
     }
 
     #[cfg(test)]

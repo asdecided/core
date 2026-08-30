@@ -246,6 +246,82 @@ pub(crate) fn build_derived_index_from_composed(
     }
 }
 
+/// Build the one persistable graph projection from an authenticated semantic
+/// closure. Every row comes from `VerifiedGraphCorpus`; no filesystem walk or
+/// alternate overlay occurs at this cache boundary.
+pub(crate) fn build_derived_index_from_graph(
+    corpus: &crate::graph_federated_corpus::VerifiedGraphCorpus,
+    recursive: bool,
+) -> DerivedIndex {
+    let items: Vec<CorpusItem> = corpus.composition.effective().cloned().collect();
+    let index_entries = corpus.composition.effective_index();
+    let field_tokens: Vec<FieldTokens> = index_entries.iter().map(field_tokens_of).collect();
+    let source_artifacts: Vec<SourceAwareArtifact> = items
+        .iter()
+        .map(|item| SourceAwareArtifact {
+            key: item.key.clone(),
+            path: item.artifact_path.clone(),
+            origin: item.origin.clone(),
+            display_path: item.path.clone(),
+        })
+        .collect();
+    let live_decision_paths: Vec<String> = items
+        .iter()
+        .filter(|item| {
+            item.spec.map(|spec| spec.name == DECISION_TYPE).unwrap_or(false)
+                && is_live_decision(&item.artifact)
+        })
+        .map(|item| item.path.clone())
+        .collect();
+    let live_decision_keys: Vec<ArtifactKey> = items
+        .iter()
+        .filter(|item| {
+            item.spec.map(|spec| spec.name == DECISION_TYPE).unwrap_or(false)
+                && is_live_decision(&item.artifact)
+        })
+        .map(|item| item.key.clone())
+        .collect();
+    let relationships = corpus.composition.relationships();
+    let relationship_summary = corpus.composition.relationship_summary();
+    let overrides = crate::validate::overrides_from_config_bytes(
+        &corpus.federation.root_config_bytes,
+    );
+    let portfolio = crate::portfolio::portfolio_from_corpus_with_analysis(
+        &corpus.federation.root_corpus_path,
+        &items,
+        recursive,
+        &overrides,
+        relationship_summary,
+        true,
+    );
+    let canonical_redirects = corpus
+        .composition
+        .ordered_overrides()
+        .iter()
+        .map(|mapping| CanonicalRedirect {
+            parent: mapping.target.clone(),
+            replacement: mapping.replacement.clone(),
+            rationale: mapping.rationale.clone(),
+        })
+        .collect();
+
+    DerivedIndex {
+        layers: corpus.canonical_layers.values().cloned().collect(),
+        source_artifacts,
+        resolution: Box::new(ResolutionProjection {
+            entries: corpus.composition.identity_index(),
+            canonical_redirects,
+        }),
+        index_entries,
+        field_tokens,
+        relationships,
+        live_decision_keys,
+        live_decision_paths,
+        portfolio_summary: crate::output::portfolio_summary_value(&portfolio),
+        scope_rows: scope_rows_from_items(&items),
+    }
+}
+
 /// Build the derived structures fresh from one corpus walk (the miss path).
 pub fn build_derived_index(directory: &str, recursive: bool) -> DerivedIndex {
     let items = corpus_items(directory, recursive);

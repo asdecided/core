@@ -7,7 +7,7 @@
 //! the exact config and Markdown bytes which were hashed, so later stages can
 //! parse the verified snapshot without re-reading mutable parent files.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::path::{Component, Path, PathBuf};
@@ -59,7 +59,8 @@ pub const V2_MAX_VISITED_ENTRIES: usize = 200_000;
 /// unambiguous; locations, metadata, and timestamps never enter the preimage.
 pub const DIGEST_V1_DOMAIN: &[u8] = b"asdecided-corpus-digest-v1\0";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum ParentCorpusErrorCode {
     MalformedManifest,
     MultipleParents,
@@ -116,11 +117,26 @@ impl ParentCorpusErrorCode {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ParentCorpusError {
     pub code: ParentCorpusErrorCode,
     pub message: String,
     pub path: Option<PathBuf>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub validation_origin: Option<Box<FederationValidationOrigin>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_route: Option<Box<Vec<String>>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub route_count: Option<Box<usize>>,
+}
+
+/// Stable ownership for a version-2 validation finding.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct FederationValidationOrigin {
+    pub source: String,
+    pub layer: crate::corpus::Layer,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pin: Option<String>,
 }
 
 impl ParentCorpusError {
@@ -129,6 +145,9 @@ impl ParentCorpusError {
             code,
             message: message.into(),
             path: None,
+            validation_origin: None,
+            source_route: None,
+            route_count: None,
         }
     }
 
@@ -141,7 +160,29 @@ impl ParentCorpusError {
             code,
             message: message.into(),
             path: Some(path.into()),
+            validation_origin: None,
+            source_route: None,
+            route_count: None,
         }
+    }
+
+    fn with_graph_context(
+        mut self,
+        validation_origin: FederationValidationOrigin,
+        source_route: Vec<String>,
+        route_count: usize,
+    ) -> Self {
+        debug_assert!(!source_route.is_empty());
+        debug_assert!(route_count >= 1);
+        self.validation_origin = Some(Box::new(validation_origin));
+        self.source_route = Some(Box::new(source_route));
+        self.route_count = Some(Box::new(route_count));
+        self
+    }
+
+    fn with_validation_origin(mut self, validation_origin: FederationValidationOrigin) -> Self {
+        self.validation_origin = Some(Box::new(validation_origin));
+        self
     }
 
     pub const fn stable_code(&self) -> &'static str {
@@ -296,6 +337,10 @@ pub struct VerifiedParent {
 pub struct VerifiedFederationNode {
     pub source: String,
     pub digest: String,
+    /// Lexicographically minimal verified root-to-node source route.
+    pub source_route: Vec<String>,
+    /// Exact number of verified physical routes represented by this node.
+    pub route_count: usize,
     pub config_path: PathBuf,
     pub config_bytes: Vec<u8>,
     pub manifest_path: PathBuf,
@@ -715,6 +760,13 @@ pub fn load_manifest(repository_root: &Path) -> Result<Option<CorpusManifest>, P
             ),
         )
     })?;
+    parse_manifest_v1_bytes(path, bytes).map(Some)
+}
+
+fn parse_manifest_v1_bytes(
+    path: PathBuf,
+    bytes: Vec<u8>,
+) -> Result<CorpusManifest, ParentCorpusError> {
     let raw = std::str::from_utf8(&bytes)
         .map_err(|_| malformed(&path, "manifest must be valid UTF-8"))?;
     let text = normalize_newlines(raw);
@@ -778,13 +830,13 @@ pub fn load_manifest(repository_root: &Path) -> Result<Option<CorpusManifest>, P
             (None, None)
         };
 
-    Ok(Some(CorpusManifest {
+    Ok(CorpusManifest {
         path,
         bytes,
         inherits,
         overrides,
         override_mapping_bytes,
-    }))
+    })
 }
 
 fn validate_v2_path(value: &str, field: &str) -> Result<(), String> {
@@ -858,53 +910,190 @@ fn validate_v2_path_limits(
     Ok(())
 }
 
-fn strict_yaml_lexical_check(path: &Path, yaml: &str) -> Result<(), ParentCorpusError> {
-    for (line_index, line) in yaml.lines().enumerate() {
-        let mut single = false;
-        let mut double = false;
-        let mut escaped = false;
-        let mut plain = String::new();
-        for character in line.chars() {
-            if escaped {
-                escaped = false;
-                continue;
-            }
-            if double && character == '\\' {
-                escaped = true;
-                continue;
-            }
-            if !double && character == '\'' {
-                single = !single;
-                continue;
-            }
-            if !single && character == '"' {
-                double = !double;
-                continue;
-            }
-            if !single && !double && character == '#' {
-                break;
-            }
-            if !single && !double {
-                plain.push(character);
-            }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum YamlContainer {
+    Mapping { expects_key: bool },
+    Sequence,
+}
+
+#[derive(Debug, Default)]
+struct RestrictedYamlScan {
+    version: Option<u64>,
+    nodes: usize,
+    maximum_depth: usize,
+    forbidden_line: Option<usize>,
+}
+
+struct YamlParserGuard(unsafe_libyaml::yaml_parser_t);
+
+impl Drop for YamlParserGuard {
+    fn drop(&mut self) {
+        // SAFETY: the parser was initialized successfully and is deleted once.
+        unsafe { unsafe_libyaml::yaml_parser_delete(&mut self.0) };
+    }
+}
+
+fn scan_yaml_events(yaml: &str) -> Result<RestrictedYamlScan, (Option<u64>, String)> {
+    use std::ffi::CStr;
+    use std::mem::MaybeUninit;
+    use std::slice;
+    use unsafe_libyaml::yaml_event_type_t::{
+        YAML_ALIAS_EVENT, YAML_MAPPING_END_EVENT, YAML_MAPPING_START_EVENT, YAML_SCALAR_EVENT,
+        YAML_SEQUENCE_END_EVENT, YAML_SEQUENCE_START_EVENT, YAML_STREAM_END_EVENT,
+    };
+
+    let mut parser = MaybeUninit::<unsafe_libyaml::yaml_parser_t>::uninit();
+    // SAFETY: libyaml initializes the complete parser on success.
+    if unsafe { unsafe_libyaml::yaml_parser_initialize(parser.as_mut_ptr()) }.fail {
+        return Err((None, "YAML parser initialization failed".to_string()));
+    }
+    // SAFETY: initialization succeeded above.
+    let mut parser = YamlParserGuard(unsafe { parser.assume_init() });
+    // SAFETY: `yaml` remains alive for the parser's complete lifetime.
+    unsafe {
+        unsafe_libyaml::yaml_parser_set_input_string(
+            &mut parser.0,
+            yaml.as_ptr(),
+            yaml.len() as u64,
+        )
+    };
+
+    let mut scan = RestrictedYamlScan::default();
+    let mut containers = Vec::<YamlContainer>::new();
+    let mut root_key = None::<Vec<u8>>;
+    loop {
+        let mut event = MaybeUninit::<unsafe_libyaml::yaml_event_t>::uninit();
+        // SAFETY: the initialized parser owns its input and libyaml initializes
+        // the event completely on success.
+        if unsafe { unsafe_libyaml::yaml_parser_parse(&mut parser.0, event.as_mut_ptr()) }.fail {
+            let problem = if parser.0.problem.is_null() {
+                "invalid YAML".to_string()
+            } else {
+                // SAFETY: libyaml exposes a NUL-terminated problem string while
+                // the parser is alive.
+                unsafe { CStr::from_ptr(parser.0.problem) }
+                    .to_string_lossy()
+                    .into_owned()
+            };
+            return Err((scan.version, problem));
         }
-        let tokens = plain.split(|character: char| {
-            character.is_whitespace() || matches!(character, ':' | ',' | '[' | ']' | '{' | '}')
-        });
-        if tokens
-            .clone()
-            .any(|token| token.starts_with('&') || token.starts_with('*') || token.starts_with('!'))
-            || plain.trim_start().starts_with("<<:")
-            || plain.contains(" <<:")
-        {
-            return Err(malformed(
-                path,
-                format!(
-                    "version 2 YAML forbids anchors, aliases, custom tags, and merge keys (line {})",
-                    line_index + 1
-                ),
-            ));
+        // SAFETY: parsing succeeded above.
+        let mut event = unsafe { event.assume_init() };
+        let event_type = event.type_;
+        let line = event.start_mark.line as usize + 1;
+
+        match event_type {
+            YAML_ALIAS_EVENT => {
+                scan.nodes = scan.nodes.saturating_add(1);
+                scan.forbidden_line.get_or_insert(line);
+                if let Some(YamlContainer::Mapping { expects_key }) = containers.last_mut() {
+                    if !*expects_key {
+                        *expects_key = true;
+                    }
+                }
+            }
+            YAML_SCALAR_EVENT => {
+                scan.nodes = scan.nodes.saturating_add(1);
+                // SAFETY: scalar fields are valid for a scalar event and stay
+                // alive until yaml_event_delete below.
+                let scalar = unsafe { event.data.scalar };
+                let value = unsafe { slice::from_raw_parts(scalar.value, scalar.length as usize) };
+                if !scalar.anchor.is_null() || !scalar.tag.is_null() {
+                    scan.forbidden_line.get_or_insert(line);
+                }
+                let is_root_mapping = containers.len() == 1;
+                if let Some(YamlContainer::Mapping { expects_key }) = containers.last_mut() {
+                    if *expects_key {
+                        if value == b"<<" {
+                            scan.forbidden_line.get_or_insert(line);
+                        }
+                        if is_root_mapping {
+                            root_key = Some(value.to_vec());
+                        }
+                        *expects_key = false;
+                    } else {
+                        if is_root_mapping && root_key.as_deref() == Some(b"version") {
+                            scan.version = std::str::from_utf8(value)
+                                .ok()
+                                .and_then(|value| value.parse::<u64>().ok());
+                        }
+                        *expects_key = true;
+                    }
+                }
+            }
+            YAML_MAPPING_START_EVENT | YAML_SEQUENCE_START_EVENT => {
+                scan.nodes = scan.nodes.saturating_add(1);
+                if let Some(YamlContainer::Mapping { expects_key }) = containers.last_mut() {
+                    if !*expects_key {
+                        *expects_key = true;
+                    }
+                }
+                // SAFETY: the selected union field matches the event type.
+                let tagged_or_anchored = if event_type == YAML_MAPPING_START_EVENT {
+                    let start = unsafe { event.data.mapping_start };
+                    !start.anchor.is_null() || !start.tag.is_null()
+                } else {
+                    let start = unsafe { event.data.sequence_start };
+                    !start.anchor.is_null() || !start.tag.is_null()
+                };
+                if tagged_or_anchored {
+                    scan.forbidden_line.get_or_insert(line);
+                }
+                containers.push(if event_type == YAML_MAPPING_START_EVENT {
+                    YamlContainer::Mapping { expects_key: true }
+                } else {
+                    YamlContainer::Sequence
+                });
+                scan.maximum_depth = scan.maximum_depth.max(containers.len());
+            }
+            YAML_MAPPING_END_EVENT | YAML_SEQUENCE_END_EVENT => {
+                containers.pop();
+            }
+            _ => {}
         }
+        // SAFETY: this event was initialized by libyaml and is deleted once.
+        unsafe { unsafe_libyaml::yaml_event_delete(&mut event) };
+        if event_type == YAML_STREAM_END_EVENT {
+            break;
+        }
+    }
+    Ok(scan)
+}
+
+fn manifest_yaml_version(yaml: &str) -> Option<u64> {
+    match scan_yaml_events(yaml) {
+        Ok(scan) => scan.version,
+        Err((version, _)) => version,
+    }
+}
+
+fn restricted_yaml_event_check(path: &Path, yaml: &str) -> Result<(), ParentCorpusError> {
+    let scan = scan_yaml_events(yaml).map_err(|(_, reason)| {
+        malformed(path, format!("version 2 YAML is invalid: {reason}"))
+    })?;
+    if let Some(line) = scan.forbidden_line {
+        return Err(malformed(
+            path,
+            format!(
+                "version 2 YAML forbids anchors, aliases, custom tags, and merge keys (line {line})"
+            ),
+        ));
+    }
+    if scan.nodes > V2_MAX_YAML_NODES {
+        return Err(limit_error(
+            path,
+            "yaml-nodes",
+            V2_MAX_YAML_NODES,
+            scan.nodes,
+        ));
+    }
+    if scan.maximum_depth > V2_MAX_YAML_DEPTH {
+        return Err(limit_error(
+            path,
+            "yaml-depth",
+            V2_MAX_YAML_DEPTH,
+            scan.maximum_depth,
+        ));
     }
     Ok(())
 }
@@ -948,7 +1137,9 @@ fn parse_strict_v2_yaml(
     yaml: &str,
     section: &str,
 ) -> Result<serde_yaml::Value, ParentCorpusError> {
-    strict_yaml_lexical_check(path, yaml)?;
+    // The event pass applies the resource and restricted-syntax contract
+    // before serde constructs an owned YAML value.
+    restricted_yaml_event_check(path, yaml)?;
     let value: serde_yaml::Value = serde_yaml::from_str(yaml)
         .map_err(|error| malformed(path, format!("{section} YAML must be one mapping: {error}")))?;
     if !value.is_mapping() {
@@ -1064,7 +1255,7 @@ pub fn load_graph_manifest(
             ))
         }
     };
-    ensure_no_symlink_components(repository_root, &path)?;
+    ensure_no_reparse_components(repository_root, &path)?;
     if metadata.file_type().is_symlink() || !metadata.is_file() {
         return Err(ParentCorpusError::at(
             ParentCorpusErrorCode::SymlinkTraversal,
@@ -1075,7 +1266,35 @@ pub fn load_graph_manifest(
             ),
         ));
     }
-    if metadata.len() > V2_MAX_MANIFEST_BYTES as u64 {
+    // Capture one stable byte buffer before dispatch. Version 1 still returns
+    // to its established parser unchanged; version 2 never parses or compares
+    // a second path read.
+    let captured = capture_stable_regular(
+        &path,
+        usize::MAX,
+        "manifest-bytes",
+        false,
+        Some(directory_device(repository_root)?),
+    )?;
+    let Some(dispatch_version) = graph_manifest_version(&path, &captured.bytes) else {
+        // Anything not unambiguously selected as graph mode remains on the
+        // established v1 parser, including its exact diagnostics.
+        return Ok(None);
+    };
+    if dispatch_version == 1 {
+        return Ok(None);
+    }
+    if captured.identity.links != 1 {
+        return Err(ParentCorpusError::at(
+            ParentCorpusErrorCode::UnsupportedFilesystem,
+            &path,
+            format!(
+                "version 2 files must have exactly one hard link: {}",
+                path.display()
+            ),
+        ));
+    }
+    if captured.bytes.len() > V2_MAX_MANIFEST_BYTES {
         return Err(limit_error(
             &path,
             "manifest-bytes",
@@ -1083,16 +1302,28 @@ pub fn load_graph_manifest(
             V2_MAX_MANIFEST_BYTES + 1,
         ));
     }
-    let bytes = std::fs::read(&path).map_err(|error| {
-        ParentCorpusError::at(
-            ParentCorpusErrorCode::MalformedManifest,
-            &path,
-            format!(
-                "cannot read federation manifest {}: {error}",
-                path.display()
-            ),
-        )
-    })?;
+    parse_graph_manifest_bytes(path, captured.bytes).map(Some)
+}
+
+fn graph_manifest_version(path: &Path, bytes: &[u8]) -> Option<u64> {
+    let raw = std::str::from_utf8(bytes).ok()?;
+    let text = normalize_newlines(raw);
+    let inherits_sections = heading_sections(&text, "inherits");
+    let (start, end) = inherits_sections.first().copied()?;
+    if inherits_sections.len() != 1 {
+        return None;
+    }
+    let blocks = fenced_yaml_blocks(path, &text, start, end).ok()?;
+    if blocks.len() != 1 {
+        return None;
+    }
+    manifest_yaml_version(&blocks[0])
+}
+
+fn parse_graph_manifest_bytes(
+    path: PathBuf,
+    bytes: Vec<u8>,
+) -> Result<GraphCorpusManifest, ParentCorpusError> {
     let raw = std::str::from_utf8(&bytes)
         .map_err(|_| malformed(&path, "manifest must be valid UTF-8"))?;
     let text = normalize_newlines(raw);
@@ -1112,20 +1343,8 @@ pub fn load_graph_manifest(
             "## inherits must contain exactly one fenced yaml block",
         ));
     }
-    // Inspect only the version scalar before selecting the strict v2 mode.
-    let probe: serde_yaml::Value = serde_yaml::from_str(&blocks[0]).map_err(|error| {
-        malformed(
-            &path,
-            format!("## inherits YAML must be one mapping: {error}"),
-        )
-    })?;
-    let version = probe
-        .as_mapping()
-        .and_then(|mapping| mapping.get(serde_yaml::Value::String("version".to_string())))
-        .and_then(serde_yaml::Value::as_u64);
-    if version == Some(1) {
-        return Ok(None);
-    }
+    // The dispatch pass consumed events only. Restricted v2 scanning happens
+    // before this function constructs any serde YAML value.
     let value = parse_strict_v2_yaml(&path, &blocks[0], "## inherits")?;
     let raw: RawGraphManifest = serde_yaml::from_value(value).map_err(|error| {
         malformed(
@@ -1202,24 +1421,31 @@ pub fn load_graph_manifest(
                 ));
             }
             let value = parse_strict_v2_yaml(&path, &blocks[0], "## overrides")?;
-        let parsed: RawGraphOverrides = serde_yaml::from_value(value.clone()).map_err(|error| {
-            malformed(&path, format!("invalid version 2 override mapping: {error}"))
-        })?;
-        if parsed.version != 2 {
-            return Err(malformed(
-                &path,
-                "## overrides version must match ## inherits version 2",
-            ));
-        }
-        for item in &parsed.items {
-            if item.target.is_empty() || item.replacement.is_empty() || item.rationale.is_empty() {
+            let parsed: RawGraphOverrides =
+                serde_yaml::from_value(value.clone()).map_err(|error| {
+                    malformed(
+                        &path,
+                        format!("invalid version 2 override mapping: {error}"),
+                    )
+                })?;
+            if parsed.version != 2 {
                 return Err(malformed(
                     &path,
-                    "version 2 override operands must be non-empty canonical references",
+                    "## overrides version must match ## inherits version 2",
                 ));
             }
-        }
-        let item_count = parsed.items.len();
+            for item in &parsed.items {
+                if item.target.is_empty()
+                    || item.replacement.is_empty()
+                    || item.rationale.is_empty()
+                {
+                    return Err(malformed(
+                        &path,
+                        "version 2 override operands must be non-empty canonical references",
+                    ));
+                }
+            }
+            let item_count = parsed.items.len();
             if item_count > V2_MAX_OVERRIDES {
                 return Err(limit_error(
                     &path,
@@ -1233,13 +1459,70 @@ pub fn load_graph_manifest(
             (None, None)
         };
 
-    Ok(Some(GraphCorpusManifest {
+    Ok(GraphCorpusManifest {
         path,
         bytes,
         parents,
         overrides,
         override_mapping_bytes,
-    }))
+    })
+}
+
+/// Resolve every direct version-2 materialisation root for write-boundary
+/// classification without walking a corpus or verifying its content pin.
+///
+/// `None` preserves the version-1/no-manifest dispatch contract. A version-2
+/// manifest is parsed strictly and every declared root is independently
+/// confined beneath the declaring repository. Transitive materialisations are
+/// necessarily beneath one of these direct roots, so mutation guards do not
+/// need a corpus argument or a second graph overlay.
+pub fn direct_graph_materialisation_roots(
+    repository_root: &Path,
+) -> Result<Option<Vec<PathBuf>>, ParentCorpusError> {
+    let repository_root = std::fs::canonicalize(repository_root).map_err(|error| {
+        ParentCorpusError::at(
+            ParentCorpusErrorCode::PathEscape,
+            repository_root,
+            format!("repository root is unavailable: {error}"),
+        )
+    })?;
+    let Some(manifest) = load_graph_manifest(&repository_root)? else {
+        return Ok(None);
+    };
+    let mut roots: Vec<(PathBuf, &ParentDeclaration)> = Vec::new();
+    for declaration in &manifest.parents {
+        let candidate = checked_relative_join(&repository_root, &declaration.root, "root")?;
+        ensure_no_reparse_components(&repository_root, &candidate)?;
+        let root = canonical_confined(
+            &repository_root,
+            &candidate,
+            ParentCorpusErrorCode::MaterialisationMissing,
+            "materialisation",
+        )?;
+        if root == repository_root || !root.is_dir() {
+            return Err(ParentCorpusError::at(
+                ParentCorpusErrorCode::PathEscape,
+                &candidate,
+                "parent materialisation must be a directory strictly inside its declaring repository",
+            ));
+        }
+        ensure_no_mount_boundary(&repository_root, &root)?;
+        for (other_root, other) in &roots {
+            if root == *other_root || root.starts_with(other_root) || other_root.starts_with(&root)
+            {
+                return Err(ParentCorpusError::at(
+                    ParentCorpusErrorCode::OverlappingRoots,
+                    &root,
+                    format!(
+                        "sibling parent roots overlap for '{}' and '{}'",
+                        other.source, declaration.source
+                    ),
+                ));
+            }
+        }
+        roots.push((root, declaration));
+    }
+    Ok(Some(roots.into_iter().map(|(root, _)| root).collect()))
 }
 
 fn lexical_components(path: &Path) -> Result<Vec<&std::ffi::OsStr>, ()> {
@@ -1317,6 +1600,49 @@ fn ensure_no_symlink_components(boundary: &Path, target: &Path) -> Result<(), Pa
     Ok(())
 }
 
+fn ensure_no_reparse_components(boundary: &Path, target: &Path) -> Result<(), ParentCorpusError> {
+    ensure_no_symlink_components(boundary, target)?;
+    #[cfg(windows)]
+    {
+        let relative = target.strip_prefix(boundary).map_err(|_| {
+            ParentCorpusError::at(
+                ParentCorpusErrorCode::PathEscape,
+                target,
+                format!("parent path escapes repository boundary: {}", target.display()),
+            )
+        })?;
+        let mut current = boundary.to_path_buf();
+        for component in relative.components() {
+            let Component::Normal(value) = component else {
+                continue;
+            };
+            current.push(value);
+            match std::fs::symlink_metadata(&current) {
+                Ok(metadata) if is_symlink_or_reparse(&metadata) => {
+                    return Err(ParentCorpusError::at(
+                        ParentCorpusErrorCode::SymlinkTraversal,
+                        &current,
+                        format!(
+                            "parent path traverses a Windows reparse point: {}",
+                            current.display()
+                        ),
+                    ));
+                }
+                Ok(_) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+                Err(error) => {
+                    return Err(ParentCorpusError::at(
+                        ParentCorpusErrorCode::SnapshotFailed,
+                        &current,
+                        format!("cannot inspect parent path {}: {error}", current.display()),
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 fn canonical_confined(
     boundary: &Path,
     candidate: &Path,
@@ -1359,7 +1685,11 @@ fn canonical_or_absolute(path: &Path) -> Option<PathBuf> {
 }
 
 #[cfg(target_os = "linux")]
-fn ensure_no_mount_boundary(boundary: &Path, target: &Path) -> Result<(), ParentCorpusError> {
+fn nested_mount_from_text(
+    mountinfo: &str,
+    boundary: &Path,
+    target: &Path,
+) -> Result<Option<PathBuf>, ()> {
     fn unescape_mount_path(value: &str) -> String {
         value
             .replace("\\040", " ")
@@ -1367,6 +1697,23 @@ fn ensure_no_mount_boundary(boundary: &Path, target: &Path) -> Result<(), Parent
             .replace("\\012", "\n")
             .replace("\\134", "\\")
     }
+    for line in mountinfo.lines() {
+        let Some(raw_mount) = line.split_whitespace().nth(4) else {
+            return Err(());
+        };
+        let mount = PathBuf::from(unescape_mount_path(raw_mount));
+        if mount != boundary
+            && mount.starts_with(boundary)
+            && (target == mount || target.starts_with(&mount))
+        {
+            return Ok(Some(mount));
+        }
+    }
+    Ok(None)
+}
+
+#[cfg(target_os = "linux")]
+fn ensure_no_mount_boundary(boundary: &Path, target: &Path) -> Result<(), ParentCorpusError> {
     let mountinfo = std::fs::read_to_string("/proc/self/mountinfo").map_err(|error| {
         ParentCorpusError::at(
             ParentCorpusErrorCode::UnsupportedFilesystem,
@@ -1374,28 +1721,22 @@ fn ensure_no_mount_boundary(boundary: &Path, target: &Path) -> Result<(), Parent
             format!("cannot inspect Linux mount identity: {error}"),
         )
     })?;
-    for line in mountinfo.lines() {
-        let Some(raw_mount) = line.split_whitespace().nth(4) else {
-            return Err(ParentCorpusError::at(
-                ParentCorpusErrorCode::UnsupportedFilesystem,
-                target,
-                "Linux mount identity record is malformed",
-            ));
-        };
-        let mount = PathBuf::from(unescape_mount_path(raw_mount));
-        if mount != boundary
-            && mount.starts_with(boundary)
-            && (target == mount || target.starts_with(&mount))
-        {
-            return Err(ParentCorpusError::at(
-                ParentCorpusErrorCode::UnsupportedFilesystem,
-                target,
-                format!(
-                    "federation path crosses mount boundary at {}",
-                    mount.display()
-                ),
-            ));
-        }
+    let nested = nested_mount_from_text(&mountinfo, boundary, target).map_err(|()| {
+        ParentCorpusError::at(
+            ParentCorpusErrorCode::UnsupportedFilesystem,
+            target,
+            "Linux mount identity record is malformed",
+        )
+    })?;
+    if let Some(mount) = nested {
+        return Err(ParentCorpusError::at(
+            ParentCorpusErrorCode::UnsupportedFilesystem,
+            target,
+            format!(
+                "federation path crosses mount boundary at {}",
+                mount.display()
+            ),
+        ));
     }
     Ok(())
 }
@@ -1405,6 +1746,58 @@ fn ensure_no_mount_boundary(_boundary: &Path, _target: &Path) -> Result<(), Pare
     // Stable device/volume identities are checked at every directory and file
     // on these platforms. Linux additionally exposes bind-mount identity.
     Ok(())
+}
+
+struct WalkMountBoundary {
+    boundary: PathBuf,
+    #[cfg(target_os = "linux")]
+    mountinfo: String,
+}
+
+impl WalkMountBoundary {
+    fn capture(boundary: &Path) -> Result<Self, ParentCorpusError> {
+        #[cfg(target_os = "linux")]
+        let mountinfo = std::fs::read_to_string("/proc/self/mountinfo").map_err(|error| {
+            ParentCorpusError::at(
+                ParentCorpusErrorCode::UnsupportedFilesystem,
+                boundary,
+                format!("cannot inspect Linux mount identity: {error}"),
+            )
+        })?;
+        Ok(Self {
+            boundary: boundary.to_path_buf(),
+            #[cfg(target_os = "linux")]
+            mountinfo,
+        })
+    }
+
+    fn check(&self, target: &Path) -> Result<(), ParentCorpusError> {
+        #[cfg(target_os = "linux")]
+        {
+            let nested = nested_mount_from_text(&self.mountinfo, &self.boundary, target).map_err(
+                |()| {
+                    ParentCorpusError::at(
+                        ParentCorpusErrorCode::UnsupportedFilesystem,
+                        target,
+                        "Linux mount identity record is malformed",
+                    )
+                },
+            )?;
+            if let Some(mount) = nested {
+                return Err(ParentCorpusError::at(
+                    ParentCorpusErrorCode::UnsupportedFilesystem,
+                    target,
+                    format!(
+                        "federation path crosses mount boundary at {}",
+                        mount.display()
+                    ),
+                ));
+            }
+        }
+        #[cfg(not(target_os = "linux"))]
+        let _ = target;
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1418,10 +1811,7 @@ struct StableFileIdentity {
 }
 
 #[cfg(unix)]
-fn stable_file_identity(
-    _path: &Path,
-    metadata: &std::fs::Metadata,
-) -> Result<StableFileIdentity, ()> {
+fn stable_metadata_identity(metadata: &std::fs::Metadata) -> Result<StableFileIdentity, ()> {
     use std::os::unix::fs::MetadataExt;
     Ok(StableFileIdentity {
         device: metadata.dev(),
@@ -1434,13 +1824,9 @@ fn stable_file_identity(
 }
 
 #[cfg(windows)]
-fn stable_file_identity(
-    path: &Path,
-    _metadata: &std::fs::Metadata,
-) -> Result<StableFileIdentity, ()> {
+fn opened_file_identity(file: &std::fs::File) -> Result<StableFileIdentity, ()> {
     use std::ffi::c_void;
     use std::mem::MaybeUninit;
-    use std::os::windows::fs::OpenOptionsExt;
     use std::os::windows::io::AsRawHandle;
 
     #[repr(C)]
@@ -1451,7 +1837,7 @@ fn stable_file_identity(
 
     #[repr(C)]
     struct ByHandleFileInformation {
-        _file_attributes: u32,
+        file_attributes: u32,
         _creation_time: FileTime,
         _last_access_time: FileTime,
         last_write_time: FileTime,
@@ -1471,12 +1857,6 @@ fn stable_file_identity(
         ) -> i32;
     }
 
-    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
-    let file = std::fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
-        .open(path)
-        .map_err(|_| ())?;
     let mut information = MaybeUninit::<ByHandleFileInformation>::uninit();
     // SAFETY: `file` keeps a valid owned handle alive for the call and the
     // Win32 function initializes the complete output structure on success.
@@ -1491,6 +1871,10 @@ fn stable_file_identity(
     }
     // SAFETY: the successful Win32 call above initialized every field.
     let information = unsafe { information.assume_init() };
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+    if information.file_attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        return Err(());
+    }
     let last_write = ((information.last_write_time.high as u64) << 32)
         | information.last_write_time.low as u64;
     Ok(StableFileIdentity {
@@ -1505,21 +1889,99 @@ fn stable_file_identity(
     })
 }
 
+#[cfg(unix)]
+fn opened_file_identity(file: &std::fs::File) -> Result<StableFileIdentity, ()> {
+    stable_metadata_identity(&file.metadata().map_err(|_| ())?)
+}
+
+#[cfg(unix)]
+fn open_no_follow(path: &Path, directory: bool) -> std::io::Result<std::fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let flags = libc::O_NOFOLLOW | if directory { libc::O_DIRECTORY } else { 0 };
+    std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(flags)
+        .open(path)
+}
+
+#[cfg(windows)]
+fn open_no_follow(path: &Path, directory: bool) -> std::io::Result<std::fs::File> {
+    use std::os::windows::fs::OpenOptionsExt;
+    const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+    let flags = FILE_FLAG_OPEN_REPARSE_POINT
+        | if directory {
+            FILE_FLAG_BACKUP_SEMANTICS
+        } else {
+            0
+        };
+    std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(flags)
+        .open(path)
+}
+
 #[cfg(not(any(unix, windows)))]
-fn stable_file_identity(
+fn open_no_follow(_path: &Path, _directory: bool) -> std::io::Result<std::fs::File> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "no-follow opens are unavailable",
+    ))
+}
+
+#[cfg(windows)]
+fn stable_path_identity(
+    path: &Path,
+    _metadata: &std::fs::Metadata,
+    directory: bool,
+) -> Result<StableFileIdentity, ()> {
+    let file = open_no_follow(path, directory).map_err(|_| ())?;
+    opened_file_identity(&file)
+}
+
+#[cfg(unix)]
+fn stable_path_identity(
+    _path: &Path,
+    metadata: &std::fs::Metadata,
+    _directory: bool,
+) -> Result<StableFileIdentity, ()> {
+    stable_metadata_identity(metadata)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn stable_path_identity(
     _path: &Path,
     _metadata: &std::fs::Metadata,
+    _directory: bool,
 ) -> Result<StableFileIdentity, ()> {
     Err(())
 }
 
-fn read_stable_regular(
+#[cfg(windows)]
+fn is_symlink_or_reparse(metadata: &std::fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+    metadata.file_type().is_symlink()
+        || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+}
+
+#[cfg(not(windows))]
+fn is_symlink_or_reparse(metadata: &std::fs::Metadata) -> bool {
+    metadata.file_type().is_symlink()
+}
+
+struct StableRegularCapture {
+    bytes: Vec<u8>,
+    identity: StableFileIdentity,
+}
+
+fn capture_stable_regular(
     path: &Path,
     maximum: usize,
     dimension: &str,
-    inherited: bool,
+    reject_hard_links: bool,
     expected_device: Option<u64>,
-) -> Result<Vec<u8>, ParentCorpusError> {
+) -> Result<StableRegularCapture, ParentCorpusError> {
     let before = std::fs::symlink_metadata(path).map_err(|error| {
         ParentCorpusError::at(
             ParentCorpusErrorCode::SnapshotFailed,
@@ -1530,7 +1992,7 @@ fn read_stable_regular(
             ),
         )
     })?;
-    if before.file_type().is_symlink() || !before.is_file() {
+    if is_symlink_or_reparse(&before) || !before.is_file() {
         return Err(ParentCorpusError::at(
             ParentCorpusErrorCode::SymlinkTraversal,
             path,
@@ -1540,19 +2002,19 @@ fn read_stable_regular(
             ),
         ));
     }
-    let before_identity = stable_file_identity(path, &before).map_err(|_| {
+    let before_identity = stable_path_identity(path, &before, false).map_err(|_| {
         ParentCorpusError::at(
             ParentCorpusErrorCode::UnsupportedFilesystem,
             path,
             format!("stable file identity is unavailable for {}", path.display()),
         )
     })?;
-    if inherited && before_identity.links != 1 {
+    if reject_hard_links && before_identity.links != 1 {
         return Err(ParentCorpusError::at(
             ParentCorpusErrorCode::UnsupportedFilesystem,
             path,
             format!(
-                "inherited files must have exactly one hard link: {}",
+                "version 2 files must have exactly one hard link: {}",
                 path.display()
             ),
         ));
@@ -1568,40 +2030,58 @@ fn read_stable_regular(
         ));
     }
     if before_identity.length > maximum as u64 {
-        return Err(limit_error(path, dimension, maximum, maximum + 1));
+        return Err(limit_error(
+            path,
+            dimension,
+            maximum,
+            maximum.saturating_add(1),
+        ));
     }
 
-    #[cfg(unix)]
-    let bytes = {
-        use std::io::Read;
-        use std::os::unix::fs::OpenOptionsExt;
-        let mut file = std::fs::OpenOptions::new()
-            .read(true)
-            .custom_flags(libc::O_NOFOLLOW)
-            .open(path)
-            .map_err(|error| {
-                ParentCorpusError::at(
-                    ParentCorpusErrorCode::SnapshotFailed,
-                    path,
-                    format!("cannot open federation input {}: {error}", path.display()),
-                )
-            })?;
-        let mut bytes = Vec::with_capacity(before_identity.length as usize);
-        file.read_to_end(&mut bytes).map_err(|error| {
-            ParentCorpusError::at(
-                ParentCorpusErrorCode::SnapshotFailed,
-                path,
-                format!("cannot read federation input {}: {error}", path.display()),
-            )
-        })?;
-        bytes
-    };
-    #[cfg(not(unix))]
-    let bytes = std::fs::read(path).map_err(|error| {
+    use std::io::Read;
+    let mut file = open_no_follow(path, false).map_err(|error| {
+        ParentCorpusError::at(
+            ParentCorpusErrorCode::SnapshotFailed,
+            path,
+            format!("cannot open federation input {}: {error}", path.display()),
+        )
+    })?;
+    let opened_identity = opened_file_identity(&file).map_err(|_| {
+        ParentCorpusError::at(
+            ParentCorpusErrorCode::UnsupportedFilesystem,
+            path,
+            format!(
+                "opened federation file identity is unavailable for {}",
+                path.display()
+            ),
+        )
+    })?;
+    if opened_identity != before_identity {
+        return Err(ParentCorpusError::at(
+            ParentCorpusErrorCode::SnapshotChanged,
+            path,
+            format!(
+                "federation input changed before its no-follow handle was opened: {}",
+                path.display()
+            ),
+        ));
+    }
+    let mut bytes = Vec::with_capacity(before_identity.length as usize);
+    file.read_to_end(&mut bytes).map_err(|error| {
         ParentCorpusError::at(
             ParentCorpusErrorCode::SnapshotFailed,
             path,
             format!("cannot read federation input {}: {error}", path.display()),
+        )
+    })?;
+    let opened_after = opened_file_identity(&file).map_err(|_| {
+        ParentCorpusError::at(
+            ParentCorpusErrorCode::UnsupportedFilesystem,
+            path,
+            format!(
+                "opened federation file identity is unavailable for {}",
+                path.display()
+            ),
         )
     })?;
 
@@ -1615,14 +2095,24 @@ fn read_stable_regular(
             ),
         )
     })?;
-    let after_identity = stable_file_identity(path, &after).map_err(|_| {
+    if is_symlink_or_reparse(&after) || !after.is_file() {
+        return Err(ParentCorpusError::at(
+            ParentCorpusErrorCode::SnapshotChanged,
+            path,
+            format!("federation input changed shape during capture: {}", path.display()),
+        ));
+    }
+    let after_identity = stable_path_identity(path, &after, false).map_err(|_| {
         ParentCorpusError::at(
             ParentCorpusErrorCode::UnsupportedFilesystem,
             path,
             format!("stable file identity is unavailable for {}", path.display()),
         )
     })?;
-    if before_identity != after_identity || bytes.len() as u64 != before_identity.length {
+    if before_identity != opened_after
+        || before_identity != after_identity
+        || bytes.len() as u64 != before_identity.length
+    {
         return Err(ParentCorpusError::at(
             ParentCorpusErrorCode::SnapshotChanged,
             path,
@@ -1632,7 +2122,109 @@ fn read_stable_regular(
             ),
         ));
     }
-    Ok(bytes)
+    Ok(StableRegularCapture {
+        bytes,
+        identity: before_identity,
+    })
+}
+
+fn read_stable_regular(
+    path: &Path,
+    maximum: usize,
+    dimension: &str,
+    reject_hard_links: bool,
+    expected_device: Option<u64>,
+) -> Result<Vec<u8>, ParentCorpusError> {
+    capture_stable_regular(
+        path,
+        maximum,
+        dimension,
+        reject_hard_links,
+        expected_device,
+    )
+    .map(|capture| capture.bytes)
+}
+
+fn validate_regular_entry(
+    path: &Path,
+    reject_hard_links: bool,
+    expected_device: u64,
+) -> Result<(), ParentCorpusError> {
+    let before = std::fs::symlink_metadata(path).map_err(|error| {
+        ParentCorpusError::at(
+            ParentCorpusErrorCode::SnapshotFailed,
+            path,
+            format!("cannot inspect federation entry {}: {error}", path.display()),
+        )
+    })?;
+    if is_symlink_or_reparse(&before) || !before.is_file() {
+        return Err(ParentCorpusError::at(
+            ParentCorpusErrorCode::SymlinkTraversal,
+            path,
+            format!("federation entry must be a real regular file: {}", path.display()),
+        ));
+    }
+    let before_identity = stable_path_identity(path, &before, false).map_err(|_| {
+        ParentCorpusError::at(
+            ParentCorpusErrorCode::UnsupportedFilesystem,
+            path,
+            format!("stable file identity is unavailable for {}", path.display()),
+        )
+    })?;
+    if reject_hard_links && before_identity.links != 1 {
+        return Err(ParentCorpusError::at(
+            ParentCorpusErrorCode::UnsupportedFilesystem,
+            path,
+            format!("version 2 files must have exactly one hard link: {}", path.display()),
+        ));
+    }
+    if before_identity.device != expected_device {
+        return Err(ParentCorpusError::at(
+            ParentCorpusErrorCode::UnsupportedFilesystem,
+            path,
+            format!("federation entry crosses a filesystem boundary: {}", path.display()),
+        ));
+    }
+    let file = open_no_follow(path, false).map_err(|error| {
+        ParentCorpusError::at(
+            ParentCorpusErrorCode::SnapshotFailed,
+            path,
+            format!("cannot open federation entry {}: {error}", path.display()),
+        )
+    })?;
+    let opened_identity = opened_file_identity(&file).map_err(|_| {
+        ParentCorpusError::at(
+            ParentCorpusErrorCode::UnsupportedFilesystem,
+            path,
+            format!("opened file identity is unavailable for {}", path.display()),
+        )
+    })?;
+    let after = std::fs::symlink_metadata(path).map_err(|error| {
+        ParentCorpusError::at(
+            ParentCorpusErrorCode::SnapshotChanged,
+            path,
+            format!("federation entry changed during inspection {}: {error}", path.display()),
+        )
+    })?;
+    let after_identity = stable_path_identity(path, &after, false).map_err(|_| {
+        ParentCorpusError::at(
+            ParentCorpusErrorCode::UnsupportedFilesystem,
+            path,
+            format!("stable file identity is unavailable for {}", path.display()),
+        )
+    })?;
+    if is_symlink_or_reparse(&after)
+        || !after.is_file()
+        || before_identity != opened_identity
+        || before_identity != after_identity
+    {
+        return Err(ParentCorpusError::at(
+            ParentCorpusErrorCode::SnapshotChanged,
+            path,
+            format!("federation entry changed during inspection: {}", path.display()),
+        ));
+    }
+    Ok(())
 }
 
 #[derive(Debug, Default)]
@@ -1671,7 +2263,7 @@ fn directory_device(path: &Path) -> Result<u64, ParentCorpusError> {
             ),
         )
     })?;
-    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+    if is_symlink_or_reparse(&metadata) || !metadata.is_dir() {
         return Err(ParentCorpusError::at(
             ParentCorpusErrorCode::SymlinkTraversal,
             path,
@@ -1681,28 +2273,52 @@ fn directory_device(path: &Path) -> Result<u64, ParentCorpusError> {
             ),
         ));
     }
-    stable_file_identity(path, &metadata)
-        .map(|identity| identity.device)
-        .map_err(|_| {
-            ParentCorpusError::at(
-                ParentCorpusErrorCode::UnsupportedFilesystem,
-                path,
-                format!(
-                    "stable filesystem identity is unavailable for {}",
-                    path.display()
-                ),
-            )
-        })
+    let before = stable_path_identity(path, &metadata, true).map_err(|_| {
+        ParentCorpusError::at(
+            ParentCorpusErrorCode::UnsupportedFilesystem,
+            path,
+            format!(
+                "stable filesystem identity is unavailable for {}",
+                path.display()
+            ),
+        )
+    })?;
+    let directory = open_no_follow(path, true).map_err(|error| {
+        ParentCorpusError::at(
+            ParentCorpusErrorCode::UnsupportedFilesystem,
+            path,
+            format!(
+                "cannot open federation directory without following links {}: {error}",
+                path.display()
+            ),
+        )
+    })?;
+    let opened = opened_file_identity(&directory).map_err(|_| {
+        ParentCorpusError::at(
+            ParentCorpusErrorCode::UnsupportedFilesystem,
+            path,
+            format!("opened directory identity is unavailable for {}", path.display()),
+        )
+    })?;
+    if before != opened {
+        return Err(ParentCorpusError::at(
+            ParentCorpusErrorCode::SnapshotChanged,
+            path,
+            format!("federation directory changed while opening: {}", path.display()),
+        ));
+    }
+    Ok(opened.device)
 }
 
 #[allow(clippy::too_many_arguments)] // The explicit bounds/context prevent accidental v1 reuse.
 fn snapshot_directory_v2(
     corpus_root: &Path,
+    mount_boundary: &WalkMountBoundary,
     directory: &Path,
     components: &mut Vec<String>,
     exclusions: &[PathBuf],
     expected_device: u64,
-    inherited_files: bool,
+    reject_hard_links: bool,
     charge_limits: bool,
     counters: &mut GraphCounters,
     output: &mut Vec<SnapshotFile>,
@@ -1717,7 +2333,14 @@ fn snapshot_directory_v2(
             ),
         )
     })?;
-    let directory_identity = stable_file_identity(directory, &directory_before).map_err(|_| {
+    if is_symlink_or_reparse(&directory_before) || !directory_before.is_dir() {
+        return Err(ParentCorpusError::at(
+            ParentCorpusErrorCode::SymlinkTraversal,
+            directory,
+            format!("inherited directory must be a real directory: {}", directory.display()),
+        ));
+    }
+    let directory_identity = stable_path_identity(directory, &directory_before, true).map_err(|_| {
         ParentCorpusError::at(
             ParentCorpusErrorCode::UnsupportedFilesystem,
             directory,
@@ -1727,6 +2350,30 @@ fn snapshot_directory_v2(
             ),
         )
     })?;
+    let directory_handle = open_no_follow(directory, true).map_err(|error| {
+        ParentCorpusError::at(
+            ParentCorpusErrorCode::SnapshotFailed,
+            directory,
+            format!(
+                "cannot open inherited directory without following links {}: {error}",
+                directory.display()
+            ),
+        )
+    })?;
+    let opened_directory_identity = opened_file_identity(&directory_handle).map_err(|_| {
+        ParentCorpusError::at(
+            ParentCorpusErrorCode::UnsupportedFilesystem,
+            directory,
+            format!("opened directory identity is unavailable for {}", directory.display()),
+        )
+    })?;
+    if directory_identity != opened_directory_identity {
+        return Err(ParentCorpusError::at(
+            ParentCorpusErrorCode::SnapshotChanged,
+            directory,
+            format!("inherited directory changed while opening: {}", directory.display()),
+        ));
+    }
     if directory_identity.device != expected_device {
         return Err(ParentCorpusError::at(
             ParentCorpusErrorCode::UnsupportedFilesystem,
@@ -1770,6 +2417,7 @@ fn snapshot_directory_v2(
             )?;
         }
         let path = entry.path();
+        mount_boundary.check(&path)?;
         if exclusions
             .iter()
             .any(|excluded| path == *excluded || path.starts_with(excluded))
@@ -1783,7 +2431,7 @@ fn snapshot_directory_v2(
                 format!("cannot inspect inherited entry {}: {error}", path.display()),
             )
         })?;
-        if metadata.file_type().is_symlink() {
+        if is_symlink_or_reparse(&metadata) {
             return Err(ParentCorpusError::at(
                 ParentCorpusErrorCode::SymlinkTraversal,
                 &path,
@@ -1793,7 +2441,14 @@ fn snapshot_directory_v2(
                 ),
             ));
         }
-        let Ok(name) = entry.file_name().into_string() else {
+        let file_name = entry.file_name();
+        let discovered_markdown = file_name
+            .to_str()
+            .is_some_and(|name| !name.starts_with('.') && name.ends_with(".md"));
+        if metadata.is_file() && !discovered_markdown {
+            validate_regular_entry(&path, reject_hard_links, expected_device)?;
+        }
+        let Ok(name) = file_name.into_string() else {
             continue;
         };
         if name.starts_with('.') {
@@ -1803,11 +2458,12 @@ fn snapshot_directory_v2(
         if metadata.is_dir() {
             snapshot_directory_v2(
                 corpus_root,
+                mount_boundary,
                 &path,
                 components,
                 exclusions,
                 expected_device,
-                inherited_files,
+                reject_hard_links,
                 charge_limits,
                 counters,
                 output,
@@ -1827,7 +2483,7 @@ fn snapshot_directory_v2(
                 &path,
                 V2_MAX_FILE_BYTES,
                 "file-bytes",
-                inherited_files,
+                reject_hard_links,
                 Some(expected_device),
             )?;
             if charge_limits {
@@ -1857,7 +2513,21 @@ fn snapshot_directory_v2(
             ),
         )
     })?;
-    let after_identity = stable_file_identity(directory, &directory_after).map_err(|_| {
+    if is_symlink_or_reparse(&directory_after) || !directory_after.is_dir() {
+        return Err(ParentCorpusError::at(
+            ParentCorpusErrorCode::SnapshotChanged,
+            directory,
+            format!("inherited directory changed shape during capture: {}", directory.display()),
+        ));
+    }
+    let opened_after_identity = opened_file_identity(&directory_handle).map_err(|_| {
+        ParentCorpusError::at(
+            ParentCorpusErrorCode::UnsupportedFilesystem,
+            directory,
+            format!("opened directory identity is unavailable for {}", directory.display()),
+        )
+    })?;
+    let after_identity = stable_path_identity(directory, &directory_after, true).map_err(|_| {
         ParentCorpusError::at(
             ParentCorpusErrorCode::UnsupportedFilesystem,
             directory,
@@ -1867,7 +2537,7 @@ fn snapshot_directory_v2(
             ),
         )
     })?;
-    if directory_identity != after_identity {
+    if directory_identity != opened_after_identity || directory_identity != after_identity {
         return Err(ParentCorpusError::at(
             ParentCorpusErrorCode::SnapshotChanged,
             directory,
@@ -2276,14 +2946,17 @@ struct CapturedNode {
     digest_v2: String,
 }
 
-fn captured_manifest(repository_root: &Path) -> Result<CapturedManifest, ParentCorpusError> {
-    if let Some(manifest) = load_graph_manifest(repository_root)? {
-        return Ok(CapturedManifest::V2(manifest));
+fn captured_manifest(
+    path: PathBuf,
+    bytes: Option<Vec<u8>>,
+) -> Result<CapturedManifest, ParentCorpusError> {
+    let Some(bytes) = bytes else {
+        return Ok(CapturedManifest::None);
+    };
+    if graph_manifest_version(&path, &bytes).is_some_and(|version| version != 1) {
+        return parse_graph_manifest_bytes(path, bytes).map(CapturedManifest::V2);
     }
-    match load_manifest(repository_root)? {
-        Some(manifest) => Ok(CapturedManifest::V1(manifest)),
-        None => Ok(CapturedManifest::None),
-    }
+    parse_manifest_v1_bytes(path, bytes).map(CapturedManifest::V1)
 }
 
 fn capture_v2_node(
@@ -2308,7 +2981,7 @@ fn capture_v2_node(
     }
     let device = directory_device(&repository_root)?;
     let config_candidate = repository_root.join(CONFIG_RELATIVE_PATH);
-    ensure_no_symlink_components(&repository_root, &config_candidate)?;
+    ensure_no_reparse_components(&repository_root, &config_candidate)?;
     let config_path = canonical_confined(
         &repository_root,
         &config_candidate,
@@ -2363,7 +3036,7 @@ fn capture_v2_node(
     }
 
     let manifest_path = repository_root.join(MANIFEST_RELATIVE_PATH);
-    ensure_no_symlink_components(&repository_root, &manifest_path)?;
+    ensure_no_reparse_components(&repository_root, &manifest_path)?;
     let manifest_bytes = match std::fs::symlink_metadata(&manifest_path) {
         Ok(_) => Some(read_stable_regular(
             &manifest_path,
@@ -2390,14 +3063,7 @@ fn capture_v2_node(
             &manifest_path,
         )?;
     }
-    let manifest = captured_manifest(&repository_root)?;
-    if manifest.bytes() != manifest_bytes.as_deref() {
-        return Err(ParentCorpusError::at(
-            ParentCorpusErrorCode::SnapshotChanged,
-            &manifest_path,
-            "federation manifest changed while it was parsed",
-        ));
-    }
+    let manifest = captured_manifest(manifest_path.clone(), manifest_bytes)?;
     add_limited(
         &mut counters.overrides,
         manifest.override_count(),
@@ -2407,6 +3073,7 @@ fn capture_v2_node(
     )?;
 
     let corpus_candidate = checked_relative_join(&repository_root, corpus_relative, "corpus")?;
+    ensure_no_reparse_components(&repository_root, &corpus_candidate)?;
     let corpus_root = canonical_confined(
         &repository_root,
         &corpus_candidate,
@@ -2426,9 +3093,11 @@ fn capture_v2_node(
         .iter()
         .filter_map(|parent| checked_relative_join(&repository_root, &parent.root, "root").ok())
         .collect::<Vec<_>>();
+    let walk_mount_boundary = WalkMountBoundary::capture(&repository_root)?;
     let mut files = Vec::new();
     snapshot_directory_v2(
         &corpus_root,
+        &walk_mount_boundary,
         &corpus_root,
         &mut Vec::new(),
         &exclusions,
@@ -2438,7 +3107,7 @@ fn capture_v2_node(
         counters,
         &mut files,
     )?;
-    let digest_v2 = digest_snapshot_v2(&source, &config_bytes, manifest_bytes.as_deref(), &files);
+    let digest_v2 = digest_snapshot_v2(&source, &config_bytes, manifest.bytes(), &files);
     Ok(CapturedNode {
         repository_root,
         source,
@@ -2489,6 +3158,7 @@ pub fn calculate_parent_digest_v2(
 
 struct GraphVerification {
     invocation_root: PathBuf,
+    root_source: String,
     counters: GraphCounters,
     physical_captures: BTreeMap<(PathBuf, String), CapturedNode>,
     expanded_physical: BTreeSet<(PathBuf, String)>,
@@ -2505,6 +3175,7 @@ impl GraphVerification {
         declaration: &ParentDeclaration,
     ) -> Result<PathBuf, ParentCorpusError> {
         let candidate = checked_relative_join(owner_root, &declaration.root, "root")?;
+        ensure_no_reparse_components(owner_root, &candidate)?;
         let root = canonical_confined(
             owner_root,
             &candidate,
@@ -2522,33 +3193,57 @@ impl GraphVerification {
         Ok(root)
     }
 
+    #[allow(clippy::too_many_arguments)] // Route ownership is explicit at every recursive edge.
     fn verify_edges(
         &mut self,
         owner_source: &str,
+        owner_pin: Option<&str>,
         owner_root: &Path,
         declarations: &[ParentDeclaration],
         depth: usize,
         active_sources: &mut Vec<String>,
         owner_is_v1: bool,
     ) -> Result<(), ParentCorpusError> {
+        let owner_origin = FederationValidationOrigin {
+            source: owner_source.to_string(),
+            layer: if owner_pin.is_some() {
+                crate::corpus::Layer::Inherited
+            } else {
+                crate::corpus::Layer::Local
+            },
+            pin: owner_pin.map(str::to_string),
+        };
         if depth > V2_MAX_INHERITANCE_DEPTH {
             return Err(limit_error(
                 owner_root,
                 "depth",
                 V2_MAX_INHERITANCE_DEPTH,
                 V2_MAX_INHERITANCE_DEPTH + 1,
-            ));
+            )
+            .with_graph_context(owner_origin, active_sources.clone(), 1));
         }
         let mut siblings: Vec<(PathBuf, &ParentDeclaration)> = Vec::new();
         for declaration in declarations {
+            let declared_route = active_sources
+                .iter()
+                .cloned()
+                .chain(std::iter::once(declaration.source.clone()))
+                .collect::<Vec<_>>();
             add_limited(
                 &mut self.counters.edges,
                 1,
                 V2_MAX_EDGES,
                 "edges",
                 owner_root,
-            )?;
-            let materialisation_root = self.resolve_materialisation(owner_root, declaration)?;
+            )
+            .map_err(|error| {
+                error.with_graph_context(owner_origin.clone(), declared_route.clone(), 1)
+            })?;
+            let materialisation_root = self
+                .resolve_materialisation(owner_root, declaration)
+                .map_err(|error| {
+                    error.with_graph_context(owner_origin.clone(), declared_route.clone(), 1)
+                })?;
             for (other_root, other) in &siblings {
                 let overlap = materialisation_root == *other_root
                     || materialisation_root.starts_with(other_root)
@@ -2565,7 +3260,8 @@ impl GraphVerification {
                             "sibling parent roots overlap for '{}' and '{}'",
                             other.source, declaration.source
                         ),
-                    ));
+                    )
+                    .with_graph_context(owner_origin.clone(), declared_route.clone(), 1));
                 }
             }
             siblings.push((materialisation_root.clone(), declaration));
@@ -2579,7 +3275,10 @@ impl GraphVerification {
                     &declaration.corpus,
                     &self.invocation_root,
                     &mut self.counters,
-                )?;
+                )
+                .map_err(|error| {
+                    error.with_graph_context(owner_origin.clone(), declared_route.clone(), 1)
+                })?;
                 self.physical_captures
                     .insert(physical_key.clone(), captured.clone());
                 captured
@@ -2592,7 +3291,8 @@ impl GraphVerification {
                         "manifest source '{}' does not match inherited corpus.source '{}'",
                         declaration.source, captured.source
                     ),
-                ));
+                )
+                .with_graph_context(owner_origin.clone(), declared_route.clone(), 1));
             }
             let verified_pin = if declaration.version == 1 {
                 digest_snapshot(&captured.source, &captured.config_bytes, &captured.files)
@@ -2607,7 +3307,8 @@ impl GraphVerification {
                         "declared parent digest '{}' does not match verified digest '{}'",
                         declaration.digest, verified_pin
                     ),
-                ));
+                )
+                .with_graph_context(owner_origin.clone(), declared_route.clone(), 1));
             }
             if owner_is_v1 && !matches!(captured.manifest, CapturedManifest::None) {
                 return Err(ParentCorpusError::at(
@@ -2617,7 +3318,8 @@ impl GraphVerification {
                         "version-1 parent source '{}' declares its own inheritance",
                         captured.source
                     ),
-                ));
+                )
+                .with_graph_context(owner_origin.clone(), declared_route.clone(), 1));
             }
             if active_sources
                 .iter()
@@ -2629,10 +3331,23 @@ impl GraphVerification {
                     ParentCorpusErrorCode::Cycle,
                     owner_root.join(MANIFEST_RELATIVE_PATH),
                     format!("federation source cycle: {}", route.join(" -> ")),
+                )
+                .with_graph_context(
+                    FederationValidationOrigin {
+                        source: self.root_source.clone(),
+                        layer: crate::corpus::Layer::Local,
+                        pin: None,
+                    },
+                    route,
+                    1,
                 ));
             }
             if let Some(existing) = self.logical_nodes.get(&captured.source) {
                 if existing.digest != captured.digest_v2 {
+                    let mut source_route = existing.source_route.clone();
+                    if declared_route < source_route {
+                        source_route = declared_route.clone();
+                    }
                     return Err(ParentCorpusError::at(
                         ParentCorpusErrorCode::DivergentPin,
                         owner_root.join(MANIFEST_RELATIVE_PATH),
@@ -2640,6 +3355,15 @@ impl GraphVerification {
                             "source '{}' verified with divergent pins '{}' and '{}'",
                             captured.source, existing.digest, captured.digest_v2
                         ),
+                    )
+                    .with_graph_context(
+                        FederationValidationOrigin {
+                            source: self.root_source.clone(),
+                            layer: crate::corpus::Layer::Local,
+                            pin: None,
+                        },
+                        source_route,
+                        existing.route_count + 1,
                     ));
                 }
             }
@@ -2665,6 +3389,7 @@ impl GraphVerification {
                     CapturedManifest::None => {}
                     CapturedManifest::V1(manifest) => self.verify_edges(
                         &captured.source,
+                        Some(&captured.digest_v2),
                         &captured.repository_root,
                         std::slice::from_ref(&manifest.inherits),
                         depth + 1,
@@ -2673,6 +3398,7 @@ impl GraphVerification {
                     )?,
                     CapturedManifest::V2(manifest) => self.verify_edges(
                         &captured.source,
+                        Some(&captured.digest_v2),
                         &captured.repository_root,
                         &manifest.parents,
                         depth + 1,
@@ -2684,14 +3410,25 @@ impl GraphVerification {
             }
             active_sources.pop();
 
-            if !self.logical_nodes.contains_key(&captured.source) {
+            if let Some(existing) = self.logical_nodes.get_mut(&captured.source) {
+                existing.route_count += 1;
+                if declared_route < existing.source_route {
+                    existing.source_route = declared_route;
+                }
+            } else {
+                let node_origin = FederationValidationOrigin {
+                    source: captured.source.clone(),
+                    layer: crate::corpus::Layer::Inherited,
+                    pin: Some(captured.digest_v2.clone()),
+                };
                 if self.logical_nodes.len() >= V2_MAX_INHERITED_SOURCES {
                     return Err(limit_error(
                         &captured.config_path,
                         "unique-inherited-sources",
                         V2_MAX_INHERITED_SOURCES,
                         V2_MAX_INHERITED_SOURCES + 1,
-                    ));
+                    )
+                    .with_graph_context(node_origin.clone(), declared_route.clone(), 1));
                 }
                 add_limited(
                     &mut self.counters.logical_files,
@@ -2699,7 +3436,10 @@ impl GraphVerification {
                     V2_MAX_INHERITED_FILES,
                     "inherited-files",
                     &captured.corpus_root,
-                )?;
+                )
+                .map_err(|error| {
+                    error.with_graph_context(node_origin.clone(), declared_route.clone(), 1)
+                })?;
                 let logical_bytes = captured.config_bytes.len()
                     + captured.manifest.bytes().map_or(0, <[u8]>::len)
                     + captured
@@ -2713,12 +3453,17 @@ impl GraphVerification {
                     V2_MAX_LOGICAL_BYTES,
                     "logical-bytes",
                     &captured.corpus_root,
-                )?;
+                )
+                .map_err(|error| {
+                    error.with_graph_context(node_origin, declared_route.clone(), 1)
+                })?;
                 self.logical_nodes.insert(
                     captured.source.clone(),
                     VerifiedFederationNode {
                         source: captured.source,
                         digest: captured.digest_v2,
+                        source_route: declared_route,
+                        route_count: 1,
                         config_path: captured.config_path,
                         config_bytes: captured.config_bytes,
                         manifest_path: captured.manifest_path,
@@ -2761,12 +3506,12 @@ pub fn verify_federation(
     validate_v2_path(root_corpus_relative, "corpus")
         .map_err(|reason| ParentCorpusError::new(ParentCorpusErrorCode::PathEscape, reason))?;
     let root_config_path = repository_root.join(CONFIG_RELATIVE_PATH);
-    ensure_no_symlink_components(&repository_root, &root_config_path)?;
+    ensure_no_reparse_components(&repository_root, &root_config_path)?;
     let root_config_bytes = read_stable_regular(
         &root_config_path,
         V2_MAX_CONFIG_BYTES,
         "config-bytes",
-        false,
+        true,
         Some(directory_device(&repository_root)?),
     )?;
     let config_text = std::str::from_utf8(&root_config_bytes).map_err(|_| {
@@ -2793,62 +3538,68 @@ pub fn verify_federation(
             "version 2 root config must declare corpus.source",
         )
     })?;
+    let root_origin = FederationValidationOrigin {
+        source: root_source.clone(),
+        layer: crate::corpus::Layer::Local,
+        pin: None,
+    };
     if root_source.len() > V2_MAX_SOURCE_BYTES {
         return Err(limit_error(
             &root_config_path,
             "source-bytes",
             V2_MAX_SOURCE_BYTES,
             V2_MAX_SOURCE_BYTES + 1,
-        ));
+        )
+        .with_validation_origin(root_origin.clone()));
     }
     let root_corpus_candidate =
-        checked_relative_join(&repository_root, root_corpus_relative, "corpus")?;
+        checked_relative_join(&repository_root, root_corpus_relative, "corpus")
+            .map_err(|error| error.with_validation_origin(root_origin.clone()))?;
+    ensure_no_reparse_components(&repository_root, &root_corpus_candidate)
+        .map_err(|error| error.with_validation_origin(root_origin.clone()))?;
     let root_corpus_root = canonical_confined(
         &repository_root,
         &root_corpus_candidate,
         ParentCorpusErrorCode::ParentCorpusMissing,
         "root corpus",
-    )?;
-    let root_device = directory_device(&repository_root)?;
-    if directory_device(&root_corpus_root)? != root_device {
+    )
+    .map_err(|error| error.with_validation_origin(root_origin.clone()))?;
+    let root_device = directory_device(&repository_root)
+        .map_err(|error| error.with_validation_origin(root_origin.clone()))?;
+    if directory_device(&root_corpus_root)
+        .map_err(|error| error.with_validation_origin(root_origin.clone()))?
+        != root_device
+    {
         return Err(ParentCorpusError::at(
             ParentCorpusErrorCode::UnsupportedFilesystem,
             &root_corpus_root,
             "root corpus crosses a filesystem boundary",
-        ));
+        )
+        .with_validation_origin(root_origin.clone()));
     }
     let root_exclusions = manifest
         .parents
         .iter()
         .map(|parent| checked_relative_join(&repository_root, &parent.root, "root"))
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.with_validation_origin(root_origin.clone()))?;
+    let root_mount_boundary = WalkMountBoundary::capture(&repository_root)
+        .map_err(|error| error.with_validation_origin(root_origin.clone()))?;
     let mut root_files = Vec::new();
     let mut root_snapshot_counters = GraphCounters::default();
     snapshot_directory_v2(
         &root_corpus_root,
+        &root_mount_boundary,
         &root_corpus_root,
         &mut Vec::new(),
         &root_exclusions,
         root_device,
-        false,
+        true,
         false,
         &mut root_snapshot_counters,
         &mut root_files,
-    )?;
-    let stable_manifest_bytes = read_stable_regular(
-        &manifest.path,
-        V2_MAX_MANIFEST_BYTES,
-        "manifest-bytes",
-        false,
-        Some(root_device),
-    )?;
-    if stable_manifest_bytes != manifest.bytes {
-        return Err(ParentCorpusError::at(
-            ParentCorpusErrorCode::SnapshotChanged,
-            &manifest.path,
-            "root federation manifest changed while it was parsed",
-        ));
-    }
+    )
+    .map_err(|error| error.with_validation_origin(root_origin))?;
     let root_override_count = manifest
         .overrides
         .as_ref()
@@ -2858,6 +3609,7 @@ pub fn verify_federation(
         .map_or(0, Vec::len);
     let mut verification = GraphVerification {
         invocation_root: repository_root.clone(),
+        root_source: root_source.clone(),
         counters: GraphCounters {
             overrides: root_override_count,
             ..GraphCounters::default()
@@ -2871,6 +3623,7 @@ pub fn verify_federation(
     };
     verification.verify_edges(
         &root_source,
+        None,
         &repository_root,
         &manifest.parents,
         1,
@@ -3300,5 +4053,50 @@ mod tests {
         let root = scratch("no-manifest");
         assert!(verify_parent(&root).unwrap().is_none());
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn captured_manifest_parser_never_reopens_its_path() {
+        let root = scratch("captured-manifest");
+        fs::create_dir_all(root.join(".decided")).unwrap();
+        let path = root.join(MANIFEST_RELATIVE_PATH);
+        let captured = format!(
+            "# Corpus\n\n## inherits\n\n```yaml\nversion: 2\nparents:\n  - alias: parent\n    source: acme/parent\n    root: vendor/parent\n    corpus: decisions\n    digest: {DIGEST_V2_PREFIX}{}\n```\n",
+            "0".repeat(64)
+        )
+        .into_bytes();
+        fs::write(&path, &captured).unwrap();
+        fs::write(&path, b"not the captured manifest\n").unwrap();
+        let parsed = parse_graph_manifest_bytes(path, captured).unwrap();
+        assert_eq!(parsed.parents[0].source, "acme/parent");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn nested_mount_records_are_detected_for_every_walk_target() {
+        let mountinfo = concat!(
+            "1 0 8:1 / / rw - ext4 /dev/root rw\n",
+            "2 1 8:1 / /repo rw - ext4 /dev/root rw\n",
+            "3 2 8:1 / /repo/vendor\\040parent/decisions/nested rw - ext4 /dev/root rw\n",
+        );
+        assert_eq!(
+            nested_mount_from_text(
+                mountinfo,
+                Path::new("/repo/vendor parent"),
+                Path::new("/repo/vendor parent/decisions/nested/policy.md"),
+            )
+            .unwrap(),
+            Some(PathBuf::from("/repo/vendor parent/decisions/nested"))
+        );
+        assert_eq!(
+            nested_mount_from_text(
+                mountinfo,
+                Path::new("/repo/vendor parent"),
+                Path::new("/repo/vendor parent/decisions/policy.md"),
+            )
+            .unwrap(),
+            None
+        );
     }
 }

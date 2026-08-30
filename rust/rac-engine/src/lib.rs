@@ -51,6 +51,7 @@ pub mod identity;
 pub mod corpus;
 pub mod composition;
 pub mod graph_composition;
+pub mod graph_federated_corpus;
 pub mod validate;
 pub mod relationships;
 pub mod diff;

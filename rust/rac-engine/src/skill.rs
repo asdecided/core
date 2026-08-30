@@ -84,18 +84,13 @@ pub enum SkillInstallError {
     Io(String),
 }
 
-/// `install_skills(target_dir, skill_name)` — write bundled skills into
-/// `<dir>/.claude/skills/<name>/SKILL.md`.
-///
-/// With no name every bundled skill is installed all-or-nothing: every
-/// target path is checked BEFORE any write, and one collision refuses the
-/// whole installation with nothing written (existing paths listed in
-/// registry order). Emitted paths are `str(Path(dir) / ...)` — the caller's
-/// `--dir` normalized by pathlib, never abspath'd (landmine 6).
-pub fn install_skills(
+/// Resolve every destination an installation would write, preserving the
+/// registry-order and unknown-name contract. Callers can preflight these
+/// concrete paths before the all-or-nothing write loop begins.
+pub fn install_targets(
     target_dir: &str,
     skill_name: Option<&str>,
-) -> Result<SkillInstallation, SkillInstallError> {
+) -> Result<Vec<String>, SkillInstallError> {
     if let Some(name) = skill_name {
         if skill_bytes(name).is_none() {
             return Err(SkillInstallError::NotFound(format!(
@@ -108,13 +103,32 @@ pub fn install_skills(
         Some(name) => vec![name],
         None => available_skills(),
     };
+    Ok(names
+        .iter()
+        .map(|name| py_join(target_dir, &[".claude", "skills", name, "SKILL.md"]))
+        .collect())
+}
+
+/// `install_skills(target_dir, skill_name)` — write bundled skills into
+/// `<dir>/.claude/skills/<name>/SKILL.md`.
+///
+/// With no name every bundled skill is installed all-or-nothing: every
+/// target path is checked BEFORE any write, and one collision refuses the
+/// whole installation with nothing written (existing paths listed in
+/// registry order). Emitted paths are `str(Path(dir) / ...)` — the caller's
+/// `--dir` normalized by pathlib, never abspath'd (landmine 6).
+pub fn install_skills(
+    target_dir: &str,
+    skill_name: Option<&str>,
+) -> Result<SkillInstallation, SkillInstallError> {
+    let names: Vec<&str> = match skill_name {
+        Some(name) => vec![name],
+        None => available_skills(),
+    };
 
     // Check every destination first, then write — a refusal never leaves a
     // partial installation behind.
-    let destinations: Vec<String> = names
-        .iter()
-        .map(|name| py_join(target_dir, &[".claude", "skills", name, "SKILL.md"]))
-        .collect();
+    let destinations = install_targets(target_dir, skill_name)?;
     let existing: Vec<&str> = destinations
         .iter()
         .filter(|dest| Path::new(dest.as_str()).exists())

@@ -17,6 +17,13 @@ pub const FEDERATED_SHELL: &str = include_str!("../assets/portal/asdecided-porta
 /// whitespace inside the element); the populated form replaces it verbatim.
 const SEAM: &str = r#"<script type="application/json" id="lore-export"></script>"#;
 
+// The v1 source-aware shell is also a frozen output. Version 2 patches only
+// its one direct-mapping property read at render time, leaving the packaged
+// v1 bytes and every v1 HTML export exact.
+const V1_OVERRIDE_TARGET_READ: &str = r#"T.state==="replacement"&&b(T.parent.id,$)"#;
+const V2_OVERRIDE_TARGET_READ: &str =
+    r#"T.state!=="overridden"&&b((T.target??T.parent).id,$)"#;
+
 /// `_escape_for_script(payload)` — make serialized JSON safe inside a
 /// `<script>` element with two valid JSON escapes, applied in the oracle's
 /// order: `</` → `<\/` first, then `<!--` → `<\u{0021}--` (both literal
@@ -51,7 +58,26 @@ pub fn render_export_html(export: &CorpusExport) -> Result<String, String> {
 }
 
 pub fn render_federated_export_html(export: &CorpusExport) -> Result<String, String> {
-    render_export_html_with_shell(export, FEDERATED_SHELL)
+    if export
+        .artifacts
+        .iter()
+        .any(|artifact| artifact.graph_provenance.is_some())
+    {
+        if FEDERATED_SHELL.matches(V1_OVERRIDE_TARGET_READ).count() != 1 {
+            return Err(
+                "packaged source-aware portal shell has no usable v1 override seam; re-vendor it"
+                    .to_string(),
+            );
+        }
+        let graph_shell = FEDERATED_SHELL.replacen(
+            V1_OVERRIDE_TARGET_READ,
+            V2_OVERRIDE_TARGET_READ,
+            1,
+        );
+        render_export_html_with_shell(export, &graph_shell)
+    } else {
+        render_export_html_with_shell(export, FEDERATED_SHELL)
+    }
 }
 
 #[cfg(test)]
@@ -63,6 +89,8 @@ mod tests {
         assert_eq!(SHELL.matches(SEAM).count(), 1);
         assert_eq!(FEDERATED_SHELL.matches(SEAM).count(), 1);
         assert_ne!(SHELL, FEDERATED_SHELL);
+        assert_eq!(FEDERATED_SHELL.matches(V1_OVERRIDE_TARGET_READ).count(), 1);
+        assert!(!FEDERATED_SHELL.contains(V2_OVERRIDE_TARGET_READ));
     }
 
     /// The two escapes in the oracle's order; the comment-open rewrite must

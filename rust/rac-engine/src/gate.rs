@@ -518,14 +518,14 @@ fn build_gate_internal(
 
     if let Some(options) = code {
         let sentry = if let Some(corpus) = composed {
-            crate::sentry::analyze_with_items(
+            crate::sentry::analyze_with_items_excluding(
                 directory,
                 options.repository,
                 options.base,
                 options.full_tree,
                 &items,
                 true,
-                corpus.read_only_root(),
+                corpus.read_only_roots(),
             )
         } else {
             crate::sentry::analyze(

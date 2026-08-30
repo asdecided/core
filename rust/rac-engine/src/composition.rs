@@ -10,6 +10,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use crate::corpus::{ArtifactKey, ArtifactPath, Layer};
+use crate::graph_composition::{GraphComposition, GraphLookupError, GraphOverrideProvenance};
 use crate::pycompat::py_casefold;
 use crate::relationships::{
     resolution_index_from_rows, resolve_relationships, validation_from_rows_with_index,
@@ -271,9 +272,11 @@ pub enum LookupError {
 /// The one composed read model. `items` owns the catalog exactly once; local
 /// and effective corpora are stable ordered projections over it.
 pub struct ComposedCorpus {
+    graph: Option<GraphComposition>,
     items: Vec<CorpusItem>,
     child_source: Option<String>,
     read_only_root: Option<PathBuf>,
+    read_only_roots: Vec<PathBuf>,
     local: Vec<usize>,
     effective: Vec<usize>,
     parent: Option<ParentIdentity>,
@@ -284,6 +287,39 @@ pub struct ComposedCorpus {
     resolution_index: ResolutionIndex,
     item_by_key: HashMap<ArtifactKey, usize>,
     captured_content: HashMap<ArtifactKey, Vec<u8>>,
+}
+
+enum CorpusProjectionIter<'a> {
+    Direct(std::slice::Iter<'a, CorpusItem>),
+    Projected {
+        items: &'a [CorpusItem],
+        indices: std::slice::Iter<'a, usize>,
+    },
+}
+
+impl<'a> Iterator for CorpusProjectionIter<'a> {
+    type Item = &'a CorpusItem;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::Direct(items) => items.next(),
+            Self::Projected { items, indices } => indices.next().map(|index| &items[*index]),
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let length = self.len();
+        (length, Some(length))
+    }
+}
+
+impl ExactSizeIterator for CorpusProjectionIter<'_> {
+    fn len(&self) -> usize {
+        match self {
+            Self::Direct(items) => items.len(),
+            Self::Projected { indices, .. } => indices.len(),
+        }
+    }
 }
 
 impl ComposedCorpus {
@@ -385,6 +421,42 @@ impl ComposedCorpus {
         )
     }
 
+    /// Activate an already-verified version-2 graph behind the common read
+    /// facade. The graph remains the sole owner of catalog and projection
+    /// semantics; captured bytes and physical read-only roots stay runtime
+    /// data on this compatibility boundary.
+    pub fn from_graph(
+        graph: GraphComposition,
+        captured_content: impl IntoIterator<Item = (ArtifactKey, Vec<u8>)>,
+        read_only_roots: impl IntoIterator<Item = PathBuf>,
+    ) -> Self {
+        let child_source = graph.root_source().to_string();
+        let mut captured_content: HashMap<ArtifactKey, Vec<u8>> =
+            captured_content.into_iter().collect();
+        captured_content.retain(|key, _| graph.item(key).is_some());
+        let mut read_only_roots: Vec<PathBuf> = read_only_roots.into_iter().collect();
+        read_only_roots.sort();
+        read_only_roots.dedup();
+        let read_only_root = read_only_roots.first().cloned();
+        Self {
+            graph: Some(graph),
+            items: Vec::new(),
+            child_source: Some(child_source),
+            read_only_root,
+            read_only_roots,
+            local: Vec::new(),
+            effective: Vec::new(),
+            parent: None,
+            overrides: Vec::new(),
+            findings: Vec::new(),
+            catalog_rows: Vec::new(),
+            effective_rows: Vec::new(),
+            resolution_index: ResolutionIndex::new(),
+            item_by_key: HashMap::new(),
+            captured_content,
+        }
+    }
+
     fn build(
         items: Vec<CorpusItem>,
         child_source: Option<String>,
@@ -483,10 +555,13 @@ impl ComposedCorpus {
             .collect();
         captured_content.retain(|key, _| item_by_key.contains_key(key));
 
+        let read_only_roots = read_only_root.iter().cloned().collect();
         Self {
+            graph: None,
             items,
             child_source,
             read_only_root,
+            read_only_roots,
             local,
             effective,
             parent,
@@ -501,15 +576,36 @@ impl ComposedCorpus {
     }
 
     pub fn local_items(&self) -> impl ExactSizeIterator<Item = &CorpusItem> {
-        self.local.iter().map(|index| &self.items[*index])
+        match &self.graph {
+            Some(graph) => CorpusProjectionIter::Projected {
+                items: graph.catalog_slice(),
+                indices: graph.root_local_indices().iter(),
+            },
+            None => CorpusProjectionIter::Projected {
+                items: &self.items,
+                indices: self.local.iter(),
+            },
+        }
     }
 
     pub fn catalog(&self) -> impl ExactSizeIterator<Item = &CorpusItem> {
-        self.items.iter()
+        match &self.graph {
+            Some(graph) => CorpusProjectionIter::Direct(graph.catalog_slice().iter()),
+            None => CorpusProjectionIter::Direct(self.items.iter()),
+        }
     }
 
     pub fn effective(&self) -> impl ExactSizeIterator<Item = &CorpusItem> {
-        self.effective.iter().map(|index| &self.items[*index])
+        match &self.graph {
+            Some(graph) => CorpusProjectionIter::Projected {
+                items: graph.catalog_slice(),
+                indices: graph.effective_indices().iter(),
+            },
+            None => CorpusProjectionIter::Projected {
+                items: &self.items,
+                indices: self.effective.iter(),
+            },
+        }
     }
 
     pub fn parent(&self) -> Option<&ParentIdentity> {
@@ -520,8 +616,29 @@ impl ComposedCorpus {
         self.child_source.as_deref()
     }
 
+    /// V1's one read-only root. Graph-backed callers receive the first
+    /// bytewise-sorted root for source compatibility and must use
+    /// [`Self::read_only_roots`] for complete mutation/exclusion guards.
     pub fn read_only_root(&self) -> Option<&Path> {
         self.read_only_root.as_deref()
+    }
+
+    pub fn read_only_roots(&self) -> &[PathBuf] {
+        &self.read_only_roots
+    }
+
+    pub fn is_graph(&self) -> bool {
+        self.graph.is_some()
+    }
+
+    /// Whether this facade has any inherited layer, under either the v1
+    /// single-parent model or the v2 graph model.
+    pub fn is_federated(&self) -> bool {
+        self.graph.is_some() || self.parent.is_some()
+    }
+
+    pub fn graph(&self) -> Option<&GraphComposition> {
+        self.graph.as_ref()
     }
 
     pub fn overrides(&self) -> &[ValidatedOverride] {
@@ -532,6 +649,17 @@ impl ComposedCorpus {
     /// attach only to the retained parent and effective replacement; a
     /// rationale-only artifact is not itself marked as overridden.
     pub fn provenance_for(&self, key: &ArtifactKey) -> Option<ComposedProvenance> {
+        if let Some(graph) = &self.graph {
+            let item = graph.item(key)?;
+            let chain = graph.provenance_for(key)?;
+            // The v1 carrier cannot represent owner, lineage, or a complete
+            // multi-hop chain. Return fixed origin only when that is the whole
+            // truth; callers must use `graph_provenance_for` otherwise.
+            return chain.is_empty().then(|| ComposedProvenance {
+                origin: item.origin.clone(),
+                overrides: Vec::new(),
+            });
+        }
         let item = self.item(key)?;
         let mut overrides: Vec<_> = self
             .overrides
@@ -560,15 +688,28 @@ impl ComposedCorpus {
         })
     }
 
+    /// Complete version-2 provenance. No v1-shaped flattening or truncation
+    /// occurs; callers either receive the graph-native ordered chain or `None`
+    /// when this is a v1/no-manifest composition.
+    pub fn graph_provenance_for(&self, key: &ArtifactKey) -> Option<&[GraphOverrideProvenance]> {
+        self.graph.as_ref()?.provenance_for(key)
+    }
+
     pub fn findings(&self) -> &[CompositionFinding] {
         &self.findings
     }
 
     pub fn is_overridden(&self, key: &ArtifactKey) -> bool {
+        if let Some(graph) = &self.graph {
+            return graph.terminal_redirects().contains_key(key);
+        }
         self.overrides.iter().any(|mapping| &mapping.parent == key)
     }
 
     pub fn item(&self, key: &ArtifactKey) -> Option<&CorpusItem> {
+        if let Some(graph) = &self.graph {
+            return graph.item(key);
+        }
         self.item_by_key.get(key).map(|index| &self.items[*index])
     }
 
@@ -592,6 +733,9 @@ impl ComposedCorpus {
     /// counts come from this composition's source-aware resolver, including
     /// qualified cross-source edges and canonical override redirects.
     pub fn effective_index(&self) -> Vec<IndexEntry> {
+        if let Some(graph) = &self.graph {
+            return graph.effective_index();
+        }
         let key_by_path: HashMap<&ArtifactPath, &ArtifactKey> = self
             .items
             .iter()
@@ -616,6 +760,9 @@ impl ComposedCorpus {
     /// only its qualified canonical address, and replacement rows receive the
     /// explicitly authorized parent-canonical redirect.
     pub fn identity_index(&self) -> Vec<IndexEntry> {
+        if let Some(graph) = &self.graph {
+            return graph.identity_index();
+        }
         let effective: BTreeSet<&ArtifactKey> = self.effective().map(|item| &item.key).collect();
         let mut entries: Vec<IndexEntry> = self
             .catalog()
@@ -658,6 +805,26 @@ impl ComposedCorpus {
     /// Resolve against the effective unqualified view, or the retained parent
     /// catalog when the reference is explicitly qualified.
     pub fn resolve(&self, reference: &str) -> Result<&CorpusItem, LookupError> {
+        if let Some(graph) = &self.graph {
+            return match graph.resolve_public(reference) {
+                Ok(resolution) => graph
+                    .item(&resolution.selected)
+                    .ok_or(LookupError::NotFound),
+                Err(GraphLookupError::Ambiguous {
+                    historical_candidates,
+                    ..
+                }) => Err(LookupError::Ambiguous(historical_candidates)),
+                Err(GraphLookupError::InvalidQualifiedReference) => {
+                    Err(LookupError::InvalidQualifiedReference)
+                }
+                Err(GraphLookupError::QualifiedCanonicalRequired) => {
+                    Err(LookupError::QualifiedCanonicalRequired)
+                }
+                Err(GraphLookupError::UnknownContext | GraphLookupError::NotFound) => {
+                    Err(LookupError::NotFound)
+                }
+            };
+        }
         if reference.contains("::") {
             self.validate_qualified_reference(reference)?;
         }
@@ -680,6 +847,9 @@ impl ComposedCorpus {
     /// Ambiguous paths include the owning source because two legal corpus
     /// layers may carry the same corpus-relative path.
     pub fn resolve_identity(&self, reference: &str) -> ResolutionResult {
+        if let Some(graph) = &self.graph {
+            return graph.resolve_identity(reference);
+        }
         match self.resolve(reference) {
             Ok(item) => ResolutionResult {
                 artifact_id: reference.to_string(),
@@ -759,6 +929,9 @@ impl ComposedCorpus {
     /// Resolve all effective declared edges through the same index as exact
     /// lookup, retaining qualified access to overridden parent history.
     pub fn relationships(&self) -> Vec<Relationship> {
+        if let Some(graph) = &self.graph {
+            return graph.relationships();
+        }
         resolve_relationships(&self.effective_rows, &self.resolution_index)
     }
 
@@ -766,6 +939,9 @@ impl ComposedCorpus {
     /// catalog. Diagnostics use this projection to keep their subjects local
     /// without losing qualified parent and override resolution.
     pub fn local_relationships(&self) -> Vec<Relationship> {
+        if let Some(graph) = &self.graph {
+            return graph.root_local_relationships_compatible();
+        }
         let rows: Vec<ValidationRow> = self
             .local
             .iter()
@@ -778,6 +954,9 @@ impl ComposedCorpus {
     /// overridden parent's immutable history. Export uses this projection;
     /// live reads and enforcement continue to use `relationships`.
     pub fn catalog_relationships(&self) -> Vec<Relationship> {
+        if let Some(graph) = &self.graph {
+            return graph.catalog_relationships_compatible();
+        }
         resolve_relationships(&self.catalog_rows, &self.resolution_index)
     }
 
@@ -868,9 +1047,10 @@ impl ComposedCorpus {
         child_directory: &str,
         recursive: bool,
     ) -> RelationshipValidation {
-        let source = self.child_source.clone().unwrap_or_else(|| {
-            crate::corpus::compatible_local_layer(child_directory).source
-        });
+        let source = self
+            .child_source
+            .clone()
+            .unwrap_or_else(|| crate::corpus::compatible_local_layer(child_directory).source);
         let origin = crate::corpus::CorpusLayer::local(source).origin();
         let spec = crate::spec::spec_for(&crate::classify::classify(artifact).artifact_type);
         let proposed = CorpusItem::new(

@@ -336,6 +336,14 @@ pub fn render_validate_dir_human(result: &DirectoryValidation) -> String {
                 &issue.message,
             );
         }
+        if let (Some(source_route), Some(route_count)) = (&f.source_route, f.route_count) {
+            lines.push(format!(
+                "    source route: {} ({} verified physical route{})",
+                source_route.join(" -> "),
+                route_count,
+                if route_count == 1 { "" } else { "s" }
+            ));
+        }
         lines.push(String::new());
     }
 
@@ -411,8 +419,19 @@ pub fn render_validate_dir_json(result: &DirectoryValidation) -> String {
                 "issues".into(),
                 Value::Array(f.issues.iter().map(issue_value).collect()),
             );
-            if let Some(origin) = &f.origin {
-                m.insert("provenance".into(), artifact_origin_value(origin));
+            if f.origin.is_some() || f.source_route.is_some() || f.route_count.is_some() {
+                let mut provenance = f
+                    .origin
+                    .as_ref()
+                    .and_then(|origin| artifact_origin_value(origin).as_object().cloned())
+                    .unwrap_or_default();
+                if let Some(source_route) = &f.source_route {
+                    provenance.insert("source_route".into(), json!(source_route));
+                }
+                if let Some(route_count) = f.route_count {
+                    provenance.insert("route_count".into(), json!(route_count));
+                }
+                m.insert("provenance".into(), Value::Object(provenance));
             }
             Value::Object(m)
         })
@@ -572,7 +591,25 @@ pub fn render_validate_sarif(result: &DirectoryValidation) -> String {
                 message: issue.message.clone(),
                 uri: quote_uri(&file.path),
                 line: issue.line,
-                properties: file.origin.as_ref().map(artifact_origin_value),
+                properties: if file.origin.is_some()
+                    || file.source_route.is_some()
+                    || file.route_count.is_some()
+                {
+                    let mut properties = file
+                        .origin
+                        .as_ref()
+                        .and_then(|origin| artifact_origin_value(origin).as_object().cloned())
+                        .unwrap_or_default();
+                    if let Some(source_route) = &file.source_route {
+                        properties.insert("source_route".into(), json!(source_route));
+                    }
+                    if let Some(route_count) = file.route_count {
+                        properties.insert("route_count".into(), json!(route_count));
+                    }
+                    Some(Value::Object(properties))
+                } else {
+                    None
+                },
             });
         }
     }
@@ -2894,7 +2931,12 @@ pub fn render_export_json(export: &CorpusExport) -> String {
             m.insert("title".into(), json!(a.title));
             m.insert("path".into(), json!(a.path));
             m.insert("body_html".into(), json!(a.body_html));
-            if let Some(provenance) = &a.provenance {
+            if let Some(provenance) = &a.graph_provenance {
+                m.insert(
+                    "provenance".into(),
+                    graph_composed_provenance_value(provenance),
+                );
+            } else if let Some(provenance) = &a.provenance {
                 m.insert("provenance".into(), composed_provenance_value(provenance));
             }
             Value::Object(m)
@@ -2914,10 +2956,34 @@ pub fn render_export_json(export: &CorpusExport) -> String {
             }
             if let Some(identity) = &e.to_identity {
                 m.insert("to_identity".into(), export_identity_value(identity));
-            } else if e.provenance.is_some() {
+            } else if e.provenance.is_some() || e.graph_provenance.is_some() {
                 m.insert("to_identity".into(), Value::Null);
             }
-            if let Some(provenance) = &e.provenance {
+            if let Some(authored_token) = &e.authored_token {
+                m.insert("authored_token".into(), json!(authored_token));
+                m.insert(
+                    "historical_candidates".into(),
+                    Value::Array(
+                        e.historical_candidates
+                            .iter()
+                            .map(export_identity_value)
+                            .collect(),
+                    ),
+                );
+                m.insert(
+                    "effective_terminal".into(),
+                    e.effective_terminal
+                        .as_ref()
+                        .map(export_identity_value)
+                        .unwrap_or(Value::Null),
+                );
+            }
+            if let Some(provenance) = &e.graph_provenance {
+                m.insert(
+                    "provenance".into(),
+                    graph_composed_provenance_value(provenance),
+                );
+            } else if let Some(provenance) = &e.provenance {
                 m.insert("provenance".into(), composed_provenance_value(provenance));
             }
             Value::Object(m)
@@ -3037,12 +3103,22 @@ pub fn render_documents_jsonl(export: &DocumentsExport) -> String {
             meta.insert("aliases".into(), json!(d.aliases));
             meta.insert("tags".into(), json!(d.tags));
             let source = d
-                .provenance
+                .graph_provenance
                 .as_ref()
                 .map(|provenance| provenance.origin.source.as_str())
+                .or_else(|| {
+                    d.provenance
+                        .as_ref()
+                        .map(|provenance| provenance.origin.source.as_str())
+                })
                 .unwrap_or(&export.corpus_source);
             meta.insert("source".into(), json!(source));
-            if let Some(provenance) = &d.provenance {
+            if let Some(provenance) = &d.graph_provenance {
+                meta.insert(
+                    "provenance".into(),
+                    graph_composed_provenance_value(provenance),
+                );
+            } else if let Some(provenance) = &d.provenance {
                 meta.insert("provenance".into(), composed_provenance_value(provenance));
             }
             let mut m = Map::new();
@@ -3069,7 +3145,12 @@ pub fn render_graph_json(export: &GraphExport) -> String {
             m.insert("type".into(), json!(n.artifact_type));
             m.insert("status".into(), json!(n.status));
             m.insert("title".into(), json!(n.title));
-            if let Some(provenance) = &n.provenance {
+            if let Some(provenance) = &n.graph_provenance {
+                m.insert(
+                    "provenance".into(),
+                    graph_composed_provenance_value(provenance),
+                );
+            } else if let Some(provenance) = &n.provenance {
                 m.insert("provenance".into(), composed_provenance_value(provenance));
             }
             Value::Object(m)
@@ -3092,10 +3173,34 @@ pub fn render_graph_json(export: &GraphExport) -> String {
             }
             if let Some(identity) = &e.target_identity {
                 m.insert("target_identity".into(), export_identity_value(identity));
-            } else if e.provenance.is_some() {
+            } else if e.provenance.is_some() || e.graph_provenance.is_some() {
                 m.insert("target_identity".into(), Value::Null);
             }
-            if let Some(provenance) = &e.provenance {
+            if let Some(authored_token) = &e.authored_token {
+                m.insert("authored_token".into(), json!(authored_token));
+                m.insert(
+                    "historical_candidates".into(),
+                    Value::Array(
+                        e.historical_candidates
+                            .iter()
+                            .map(export_identity_value)
+                            .collect(),
+                    ),
+                );
+                m.insert(
+                    "effective_terminal".into(),
+                    e.effective_terminal
+                        .as_ref()
+                        .map(export_identity_value)
+                        .unwrap_or(Value::Null),
+                );
+            }
+            if let Some(provenance) = &e.graph_provenance {
+                m.insert(
+                    "provenance".into(),
+                    graph_composed_provenance_value(provenance),
+                );
+            } else if let Some(provenance) = &e.provenance {
                 m.insert("provenance".into(), composed_provenance_value(provenance));
             }
             Value::Object(m)
@@ -3200,6 +3305,68 @@ pub fn composed_provenance_value(
     Value::Object(value)
 }
 
+/// Version-2 fixed origin plus the complete graph-native override chain. The
+/// chain is serialized as one value and is never projected through the v1
+/// direct-mapping carrier.
+pub fn graph_composed_provenance_value(
+    provenance: &crate::export::GraphComposedProvenance,
+) -> Value {
+    graph_provenance_value(&provenance.origin, &provenance.overrides)
+}
+
+/// Version-2 graph provenance. The complete ordered mapping chain is one
+/// indivisible response fact; budget truncation may remove optional content or
+/// a whole result record, but never an individual hop.
+pub fn graph_provenance_value(
+    origin: &crate::corpus::ArtifactOrigin,
+    overrides: &[crate::graph_composition::GraphOverrideProvenance],
+) -> Value {
+    let mut value = artifact_origin_value(origin)
+        .as_object()
+        .cloned()
+        .expect("artifact origin is an object");
+    if !overrides.is_empty() {
+        value.insert(
+            "overrides".into(),
+            Value::Array(
+                overrides
+                    .iter()
+                    .map(|mapping| {
+                        json!({
+                            "state": mapping.state.as_str(),
+                            "owner_source": mapping.owner_source,
+                            "target": artifact_key_value(&mapping.target),
+                            "replacement": artifact_key_value(&mapping.replacement),
+                            "rationale": artifact_key_value(&mapping.rationale),
+                        })
+                    })
+                    .collect(),
+            ),
+        );
+    }
+    Value::Object(value)
+}
+
+/// Lossless provenance for either federation manifest version. Version 2 is
+/// never projected through the single-hop version-1 carrier.
+pub fn composed_artifact_provenance_value(
+    corpus: &crate::composition::ComposedCorpus,
+    key: &crate::corpus::ArtifactKey,
+) -> Option<Value> {
+    if corpus.is_graph() {
+        let item = corpus.item(key)?;
+        let overrides = corpus.graph_provenance_for(key)?.to_vec();
+        return Some(graph_composed_provenance_value(
+            &crate::export::GraphComposedProvenance {
+                origin: item.origin.clone(),
+                overrides,
+            },
+        ));
+    }
+    corpus
+        .provenance_for(key)
+        .map(|provenance| composed_provenance_value(&provenance))
+}
 /// Federated resolution JSON with additive source/layer/pin provenance.
 pub fn render_resolve_json_with_origin(
     result: &ResolutionResult,
@@ -3242,12 +3409,9 @@ pub fn render_resolve_json_with_composed(
     if let Some(provenance) = artifact
         .key
         .as_ref()
-        .and_then(|key| corpus.provenance_for(key))
+        .and_then(|key| composed_artifact_provenance_value(corpus, key))
     {
-        value.insert(
-            "provenance".into(),
-            composed_provenance_value(&provenance),
-        );
+        value.insert("provenance".into(), provenance);
     }
     dumps_indent2(&Value::Object(value))
 }
@@ -3472,15 +3636,38 @@ pub fn render_find_json_with_composed(
             let Some(provenance) = artifact
                 .key
                 .as_ref()
-                .and_then(|key| corpus.provenance_for(key))
+                .and_then(|key| composed_artifact_provenance_value(corpus, key))
             else {
                 continue;
             };
             if let Some(object) = matched.as_object_mut() {
-                object.insert(
-                    "provenance".into(),
-                    composed_provenance_value(&provenance),
-                );
+                object.insert("provenance".into(), provenance);
+            }
+        }
+    }
+    dumps_indent2(&payload)
+}
+
+pub fn render_find_json_with_graph(
+    result: &SearchResult,
+    explain: bool,
+    corpus: &crate::graph_federated_corpus::VerifiedGraphCorpus,
+) -> String {
+    let mut payload = search_result_value_with_origin(result, explain, true);
+    if let Some(matches) = payload.get_mut("matches").and_then(Value::as_array_mut) {
+        for (matched, artifact) in matches.iter_mut().zip(&result.matches) {
+            let Some(key) = artifact.key.as_ref() else {
+                continue;
+            };
+            let Some(item) = corpus.composition.item(key) else {
+                continue;
+            };
+            let provenance = graph_provenance_value(
+                &item.origin,
+                corpus.composition.provenance_for(key).unwrap_or(&[]),
+            );
+            if let Some(object) = matched.as_object_mut() {
+                object.insert("provenance".into(), provenance);
             }
         }
     }
@@ -3575,6 +3762,37 @@ pub fn render_diagnosis_human(diagnosis: &SearchDiagnosis) -> String {
 /// `render_find_human` — aligned match rows, or a valid empty result
 /// (PORT-CONTRACT.d/06 §13). `{query!r}` is Python string repr.
 pub fn render_find_human(result: &SearchResult, explain: bool) -> String {
+    render_find_human_with_suffix(result, explain, |_| None)
+}
+
+/// Graph-v2 human search keeps the released table shape while naming the
+/// exact source, layer, and inherited pin for every returned record.
+pub fn render_find_human_with_graph(
+    result: &SearchResult,
+    explain: bool,
+    corpus: &crate::graph_federated_corpus::VerifiedGraphCorpus,
+) -> String {
+    render_find_human_with_suffix(result, explain, |artifact| {
+        let key = artifact.key.as_ref()?;
+        let origin = &corpus.composition.item(key)?.origin;
+        let mut suffix = format!(
+            "  [source={} layer={}",
+            origin.source,
+            origin.layer.as_str()
+        );
+        if let Some(pin) = &origin.pin {
+            suffix.push_str(&format!(" pin={pin}"));
+        }
+        suffix.push(']');
+        Some(suffix)
+    })
+}
+
+fn render_find_human_with_suffix(
+    result: &SearchResult,
+    explain: bool,
+    suffix_for: impl Fn(&ResolvedArtifact) -> Option<String>,
+) -> String {
     if result.matches.is_empty() {
         return format!("No artifacts match {}.", py_repr_str(&result.query));
     }
@@ -3607,6 +3825,9 @@ pub fn render_find_human(result: &SearchResult, explain: bool) -> String {
                 };
                 row.push_str(&yellow(&marker));
             }
+        }
+        if let Some(suffix) = suffix_for(m) {
+            row.push_str(&suffix);
         }
         lines.push(row);
         if let Some(snippet) = &m.snippet {

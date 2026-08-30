@@ -8,7 +8,7 @@ use rac_engine::graph_composition::{
 };
 use rac_engine::parse::parse_text;
 use rac_engine::relationships::CorpusItem;
-use rac_engine::resolve::{OUTCOME_DUPLICATE, OUTCOME_RESOLVED};
+use rac_engine::resolve::{OUTCOME_AMBIGUOUS, OUTCOME_RESOLVED};
 use rac_engine::spec::spec_for;
 
 const ROOT: &str = "acme/app";
@@ -182,7 +182,7 @@ fn equal_ids_are_legal_and_bare_lookup_is_deterministically_ambiguous() {
             effective_candidates: vec![key(LEFT, "SAME"), key(RIGHT, "SAME"), key(SHARED, "SAME"),],
         })
     );
-    assert_eq!(graph.resolve_identity("SAME").outcome, OUTCOME_DUPLICATE);
+    assert_eq!(graph.resolve_identity("SAME").outcome, OUTCOME_AMBIGUOUS);
     let qualified = graph.resolve_public("acme/shared::SAME").unwrap();
     assert!(qualified.qualified);
     assert_eq!(qualified.selected, key(SHARED, "SAME"));
@@ -585,6 +585,11 @@ fn self_relationship_remains_an_explicit_issue() {
         Some(GraphRelationshipIssue::SelfReference)
     );
     assert_eq!(relationship.effective_terminal, None);
+    let summary = graph.relationship_summary();
+    assert_eq!(summary.total, 1);
+    assert_eq!(summary.valid, 0);
+    assert_eq!(summary.broken, 1);
+    assert_eq!(summary.issues.len(), 1);
 }
 
 #[test]

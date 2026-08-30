@@ -398,7 +398,7 @@ fn invalid(
 fn collect_files(
     root: &Path,
     dir: &Path,
-    excluded: Option<&Path>,
+    excluded: &[PathBuf],
     output: &mut Vec<(String, PathBuf)>,
 ) {
     let Ok(entries) = std::fs::read_dir(dir) else {
@@ -408,10 +408,10 @@ fn collect_files(
     entries.sort_by_key(|entry| entry.file_name());
     for entry in entries {
         let path = entry.path();
-        if excluded.is_some_and(|excluded| {
-            std::fs::canonicalize(&path)
-                .ok()
-                .is_some_and(|path| path == excluded || path.starts_with(excluded))
+        if std::fs::canonicalize(&path).ok().is_some_and(|path| {
+            excluded
+                .iter()
+                .any(|excluded| path == *excluded || path.starts_with(excluded))
         }) {
             continue;
         }
@@ -530,9 +530,8 @@ pub fn analyze(
     analyze_with_items(corpus, repository, base, full_tree, &items, false, None)
 }
 
-/// Sentry over the effective items from one composed snapshot. `excluded`
-/// prevents code enumeration from entering the verified read-only parent
-/// materialisation.
+/// Compatibility entry point for one excluded read-only materialisation.
+/// Graph callers use [`analyze_with_items_excluding`].
 pub fn analyze_with_items(
     corpus: &str,
     repository: &str,
@@ -541,6 +540,29 @@ pub fn analyze_with_items(
     items: &[CorpusItem],
     include_origin: bool,
     excluded: Option<&Path>,
+) -> Result<SentryReport, String> {
+    let excluded: Vec<PathBuf> = excluded.into_iter().map(Path::to_path_buf).collect();
+    analyze_with_items_excluding(
+        corpus,
+        repository,
+        base,
+        full_tree,
+        items,
+        include_origin,
+        &excluded,
+    )
+}
+
+/// Multi-root composed Sentry entry point. Every verified direct, transitive,
+/// and duplicate-route materialisation root is excluded from code discovery.
+pub fn analyze_with_items_excluding(
+    corpus: &str,
+    repository: &str,
+    base: Option<&str>,
+    full_tree: bool,
+    items: &[CorpusItem],
+    include_origin: bool,
+    excluded: &[PathBuf],
 ) -> Result<SentryReport, String> {
     let repository_path = Path::new(repository);
     if !repository_path.is_dir() {
@@ -849,6 +871,97 @@ mod tests {
         assert_eq!(report.eligible_coverage_percent(), 100.0);
         assert_eq!(report.findings.len(), 1);
         assert_eq!(report.findings[0].code, CODE_VIOLATION);
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn composed_walk_excludes_every_read_only_materialisation_root() {
+        let root = std::env::temp_dir().join(format!(
+            "decided-sentry-multi-root-{}-{}",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        let corpus = root.join("decisions");
+        let local_source = root.join("src");
+        let parent_a = root.join("vendor/parent-a");
+        let parent_b = root.join("vendor/parent-b");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&corpus).unwrap();
+        fs::create_dir_all(&local_source).unwrap();
+        fs::create_dir_all(&parent_a).unwrap();
+        fs::create_dir_all(&parent_b).unwrap();
+        fs::write(
+            corpus.join("adr-001.md"),
+            "# ADR-001: Exclude materialised parents\n\n## Status\n\nAccepted\n\n## Context\n\nParent source trees are read-only inputs.\n\n## Decision\n\nSentry walks only the child code tree.\n\n## Consequences\n\nParent findings remain parent-owned.\n\n## Code Constraints\n\n```yaml\nversion: 1\nrules:\n  - id: no-forbidden-marker\n    kind: forbid_pattern\n    path_glob: \"**/*.rs\"\n    pattern: \"forbidden\"\n```\n",
+        )
+        .unwrap();
+        fs::write(local_source.join("safe.rs"), "fn safe() {}\n").unwrap();
+        fs::write(parent_a.join("code.rs"), "fn forbidden() {}\n").unwrap();
+        fs::write(parent_b.join("code.rs"), "fn forbidden() {}\n").unwrap();
+
+        let items = corpus_items(corpus.to_str().unwrap(), true);
+        let compatibility = analyze_with_items(
+            corpus.to_str().unwrap(),
+            root.to_str().unwrap(),
+            None,
+            true,
+            &items,
+            true,
+            None,
+        )
+        .unwrap();
+        let no_exclusions = analyze_with_items_excluding(
+            corpus.to_str().unwrap(),
+            root.to_str().unwrap(),
+            None,
+            true,
+            &items,
+            true,
+            &[],
+        )
+        .unwrap();
+        assert_eq!(compatibility.findings.len(), 2);
+        assert_eq!(no_exclusions.findings.len(), compatibility.findings.len());
+        assert_eq!(
+            no_exclusions
+                .findings
+                .iter()
+                .map(|finding| (&finding.path, finding.line, finding.code))
+                .collect::<Vec<_>>(),
+            compatibility
+                .findings
+                .iter()
+                .map(|finding| (&finding.path, finding.line, finding.code))
+                .collect::<Vec<_>>()
+        );
+
+        let parent_a = fs::canonicalize(parent_a).unwrap();
+        let parent_b = fs::canonicalize(parent_b).unwrap();
+        let one_exclusion = analyze_with_items_excluding(
+            corpus.to_str().unwrap(),
+            root.to_str().unwrap(),
+            None,
+            true,
+            &items,
+            true,
+            std::slice::from_ref(&parent_a),
+        )
+        .unwrap();
+        assert_eq!(one_exclusion.findings.len(), 1);
+        assert_eq!(one_exclusion.findings[0].path, "vendor/parent-b/code.rs");
+
+        let all_exclusions = analyze_with_items_excluding(
+            corpus.to_str().unwrap(),
+            root.to_str().unwrap(),
+            None,
+            true,
+            &items,
+            true,
+            &[parent_a, parent_b],
+        )
+        .unwrap();
+        assert!(all_exclusions.findings.is_empty());
 
         fs::remove_dir_all(root).unwrap();
     }

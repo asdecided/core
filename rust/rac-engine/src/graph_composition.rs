@@ -12,12 +12,13 @@ use crate::corpus::{ArtifactKey, Layer};
 use crate::identity::artifact_identifiers;
 use crate::pycompat::py_casefold;
 use crate::relationships::{
-    edge_spec, extract_relationships_full, CorpusItem, Relationship, ISSUE_SELF_REFERENCE,
-    ISSUE_TARGET_AMBIGUOUS, ISSUE_TARGET_NOT_FOUND,
+    edge_spec, extract_relationships_full, relationship_severity, CorpusItem, Relationship,
+    RelationshipIssue, RelationshipSummary, ISSUE_SELF_REFERENCE, ISSUE_TARGET_AMBIGUOUS,
+    ISSUE_TARGET_NOT_FOUND,
 };
 use crate::resolve::{
     entry_from_item, identity_entry_from_item, is_live_decision, resolved_from_entry, IndexEntry,
-    ResolutionResult, OUTCOME_DUPLICATE, OUTCOME_NOT_FOUND, OUTCOME_RESOLVED,
+    ResolutionResult, OUTCOME_AMBIGUOUS, OUTCOME_NOT_FOUND, OUTCOME_RESOLVED,
 };
 
 pub const FINDING_INVALID_GRAPH: &str = "corpus-federation-invalid-graph";
@@ -662,6 +663,18 @@ impl GraphComposition {
         self.item_by_key.get(key).map(|index| &self.items[*index])
     }
 
+    pub(crate) fn catalog_slice(&self) -> &[CorpusItem] {
+        &self.items
+    }
+
+    pub(crate) fn effective_indices(&self) -> &[usize] {
+        &self.root_effective
+    }
+
+    pub(crate) fn root_local_indices(&self) -> &[usize] {
+        &self.root_local
+    }
+
     pub fn visibility(&self) -> &SourceVisibility {
         &self.visibility
     }
@@ -720,7 +733,7 @@ impl GraphComposition {
                 paths.dedup();
                 ResolutionResult {
                     artifact_id: reference.to_string(),
-                    outcome: OUTCOME_DUPLICATE,
+                    outcome: OUTCOME_AMBIGUOUS,
                     artifact: None,
                     duplicate_paths: paths,
                 }
@@ -771,6 +784,98 @@ impl GraphComposition {
             .into_iter()
             .map(|relationship| self.compatible_relationship(relationship))
             .collect()
+    }
+
+    /// Compatibility-only catalog projection for existing graph/export
+    /// consumers. Use [`Self::catalog_relationships`] whenever complete
+    /// historical candidate sets are required.
+    pub fn catalog_relationships_compatible(&self) -> Vec<Relationship> {
+        self.catalog_relationships()
+            .into_iter()
+            .map(|relationship| self.compatible_relationship(relationship))
+            .collect()
+    }
+
+    pub fn root_local_relationships_compatible(&self) -> Vec<Relationship> {
+        self.root_local()
+            .flat_map(|item| self.relationships_for(item, true))
+            .map(|relationship| self.compatible_relationship(relationship))
+            .collect()
+    }
+
+    /// Portfolio metrics over the same root-effective graph projection used
+    /// by lookup and enforcement. This avoids rebuilding a source-blind
+    /// resolver merely to persist the summary segment.
+    pub fn relationship_summary(&self) -> RelationshipSummary {
+        let relationships = self.effective_relationships();
+        let mut resolved_targets = BTreeSet::new();
+        let mut issues = Vec::new();
+        let mut total = 0usize;
+        for relationship in relationships.iter().filter(|row| !row.external) {
+            total += 1;
+            if let Some(target) = &relationship.effective_terminal {
+                resolved_targets.insert(target.clone());
+            }
+            let Some(issue) = relationship.issue else {
+                continue;
+            };
+            let item = self.item(&relationship.source);
+            let code = match issue {
+                GraphRelationshipIssue::TargetNotFound => ISSUE_TARGET_NOT_FOUND,
+                GraphRelationshipIssue::TargetAmbiguous => ISSUE_TARGET_AMBIGUOUS,
+                GraphRelationshipIssue::SelfReference => ISSUE_SELF_REFERENCE,
+            };
+            if item.is_some_and(|item| {
+                item.origin.layer == Layer::Inherited && relationship_severity(code) != "error"
+            }) {
+                continue;
+            }
+            issues.push(RelationshipIssue {
+                code: code.to_string(),
+                source_path: item.map(|item| item.path.clone()),
+                source_artifact: item.map(|item| item.artifact_path.clone()),
+                origin: item.map(|item| item.origin.clone()),
+                relationship: Some(relationship.relationship.clone()),
+                target: Some(relationship.authored_token.clone()),
+                identifier: None,
+                paths: None,
+            });
+        }
+        let known = self
+            .effective()
+            .filter(|item| item.spec.is_some())
+            .map(|item| item.key.clone())
+            .collect::<BTreeSet<_>>();
+        let orphaned = known
+            .iter()
+            .filter(|key| !resolved_targets.contains(*key))
+            .count();
+        let artifacts_with_relationships = self
+            .effective()
+            .filter(|item| {
+                item.spec.is_some_and(|spec| {
+                    extract_relationships_full(&item.artifact, spec)
+                        .into_iter()
+                        .any(|(_, references)| !references.is_empty())
+                })
+            })
+            .count();
+        let coverage = if known.is_empty() {
+            1.0
+        } else {
+            crate::pycompat::py_round(
+                artifacts_with_relationships as f64 / known.len() as f64,
+                4,
+            )
+        };
+        RelationshipSummary {
+            total,
+            valid: total - issues.len(),
+            broken: issues.len(),
+            orphaned,
+            coverage,
+            issues,
+        }
     }
 
     fn compatible_relationship(&self, relationship: GraphRelationship) -> Relationship {
