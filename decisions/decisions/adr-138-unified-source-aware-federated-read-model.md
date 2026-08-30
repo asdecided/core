@@ -7,6 +7,11 @@ type: decision
 
 ## Context
 
+> **Amended by ADR-144 and ADR-148.** Manifest version 2 generalises the one
+> writable child plus read-only parent into one writable root plus a verified
+> read-only unique-source closure. One immutable closure generation still feeds
+> every consumer; no surface may construct an independent overlay.
+
 The released Rust engine assumes one corpus across validation rows, resolver
 entries, relationship endpoints, resolved artifacts, derived and persistent
 indexes, freshness tracking, MCP `GraphView`, routing, and Sentry enforcement.
@@ -89,15 +94,17 @@ lost, and a parent subtree could be discovered twice.
 - adr-105
 - adr-119
 - adr-121
-- adr-133
 - adr-134
 - adr-135
-- adr-136
 - adr-137
+- adr-144
+- adr-146
+- adr-148
 
 ## Related Designs
 
 - corpus-federation-mechanism
+- corpus-federation-graph-composition
 
 ## Related Requirements
 

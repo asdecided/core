@@ -7,13 +7,13 @@ type: design
 
 ## Status
 
-Proposed
+Accepted
 
 This design extends the accepted one-parent foundation in
-`corpus-federation-mechanism` without rewriting its history. ADR-144 through
-ADR-148 are separately reviewable proposals. Until they are explicitly
-accepted, ADR-133 through ADR-143 remain the implementation boundary and this
-design does not authorize engine changes.
+`corpus-federation-mechanism` without rewriting its history. Accepted ADR-144
+through ADR-148 authorize the version-2 graph implementation. ADR-133, ADR-136,
+and ADR-143 remain historical version-1 records; their accepted successors
+preserve that compatibility behavior while replacing their version-2 boundary.
 
 ## Context
 
@@ -535,23 +535,21 @@ materialisation refresh as an AsDecided network operation.
 
 ## Open Questions
 
-None within this proposal. Changes to topology limits, precedence, network
-materialisation, inherited writes, qualification, or override ownership require
-a new or superseding decision rather than an implementation default.
+None within this accepted design. Changes to topology limits, precedence,
+network materialisation, inherited writes, qualification, or override ownership
+require a new or superseding decision rather than an implementation default.
 
-## Ratification Gate
+## Ratification Record
 
-The graph has no remaining product-default question in this proposal. Engine
-work begins only after a human explicitly accepts ADR-144 through ADR-148. At
-that point ADR-133, ADR-136, and ADR-143 are marked Superseded atomically; the
-accepted amendments to ADR-134, ADR-137, ADR-138, ADR-141, and ADR-142 are
-recorded without erasing their retained rules; ADR-135 receives the
-same-source/same-digest physical-route clarification from ADR-144. The graph
-design moves to Accepted. The accepted `corpus-source-identity` requirement is
-amended in the same transition to reference the new authority set, require one
-explicit source per unique logical node, and permit only same-digest physical
-diamond reuse. The two implementation requirements remain Proposed until their
-acceptance evidence is complete, and the roadmap remains Planned.
+ADR-144 through ADR-148 are Accepted and authorize engine implementation within
+this design. ADR-133, ADR-136, and ADR-143 are Superseded for version 2; the
+narrower amendments to ADR-134, ADR-137, ADR-138, ADR-141, and ADR-142 are
+recorded without erasing their retained rules; and ADR-135 carries ADR-144's
+same-source/same-digest physical-route clarification. The accepted
+`corpus-source-identity` requirement references the new authority set, requires
+one explicit source per unique logical node, and permits only same-digest
+physical diamond reuse. The two implementation requirements remain Proposed
+until their acceptance evidence is complete, and the roadmap remains Planned.
 
 ## Related Decisions
 
@@ -565,17 +563,14 @@ acceptance evidence is complete, and the roadmap remains Planned.
 - adr-123
 - adr-127
 - adr-128
-- adr-133
 - adr-134
 - adr-135
-- adr-136
 - adr-137
 - adr-138
 - adr-139
 - adr-140
 - adr-141
 - adr-142
-- adr-143
 - adr-144
 - adr-145
 - adr-146

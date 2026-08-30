@@ -115,8 +115,8 @@ without letting history leak into live ranking or code enforcement.
 - `corpus-source-identity` remains the stable outer namespace.
 - Existing source-neutral ranking and root-code evaluators can consume the
   effective source-aware projection without parallel semantics.
-- ADR-146 through ADR-148 are accepted before resolution, chain, or serving
-  implementation begins.
+- ADR-146 through ADR-148 are accepted authority for resolution, chain, and
+  serving implementation.
 
 ## Related Decisions
 
@@ -139,14 +139,12 @@ without letting history leak into live ranking or code enforcement.
 - adr-127
 - adr-128
 - adr-135
-- adr-136
 - adr-137
 - adr-138
 - adr-139
 - adr-140
 - adr-141
 - adr-142
-- adr-143
 - adr-144
 - adr-145
 - adr-146

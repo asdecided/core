@@ -122,7 +122,7 @@ permission to trust an unchecked copy.
 
 ## Status
 
-Proposed
+Accepted
 
 ## Category
 
@@ -163,7 +163,6 @@ and a server could allocate unbounded state before producing a finding.
 - adr-080
 - adr-089
 - adr-103
-- adr-133
 - adr-135
 - adr-138
 - adr-139
@@ -178,6 +177,7 @@ and a server could allocate unbounded state before producing a finding.
 
 - parent-corpus-inheritance
 - federated-resolution-provenance
+- corpus-source-identity
 
 ## Related Roadmaps
 

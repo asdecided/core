@@ -47,7 +47,11 @@ migration and new decisions about ordering, collisions, cycles, and overrides.
 
 ## Status
 
-Accepted
+Superseded
+
+Superseded by ADR-144 for manifest-version-2 graph composition. This ADR's
+one-direct-leaf-parent behavior remains the exact compatibility contract for a
+version-1 root under ADR-145.
 
 ## Category
 
@@ -77,10 +81,12 @@ a separately ratified extension.
 - adr-080
 - adr-085
 - adr-089
+- adr-144
 
 ## Related Designs
 
 - corpus-federation-mechanism
+- corpus-federation-graph-composition
 
 ## Related Requirements
 
