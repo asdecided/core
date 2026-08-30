@@ -11,6 +11,6 @@
 //! remains a no-op around the read-only protocol.
 
 /// The no-op observation seam: time-and-record hooks would wrap `call` here.
-pub fn observe<F: FnOnce() -> String>(_tool: &str, call: F) -> String {
+pub fn observe<T, F: FnOnce() -> T>(_tool: &str, call: F) -> T {
     call()
 }

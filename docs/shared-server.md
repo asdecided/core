@@ -1,20 +1,26 @@
 # Operating a Shared AsDecided Server
 
+This guide uses a branch named `main` and a remote named `origin` in examples.
+Neither is normative: configure the reviewed ref and standard Git remote used
+by your repository. Corpus semantics are forge-, remote-, and branch-name-neutral
+under ADR-149.
+
 By default AsDecided runs as one `decided-mcp` process per developer, over stdio, against
 that developer's own checkout. That is the right model for almost everyone and
 needs no operations at all.
 
 At organisation scale a team may instead want **one always-current endpoint**
-every agent queries, so reads come from a single `main`-backed source of truth
+every agent queries, so reads come from a single reviewed-branch checkout
 rather than checkouts that lag between pulls. This page is the recipe for
 standing that up: a container running the HTTP transport, an authenticating
-proxy in front, a step that keeps the checkout current with `main`, and where
+proxy in front, a step that keeps the checkout current with that ref, and where
 observability lives. It assumes you have read the [MCP Server](mcp.md) page.
 
 Everything here is deployment wrapper — containers, proxies, collectors — around
 an unchanged engine. AsDecided gains no hosted service, no database, and no
 authentication code; git stays the source of truth
-([ADR-080](https://github.com/asdecided/core/blob/main/decisions/decisions/adr-080-single-source-of-truth-git-not-database.md)).
+([ADR-080](https://github.com/asdecided/core/blob/main/decisions/decisions/adr-080-single-source-of-truth-git-not-database.md),
+[ADR-149](https://github.com/asdecided/core/blob/main/decisions/decisions/adr-149-git-repository-truth-is-forge-agnostic.md)).
 
 ## 1. Do you need it?
 

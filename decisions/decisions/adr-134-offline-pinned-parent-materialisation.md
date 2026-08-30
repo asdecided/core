@@ -7,6 +7,12 @@ type: decision
 
 ## Context
 
+> **Amended by ADR-145.** Version 1 retains this ADR's exact single-parent
+> carrier and digest. Manifest version 2 permits a strict parent sequence and
+> uses a topology-binding digest that authenticates exact nested-manifest
+> presence and bytes. Materialised-only, offline, containment, exact-byte,
+> source-verification, and pre-overlay failure rules remain authoritative.
+
 ADR-089 requires federation to remain offline, deterministic, Git-native, and
 human-readable. Those constraints still leave materially different mechanisms:
 a configuration key, a live repository URL, an adjacent checkout, a Git commit
@@ -95,11 +101,12 @@ operational manifest keeps the mechanism visible without making it an artifact.
 - adr-065
 - adr-080
 - adr-089
-- adr-133
+- adr-145
 
 ## Related Designs
 
 - corpus-federation-mechanism
+- corpus-federation-graph-composition
 
 ## Related Requirements
 

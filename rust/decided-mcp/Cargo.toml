@@ -13,6 +13,9 @@ categories = ["command-line-utilities", "development-tools"]
 publish = ["crates-io"]
 
 [dependencies]
-rac-engine = { package = "asdecided-core", version = "=0.28.0", path = "../rac-engine" }
+rac-engine = { package = "asdecided-core", version = "=0.29.0", path = "../rac-engine" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
+
+[dev-dependencies]
+sha2 = "0.10"

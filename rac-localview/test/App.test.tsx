@@ -3,7 +3,12 @@ import { act } from 'react';
 import { createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { App } from '../src/viewer/App';
-import { fixtureExport, HUB_ID } from './fixtures';
+import {
+  federatedOverrideExport,
+  fixtureExport,
+  HUB_ID,
+  PARENT_SHARED_KEY,
+} from './fixtures';
 
 // Mount the real viewer in jsdom against an injected export, at each route.
 // A smoke net: the v0.21.8 graph bug shipped because nothing mounted the viewer.
@@ -59,5 +64,14 @@ describe('viewer App', () => {
     await mountAt(`#/artifact/${encodeURIComponent(HUB_ID)}`);
     expect(container.querySelector('.viewer-detail')).toBeTruthy();
     expect(container.textContent).toContain('Hub decision');
+  });
+
+  it('routes to the inherited side of a same-id override by source', async () => {
+    const seam = document.getElementById('lore-export');
+    seam!.textContent = JSON.stringify(federatedOverrideExport);
+
+    await mountAt(`#/artifact/${encodeURIComponent(PARENT_SHARED_KEY)}`);
+    expect(container.textContent).toContain('Inherited parent policy');
+    expect(container.textContent).not.toContain('Local replacement');
   });
 });

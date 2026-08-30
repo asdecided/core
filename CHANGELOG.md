@@ -6,14 +6,56 @@ details, release history over commit history.
 
 ## Unreleased
 
+## v0.29.0 — 2026-08-30
+
+### Graph-complete corpus federation
+
+- Added manifest version 2 with one to 32 direct parents, bounded recursive
+  DAG verification, topology-binding `sha256-v2` pins, same-pin diamond
+  deduplication, deterministic cycle/divergent-pin failures, and complete
+  physical-route verification. Version 1 and repositories without a manifest
+  retain their released behavior.
+- Made `corpus.source` the stable global namespace for artifacts and paths.
+  Source-qualified IDs, source-local aliases, legal equal IDs across sources,
+  and deterministic bare-reference ambiguity now share one contextual resolver.
+- Added explicit Decision-backed override chains and diamond reconvergence.
+  Catalog history retains every original, replacement, rationale, mapping owner,
+  and provenance state while only the unique terminal participates in live
+  retrieval, relationships, path routing, and code enforcement.
+- Unified validation, search, retrieval, `decisions-for`, Gate, Sentry, all six
+  MCP tools, cache generations, audit identity, and viewer/documents/graph
+  exports over the same immutable verified closure. Inherited Decisions at any
+  depth can govern root code; every inherited physical route remains read-only.
+
+### Federation operators can see why
+
+- Added `decided corpus status [directory] [--json]`. It verifies the full
+  closure before reporting logical sources, exact pins, canonical and physical
+  routes, edges, materialisation paths, graph depth, artifact projections,
+  overrides, and read-only boundaries. A stale or tampered route fails before
+  partial output.
+- Added `decided corpus explain <reference> [directory] [--from source]
+  [--json]`. It shows contextual visibility and aliases, historical candidates,
+  the selected source-owned record, effective terminal, and complete ordered
+  override provenance; ambiguous and missing results remain machine-readable.
+- Added a runnable four-source federation example with two direct parents, a
+  shared diamond ancestor, identical independently verified routes, and an
+  explicit root override.
+
+### Git-native, not forge-dependent
+
+- Made the architectural boundary explicit: corpus truth is reviewed Markdown
+  in Git, not GitHub, Cursor Origin, a branch named `main`, or a hosted database.
+  Federation and its stable reports work from a plain materialised tree without
+  `.git`, networking, a remote, or a forge API; optional review/check adapters
+  remain outside core semantics.
 - Added versioned Draft 2020-12 schemas for the viewer, documents, and graph
   export contracts. `decided export --schema <viewer|documents|graph>` emits
-  the packaged schema bytes offline, and CI now checks fixture and live-corpus
-  exports for contract and field-set drift.
-- Added optional `corpus.source` configuration as the stable corpus provenance
-  identity shared by viewer, documents, and graph exports. Existing
-  repositories fall back to their lower-case `repository_key`; uninitialised
-  corpora retain the released directory-basename source value.
+  packaged schema bytes offline, and CI checks fixture and live-corpus exports
+  for contract and field-set drift.
+- Added opt-in `decided init --parent-corpus` guidance and explicit
+  `decided corpus digest --version 2` pin calculation without materialising,
+  fetching, editing, or repinning a parent automatically.
 
 ## v0.28.0 — 2026-08-09
 

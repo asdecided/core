@@ -64,6 +64,11 @@ pub struct FileValidation {
     /// Released single-corpus validation leaves this absent so its rendered
     /// output remains byte-identical.
     pub origin: Option<ArtifactOrigin>,
+    /// Canonical source route for graph topology findings only. Ordinary
+    /// artifact validation and all released version-1 paths leave this absent.
+    pub source_route: Option<Vec<String>>,
+    /// Exact verified physical-route count represented by `source_route`.
+    pub route_count: Option<usize>,
 }
 
 pub struct DirectoryValidation {
@@ -132,6 +137,8 @@ pub fn validate_directory(directory: &str, recursive: bool) -> DirectoryValidati
                     status: STATUS_SKIPPED,
                     issues: Vec::new(),
                     origin: None,
+                    source_route: None,
+                    route_count: None,
                 };
             }
             let issues = apply_overrides(
@@ -150,6 +157,8 @@ pub fn validate_directory(directory: &str, recursive: bool) -> DirectoryValidati
                 status,
                 issues,
                 origin: None,
+                source_route: None,
+                route_count: None,
             }
         })
         .collect();
@@ -199,6 +208,8 @@ pub(crate) fn validate_directory_from_items(
                     status: STATUS_SKIPPED,
                     issues: Vec::new(),
                     origin: Some(item.origin.clone()),
+                    source_route: None,
+                    route_count: None,
                 };
             }
             let issues = if item.origin.layer == crate::corpus::Layer::Inherited {
@@ -221,6 +232,8 @@ pub(crate) fn validate_directory_from_items(
                 status,
                 issues,
                 origin: Some(item.origin.clone()),
+                source_route: None,
+                route_count: None,
             }
         })
         .collect();
@@ -268,6 +281,15 @@ fn refuse_read_only_target(path: &str) -> Option<i32> {
             Some(EXIT_VALIDATION_FAILED)
         }
     }
+}
+
+fn refuse_read_only_targets<'a>(paths: impl IntoIterator<Item = &'a str>) -> Option<i32> {
+    for path in paths {
+        if let Some(code) = refuse_read_only_target(path) {
+            return Some(code);
+        }
+    }
+    None
 }
 
 /// A fingerprint of the ancestor-walked `.decided/config.yaml` governing
@@ -458,6 +480,8 @@ pub fn validate_directory_incremental_in(
                 })
                 .collect(),
             origin: None,
+            source_route: None,
+            route_count: None,
         });
         let file_name = entry
             .display
@@ -504,6 +528,23 @@ pub fn validate_stdin_against_corpus(
     let structural = validate_product(artifact, corpus_dir);
     let relationships =
         validate_document_against_corpus(artifact, source_path, corpus_dir, recursive);
+    StdinCorpusValidation {
+        source_path: source_path.to_string(),
+        structural_issues: structural,
+        relationship_issues: relationships.issues,
+    }
+}
+
+fn validate_stdin_against_composed(
+    artifact: &Artifact,
+    corpus_dir: &str,
+    source_path: &str,
+    recursive: bool,
+    corpus: &crate::composition::ComposedCorpus,
+) -> StdinCorpusValidation {
+    let structural = validate_product(artifact, corpus_dir);
+    let relationships =
+        corpus.validate_proposed_document(artifact, source_path, corpus_dir, recursive);
     StdinCorpusValidation {
         source_path: source_path.to_string(),
         structural_issues: structural,
@@ -616,7 +657,17 @@ pub fn cmd_validate(args: &ValidateArgs) -> i32 {
             }
             Ok(None) => validate_directory(&args.file, !args.top_level),
             Err(error) => {
-                let origin = manifest_failure_origin(&args.file);
+                let origin = error
+                    .validation_origin()
+                    .map(|origin| ArtifactOrigin {
+                        source: origin.source.clone(),
+                        layer: origin.layer,
+                        pin: origin.pin.clone(),
+                        alias: None,
+                    })
+                    .or_else(|| manifest_failure_origin(&args.file));
+                let source_route = error.source_route().map(<[String]>::to_vec);
+                let route_count = error.route_count();
                 DirectoryValidation {
                     directory: args.file.clone(),
                     recursive: !args.top_level,
@@ -631,6 +682,8 @@ pub fn cmd_validate(args: &ValidateArgs) -> i32 {
                             None,
                         )],
                         origin,
+                        source_route,
+                        route_count,
                     }],
                     okf: None,
                 }
@@ -668,7 +721,17 @@ pub fn cmd_validate(args: &ValidateArgs) -> i32 {
         } else {
             py_path_str(&args.file)
         };
-        let result = validate_stdin_against_corpus(&artifact, corpus, &source_path, true);
+        let result = match load_composed_or_exit(corpus, true) {
+            Ok(Some(composed)) => validate_stdin_against_composed(
+                &artifact,
+                corpus,
+                &source_path,
+                true,
+                &composed,
+            ),
+            Ok(None) => validate_stdin_against_corpus(&artifact, corpus, &source_path, true),
+            Err(code) => return code,
+        };
         if args.json {
             emit(output::render_stdin_corpus_json(&result));
         } else {
@@ -793,10 +856,45 @@ pub struct InspectArgs {
 }
 
 pub fn cmd_inspect(args: &InspectArgs) -> i32 {
+    if args.file != "-" {
+        match crate::federated_corpus::is_read_only_graph_materialised_path(&args.file) {
+            Ok(true) => {
+                return usage_error(&format!(
+                    "inspect in a version-2 federation is limited to root-local artifacts: {}",
+                    args.file
+                ))
+            }
+            Ok(false) => {}
+            Err(error) => {
+                eprintln!("decided: {error}");
+                return EXIT_VALIDATION_FAILED;
+            }
+        }
+    }
     // Directory? Aggregate per-file results into type counts. (The directory
     // check precedes the .md extension guard — and never applies to `-`.)
     if args.file != "-" && Path::new(&args.file).is_dir() {
-        let result = crate::inspect::inspect_directory(&args.file, !args.top_level);
+        let result = match crate::federated_corpus::load_graph_composed_corpus(
+            &args.file,
+            !args.top_level,
+        ) {
+            Ok(Some(composed)) => {
+                let local = crate::federated_corpus::local_writable_projection(
+                    &args.file,
+                    &composed,
+                );
+                crate::inspect::inspect_directory_from_items(
+                    &args.file,
+                    !args.top_level,
+                    &local,
+                )
+            }
+            Ok(None) => crate::inspect::inspect_directory(&args.file, !args.top_level),
+            Err(error) => {
+                eprintln!("decided: {error}");
+                return EXIT_VALIDATION_FAILED;
+            }
+        };
         if args.json {
             emit(output::render_dir_inspect_json(&result));
         } else {
@@ -810,7 +908,38 @@ pub fn cmd_inspect(args: &InspectArgs) -> i32 {
         Ok(t) => t,
         Err(code) => return code,
     };
-    let artifact = parse_text(&text, "");
+    let graph_artifact = if args.file == "-" {
+        None
+    } else {
+        let target = match std::fs::canonicalize(&args.file) {
+            Ok(target) => target,
+            Err(error) => return usage_error(&format!("cannot read {}: {error}", args.file)),
+        };
+        let containing = Path::new(&args.file).parent().unwrap_or_else(|| Path::new("."));
+        match crate::federated_corpus::load_graph_composed_corpus(
+            &containing.to_string_lossy(),
+            true,
+        ) {
+            Ok(Some(composed)) => match composed
+                .local_items()
+                .find(|item| item.locator.path == target)
+            {
+                Some(item) => Some(item.artifact.clone()),
+                None => {
+                    return usage_error(&format!(
+                        "inspect in a version-2 federation is limited to root-local artifacts: {}",
+                        args.file
+                    ))
+                }
+            },
+            Ok(None) => None,
+            Err(error) => {
+                eprintln!("decided: {error}");
+                return EXIT_VALIDATION_FAILED;
+            }
+        }
+    };
+    let artifact = graph_artifact.unwrap_or_else(|| parse_text(&text, ""));
     let inspection = crate::inspect::build_inspection(&artifact);
     if args.verbose && !args.json {
         emit(output::render_inspect_verbose(
@@ -915,7 +1044,15 @@ pub fn cmd_relationships(args: &RelationshipsArgs) -> i32 {
 
     // Inspection arm (non --validate): always exit 0.
     let report = if is_dir {
-        build_relationship_report(&args.path, !args.top_level)
+        match load_composed_or_exit(&args.path, !args.top_level) {
+            Ok(Some(composed)) => crate::relationships::build_relationship_report_from_composed(
+                &args.path,
+                !args.top_level,
+                &composed,
+            ),
+            Ok(None) => build_relationship_report(&args.path, !args.top_level),
+            Err(code) => return code,
+        }
     } else {
         build_relationship_report_file(&args.path)
     };
@@ -940,7 +1077,14 @@ pub fn cmd_stats(args: &StatsArgs) -> i32 {
     if !Path::new(&args.directory).is_dir() {
         return usage_error(&format!("not a directory: {}", args.directory));
     }
-    let stats = crate::stats::collect_stats(&args.directory);
+    let stats = match load_composed_or_exit(&args.directory, true) {
+        Ok(Some(composed)) => {
+            let items: Vec<_> = composed.effective().cloned().collect();
+            crate::stats::collect_stats_from_items(&args.directory, &items)
+        }
+        Ok(None) => crate::stats::collect_stats(&args.directory),
+        Err(code) => return code,
+    };
     if args.json {
         emit(output::render_stats_json(&stats));
     } else {
@@ -968,8 +1112,16 @@ pub fn cmd_portfolio(args: &PortfolioArgs) -> i32 {
         return usage_error(&format!("not a directory: {}", args.directory));
     }
     let recursive = !args.top_level;
-    let items = corpus_items(&args.directory, recursive);
-    let summary = crate::portfolio::portfolio_from_corpus(&args.directory, &items, recursive);
+    let summary = match load_composed_or_exit(&args.directory, recursive) {
+        Ok(Some(composed)) => {
+            crate::portfolio::portfolio_from_composed(&args.directory, &composed, recursive)
+        }
+        Ok(None) => {
+            let items = corpus_items(&args.directory, recursive);
+            crate::portfolio::portfolio_from_corpus(&args.directory, &items, recursive)
+        }
+        Err(code) => return code,
+    };
     if args.json {
         emit(output::render_portfolio_json(&summary));
     } else {
@@ -993,7 +1145,15 @@ pub fn cmd_index(args: &IndexArgs) -> i32 {
     if !Path::new(&args.directory).is_dir() {
         return usage_error(&format!("not a directory: {}", args.directory));
     }
-    let index = crate::index::build_repository_index(&args.directory, !args.top_level);
+    let recursive = !args.top_level;
+    let index = match load_composed_or_exit(&args.directory, recursive) {
+        Ok(Some(composed)) => {
+            let items: Vec<_> = composed.effective().cloned().collect();
+            crate::index::build_repository_index_from_items(&args.directory, &items, recursive)
+        }
+        Ok(None) => crate::index::build_repository_index(&args.directory, recursive),
+        Err(code) => return code,
+    };
     if args.json {
         emit(output::render_index_json(&index));
     } else {
@@ -1016,7 +1176,13 @@ pub fn cmd_coverage(args: &CoverageArgs) -> i32 {
     if !Path::new(&args.directory).is_dir() {
         return usage_error(&format!("not a directory: {}", args.directory));
     }
-    let report = crate::coverage::analyze_coverage(&args.directory);
+    let report = match load_composed_or_exit(&args.directory, true) {
+        Ok(Some(composed)) => {
+            crate::coverage::analyze_coverage_from_composed(&args.directory, &composed)
+        }
+        Ok(None) => crate::coverage::analyze_coverage(&args.directory),
+        Err(code) => return code,
+    };
     if args.json {
         emit(output::render_coverage_json(&report));
     } else {
@@ -1160,14 +1326,14 @@ pub fn cmd_sentry(args: &SentryArgs) -> i32 {
         .map(|corpus| corpus.effective().cloned().collect())
         .unwrap_or_default();
     let report = match if let Some(composed) = &composed {
-        crate::sentry::analyze_with_items(
+        crate::sentry::analyze_with_items_excluding(
             &args.directory,
             &args.repository,
             args.base.as_deref(),
             args.full,
             &composed_items,
             true,
-            composed.read_only_root(),
+            composed.read_only_roots(),
         )
     } else {
         crate::sentry::analyze(
@@ -1213,11 +1379,22 @@ pub fn cmd_herald(args: &HeraldArgs) -> i32 {
     if !Path::new(&args.directory).is_dir() {
         return usage_error(&format!("not a directory: {}", args.directory));
     }
+    if let Some(code) = refuse_read_only_targets(
+        std::iter::once(args.out.as_str()).chain(args.github_output.as_deref()),
+    ) {
+        return code;
+    }
     let paths = match std::fs::read_to_string(&args.paths_file) {
         Ok(text) => text.lines().map(str::trim).filter(|line| !line.is_empty()).map(str::to_string).collect::<Vec<_>>(),
         Err(error) => return usage_error(&format!("could not read paths file {}: {error}", args.paths_file)),
     };
-    let report = crate::herald::collect(&args.directory, &paths, !args.top_level);
+    let report = match load_composed_or_exit(&args.directory, !args.top_level) {
+        Ok(Some(composed)) => {
+            crate::herald::collect_from_composed(&args.directory, &paths, &composed)
+        }
+        Ok(None) => crate::herald::collect(&args.directory, &paths, !args.top_level),
+        Err(code) => return code,
+    };
     let body = crate::herald::render(&report, &args.link_base, args.max_inline);
     if let Err(error) = std::fs::write(&args.out, body) {
         return usage_error(&format!("could not write Herald output {}: {error}", args.out));
@@ -1330,8 +1507,17 @@ pub fn cmd_doctor(args: &DoctorArgs) -> i32 {
     if !Path::new(&args.directory).is_dir() {
         return usage_error(&format!("not a directory: {}", args.directory));
     }
-    let report =
-        crate::doctor::diagnose(&args.directory, !args.top_level, args.hub_threshold);
+    let recursive = !args.top_level;
+    let report = match load_composed_or_exit(&args.directory, recursive) {
+        Ok(Some(composed)) => crate::doctor::diagnose_composed(
+            &args.directory,
+            recursive,
+            args.hub_threshold,
+            &composed,
+        ),
+        Ok(None) => crate::doctor::diagnose(&args.directory, recursive, args.hub_threshold),
+        Err(code) => return code,
+    };
     if args.json {
         emit(output::render_doctor_json(&report));
     } else {
@@ -1366,7 +1552,17 @@ pub fn cmd_review(args: &ReviewArgs) -> i32 {
             return usage_error("--stale-after must be a non-negative number of days");
         }
     }
-    let report = crate::review::build_review(&args.directory, !args.top_level, args.stale_after);
+    let recursive = !args.top_level;
+    let report = match load_composed_or_exit(&args.directory, recursive) {
+        Ok(Some(composed)) => crate::review::build_review_composed(
+            &args.directory,
+            recursive,
+            args.stale_after,
+            &composed,
+        ),
+        Ok(None) => crate::review::build_review(&args.directory, recursive, args.stale_after),
+        Err(code) => return code,
+    };
     if args.sarif {
         emit(output::render_review_sarif(&report));
     } else if args.json {
@@ -1397,11 +1593,18 @@ pub struct ExportArgs {
     pub check: bool,
     pub client: Vec<String>,
     pub out: Option<String>,
+    /// Human diagnostic projection of the writable child layer only.
+    pub local_only: bool,
 }
 
 pub fn cmd_export(args: &ExportArgs) -> i32 {
     if args.schema.is_none() && !Path::new(&args.directory).is_dir() {
         return usage_error(&format!("not a directory: {}", args.directory));
+    }
+    if args.local_only && (args.okf || args.agent_rules || args.schema.is_some()) {
+        return usage_error(
+            "--local-only is available only for viewer, documents, and graph exports",
+        );
     }
     // Agent-rules is a distinct mode (ADR-067) owning --out/--client/--check
     // and --json; it dispatches before the export-payload guards.
@@ -1420,6 +1623,20 @@ pub fn cmd_export(args: &ExportArgs) -> i32 {
     if args.out.is_some() && !(args.html || args.okf) {
         return usage_error("--out requires --html or --okf (--json writes to stdout)");
     }
+    // Classify explicit/default write targets before loading corpus content.
+    // A version-2 root deliberately does not enter the version-1 composition
+    // loader, but its inherited materialisations remain read-only even while
+    // graph command wiring is staged separately.
+    if args.html || args.okf {
+        let out = args.out.as_deref().unwrap_or(if args.okf {
+            "okf-bundle"
+        } else {
+            "lore-export.html"
+        });
+        if let Some(code) = refuse_read_only_target(out) {
+            return code;
+        }
+    }
     if let Some(name) = &args.schema {
         let Some(schema) = crate::export::export_schema(name) else {
             return usage_error(&format!(
@@ -1429,11 +1646,25 @@ pub fn cmd_export(args: &ExportArgs) -> i32 {
         emit_exact(schema);
         return EXIT_OK;
     }
+    let composed = match load_composed_or_exit(&args.directory, true) {
+        Ok(corpus) => corpus,
+        Err(code) => return code,
+    };
     if args.documents {
-        let export = match crate::export::build_documents_export(&args.directory) {
+        let export = match composed.as_ref() {
+            Some(corpus) => crate::export::build_documents_export_from_composed(
+                &args.directory,
+                corpus,
+                args.local_only,
+            )
+            .map_err(|error| error.message().to_string()),
+            None => crate::export::build_documents_export(&args.directory)
+                .map_err(|error| error.message().to_string()),
+        };
+        let export = match export {
             Ok(export) => export,
-            Err(error) => {
-                eprintln!("decided: {}", error.message());
+            Err(message) => {
+                eprintln!("decided: {message}");
                 return EXIT_VALIDATION_FAILED;
             }
         };
@@ -1441,10 +1672,20 @@ pub fn cmd_export(args: &ExportArgs) -> i32 {
         return EXIT_OK;
     }
     if args.graph {
-        let export = match crate::export::build_graph_export(&args.directory) {
+        let export = match composed.as_ref() {
+            Some(corpus) => crate::export::build_graph_export_from_composed(
+                &args.directory,
+                corpus,
+                args.local_only,
+            )
+            .map_err(|error| error.message().to_string()),
+            None => crate::export::build_graph_export(&args.directory)
+                .map_err(|error| error.message().to_string()),
+        };
+        let export = match export {
             Ok(export) => export,
-            Err(error) => {
-                eprintln!("decided: {}", error.message());
+            Err(message) => {
+                eprintln!("decided: {message}");
                 return EXIT_VALIDATION_FAILED;
             }
         };
@@ -1454,7 +1695,15 @@ pub fn cmd_export(args: &ExportArgs) -> i32 {
     // OKF consumes source Markdown directly, so its projection skips the
     // unrelated HTML rendering used by the viewer export.
     if args.okf {
-        let export = crate::export::build_okf_export(&args.directory, output::rac_version());
+        let export = match composed.as_ref() {
+            Some(corpus) => crate::export::build_okf_export_from_composed(
+                &args.directory,
+                output::rac_version(),
+                corpus,
+            ),
+            None => crate::export::build_okf_export(&args.directory, output::rac_version()),
+        };
+        let out = args.out.as_deref().unwrap_or("okf-bundle");
         let recency = crate::okf::artifact_recency(&args.directory, &export);
         let bundle = match crate::okf::render_okf_bundle(&export, &recency, &args.directory) {
             Ok(bundle) => bundle,
@@ -1467,7 +1716,19 @@ pub fn cmd_export(args: &ExportArgs) -> i32 {
                 return EXIT_VALIDATION_FAILED;
             }
         };
-        let out = args.out.as_deref().unwrap_or("okf-bundle");
+        let destinations: Vec<_> = bundle
+            .keys()
+            .map(|relative| std::path::Path::new(out).join(relative))
+            .collect();
+        let destination_text: Vec<_> = destinations
+            .iter()
+            .map(|path| path.to_string_lossy().into_owned())
+            .collect();
+        if let Some(code) =
+            refuse_read_only_targets(destination_text.iter().map(String::as_str))
+        {
+            return code;
+        }
         for (rel, content) in &bundle {
             let dest = std::path::Path::new(out).join(rel);
             let written = dest
@@ -1486,10 +1747,21 @@ pub fn cmd_export(args: &ExportArgs) -> i32 {
         ));
         return EXIT_OK;
     }
-    let export = match crate::export::build_corpus_export(&args.directory, output::rac_version()) {
+    let export = match composed.as_ref() {
+        Some(corpus) => crate::export::build_corpus_export_from_composed(
+            &args.directory,
+            output::rac_version(),
+            corpus,
+            args.local_only,
+        )
+        .map_err(|error| error.message().to_string()),
+        None => crate::export::build_corpus_export(&args.directory, output::rac_version())
+            .map_err(|error| error.message().to_string()),
+    };
+    let export = match export {
         Ok(export) => export,
-        Err(error) => {
-            eprintln!("decided: {}", error.message());
+        Err(message) => {
+            eprintln!("decided: {message}");
             return EXIT_VALIDATION_FAILED;
         }
     };
@@ -1500,11 +1772,15 @@ pub fn cmd_export(args: &ExportArgs) -> i32 {
         return EXIT_OK;
     }
 
-    let html = match crate::portal::render_export_html(&export) {
+    let out = args.out.as_deref().unwrap_or("lore-export.html");
+    let html = match if composed.is_some() {
+        crate::portal::render_federated_export_html(&export)
+    } else {
+        crate::portal::render_export_html(&export)
+    } {
         Ok(html) => html,
         Err(msg) => return usage_error(&msg), // PortalSeamMissing (unreachable)
     };
-    let out = args.out.as_deref().unwrap_or("lore-export.html");
     // Path(out).write_text: no parent mkdir — a missing directory is the
     // OSError path (exit 2).
     if let Err(exc) = std::fs::write(out, html) {
@@ -1526,6 +1802,12 @@ fn cmd_agent_rules(args: &ExportArgs) -> i32 {
     let root = crate::agent_rules::agent_rules_root(&args.directory, args.out.as_deref());
     if let Some(code) = refuse_read_only_target(&root) {
         return code;
+    }
+    if !args.check {
+        let targets = crate::agent_rules::output_targets(&root, &args.client);
+        if let Some(code) = refuse_read_only_targets(targets.iter().map(String::as_str)) {
+            return code;
+        }
     }
     let result = if args.check {
         match crate::agent_rules::check_agent_rules(&args.directory, &root, &args.client) {
@@ -1659,7 +1941,11 @@ fn composed_resolution(
             paths.sort();
             Ok(crate::resolve::ResolutionResult {
                 artifact_id: artifact_id.to_string(),
-                outcome: crate::resolve::OUTCOME_DUPLICATE,
+                outcome: if corpus.is_graph() {
+                    crate::resolve::OUTCOME_AMBIGUOUS
+                } else {
+                    crate::resolve::OUTCOME_DUPLICATE
+                },
                 artifact: None,
                 duplicate_paths: paths,
             })
@@ -1707,17 +1993,20 @@ pub fn cmd_resolve(args: &ResolveArgs) -> i32 {
         } else {
             output::render_resolve_human(artifact)
         });
-    } else if result.outcome == crate::resolve::OUTCOME_DUPLICATE {
+    } else if result.outcome == crate::resolve::OUTCOME_DUPLICATE
+        || result.outcome == crate::resolve::OUTCOME_AMBIGUOUS
+    {
         let found: Vec<String> = result
             .duplicate_paths
             .iter()
             .map(|p| format!("- {p}"))
             .collect();
-        eprintln!(
-            "decided: duplicate artifact ID: {}\n\nFound in:\n{}",
-            args.id,
-            found.join("\n")
-        );
+        let label = if result.outcome == crate::resolve::OUTCOME_AMBIGUOUS {
+            "ambiguous artifact ID"
+        } else {
+            "duplicate artifact ID"
+        };
+        eprintln!("decided: {label}: {}\n\nFound in:\n{}", args.id, found.join("\n"));
     } else {
         eprintln!("decided: artifact not found: {}", args.id);
     }
@@ -1789,6 +2078,127 @@ pub fn annotate_search_recency(matches: &mut [crate::resolve::ResolvedArtifact],
     );
 }
 
+/// Join Git recency onto local matches from a composed corpus without ever
+/// attributing the child checkout's history to inherited artifacts.
+///
+/// Ranking has already completed when this runs. Inherited records retain a
+/// missing `recency` field; local records use their runtime-only physical
+/// locator while public paths remain owning-source-relative.
+pub fn annotate_composed_search_recency(
+    matches: &mut [crate::resolve::ResolvedArtifact],
+    directory: &str,
+    corpus: &crate::composition::ComposedCorpus,
+) {
+    use crate::corpus::Layer;
+    use crate::gitinfo;
+
+    let local: Vec<(usize, PathBuf)> = matches
+        .iter()
+        .enumerate()
+        .filter_map(|(index, artifact)| {
+            let key = artifact.key.as_ref()?;
+            let item = corpus.item(key)?;
+            (item.origin.layer == Layer::Local)
+                .then(|| (index, item.locator.path.clone()))
+        })
+        .collect();
+    if local.is_empty() {
+        return;
+    }
+    let local_count = local.len();
+
+    let timing_started = crate::timing::start();
+    let threshold = crate::validate::load_freshness_threshold(directory);
+    let reference = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs() as i64)
+        .unwrap_or(0);
+    let repo_root = gitinfo::repository_root(Path::new(directory));
+    let paths: Vec<PathBuf> = local.iter().map(|(_, path)| path.clone()).collect();
+    let committed = match &repo_root {
+        Some(root) => gitinfo::last_committed_for_paths_in_repo(root, &paths),
+        None => paths.into_iter().map(|path| (path, None)).collect(),
+    };
+    for ((index, _), (_, last)) in local.into_iter().zip(committed) {
+        let staleness = gitinfo::staleness(last.as_deref(), threshold, reference);
+        matches[index].recency = Some(crate::resolve::Recency {
+            last_committed: staleness
+                .last_committed
+                .as_deref()
+                .map(gitinfo::isoformat_roundtrip),
+            age_days: staleness.age_days,
+            stale: staleness.stale,
+        });
+    }
+    crate::timing::emit_since(
+        "git.recency_join",
+        timing_started,
+        &[
+            ("matches", matches.len() as u64),
+            ("local_matches", local_count as u64),
+            ("repository", u64::from(repo_root.is_some())),
+        ],
+    );
+}
+
+/// Graph-v2 equivalent of [`annotate_composed_search_recency`]. Only records
+/// owned by the root source may use the root repository's Git history;
+/// inherited matches deliberately retain absent recency.
+pub fn annotate_graph_search_recency(
+    matches: &mut [crate::resolve::ResolvedArtifact],
+    directory: &str,
+    corpus: &crate::graph_federated_corpus::VerifiedGraphCorpus,
+) {
+    use crate::corpus::Layer;
+    use crate::gitinfo;
+
+    let local: Vec<(usize, PathBuf)> = matches
+        .iter()
+        .enumerate()
+        .filter_map(|(index, artifact)| {
+            let key = artifact.key.as_ref()?;
+            let item = corpus.composition.item(key)?;
+            (item.origin.layer == Layer::Local).then(|| (index, item.locator.path.clone()))
+        })
+        .collect();
+    if local.is_empty() {
+        return;
+    }
+    let local_count = local.len();
+    let timing_started = crate::timing::start();
+    let threshold = crate::validate::load_freshness_threshold(directory);
+    let reference = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs() as i64)
+        .unwrap_or(0);
+    let repo_root = gitinfo::repository_root(Path::new(directory));
+    let paths: Vec<PathBuf> = local.iter().map(|(_, path)| path.clone()).collect();
+    let committed = match &repo_root {
+        Some(root) => gitinfo::last_committed_for_paths_in_repo(root, &paths),
+        None => paths.into_iter().map(|path| (path, None)).collect(),
+    };
+    for ((index, _), (_, last)) in local.into_iter().zip(committed) {
+        let staleness = gitinfo::staleness(last.as_deref(), threshold, reference);
+        matches[index].recency = Some(crate::resolve::Recency {
+            last_committed: staleness
+                .last_committed
+                .as_deref()
+                .map(gitinfo::isoformat_roundtrip),
+            age_days: staleness.age_days,
+            stale: staleness.stale,
+        });
+    }
+    crate::timing::emit_since(
+        "git.recency_join",
+        timing_started,
+        &[
+            ("matches", matches.len() as u64),
+            ("local_matches", local_count as u64),
+            ("repository", u64::from(repo_root.is_some())),
+        ],
+    );
+}
+
 /// Serve `decided find` from the persistent index store (`_find_from_store`,
 /// ADR-112): a warm run against an unchanged corpus reads the mapped base;
 /// a cold run builds fresh, writes the store, and serves either the
@@ -1834,9 +2244,87 @@ fn find_from_store(args: &FindArgs) -> crate::resolve::SearchResult {
     }
 }
 
+fn cmd_find_graph(args: &FindArgs, repository_root: &Path, corpus_relative: &str) -> i32 {
+    use crate::derived_cache::{GraphFederatedCacheTracker, ReadModel};
+
+    let persistent_cache = crate::derived_cache::cache_enabled(args.cache);
+    let mut tracker = GraphFederatedCacheTracker::new(
+        crate::derived_cache::default_cache_dir(),
+    );
+    let read = match tracker.read_graph(
+        repository_root,
+        corpus_relative,
+        !args.top_level,
+        persistent_cache,
+    ) {
+        Ok(read) => read,
+        Err(error) => {
+            eprintln!("decided: {error}");
+            return EXIT_VALIDATION_FAILED;
+        }
+    };
+    let mut result = match read.model {
+        ReadModel::View(reader) => {
+            if args.decisions {
+                crate::read_model::store_find_decisions(reader, &args.query)
+            } else {
+                crate::read_model::store_search(
+                    reader,
+                    &args.query,
+                    args.artifact_type.as_deref(),
+                    &args.tags,
+                    args.live,
+                )
+            }
+        }
+        ReadModel::Fresh(derived) => {
+            if args.decisions {
+                crate::read_model::find_decisions_in_source_aware(
+                    &derived.index_entries,
+                    &derived.live_decision_keys,
+                    &derived.live_decision_paths,
+                    &args.query,
+                )
+            } else {
+                crate::resolve::search_index_filtered(
+                    &derived.index_entries,
+                    &args.query,
+                    args.artifact_type.as_deref(),
+                    &args.tags,
+                    args.live,
+                )
+            }
+        }
+    };
+    annotate_graph_search_recency(&mut result.matches, &args.directory, read.corpus);
+    let render_started = crate::timing::start();
+    let rendered = if args.json {
+        output::render_find_json_with_graph(&result, args.explain, read.corpus)
+    } else {
+        output::render_find_human_with_graph(&result, args.explain, read.corpus)
+    };
+    crate::timing::emit_since(
+        "cli.response_serialize",
+        render_started,
+        &[("matches", result.matches.len() as u64), ("bytes", rendered.len() as u64)],
+    );
+    emit(rendered);
+    EXIT_OK
+}
+
 pub fn cmd_find(args: &FindArgs) -> i32 {
     if !Path::new(&args.directory).is_dir() {
         return usage_error(&format!("not a directory: {}", args.directory));
+    }
+    let graph = match crate::federated_corpus::graph_cache_location(&args.directory) {
+        Ok(graph) => graph,
+        Err(error) => {
+            eprintln!("decided: {error}");
+            return EXIT_VALIDATION_FAILED;
+        }
+    };
+    if let Some((repository_root, corpus_relative)) = graph {
+        return cmd_find_graph(args, &repository_root, &corpus_relative);
     }
     let composed = match load_composed_or_exit(&args.directory, !args.top_level) {
         Ok(composed) => composed,
@@ -1845,15 +2333,20 @@ pub fn cmd_find(args: &FindArgs) -> i32 {
     let mut result = if let Some(composed) = &composed {
         let entries = composed.effective_index();
         if args.decisions {
-            let live_paths: Vec<String> = composed
+            let live_keys: Vec<crate::corpus::ArtifactKey> = composed
                 .effective()
                 .filter(|item| {
                     item.spec.map(|spec| spec.name.as_str()) == Some("decision")
                         && crate::resolve::is_live_decision(&item.artifact)
                 })
-                .map(|item| item.path.clone())
+                .map(|item| item.key.clone())
                 .collect();
-            crate::read_model::find_decisions_in(&entries, &live_paths, &args.query)
+            crate::read_model::find_decisions_in_source_aware(
+                &entries,
+                &live_keys,
+                &[],
+                &args.query,
+            )
         } else {
             crate::resolve::search_index_filtered(
                 &entries,
@@ -1881,7 +2374,9 @@ pub fn cmd_find(args: &FindArgs) -> i32 {
             args.live,
         )
     };
-    if composed.is_none() {
+    if let Some(composed) = &composed {
+        annotate_composed_search_recency(&mut result.matches, &args.directory, composed);
+    } else {
         annotate_search_recency(&mut result.matches, &args.directory);
     }
     let render_started = crate::timing::start();
@@ -2119,7 +2614,7 @@ pub struct SkillArgs {
 /// bundled Claude Code agent skills. The `--dir` not-a-directory check runs
 /// BEFORE the unknown-name check (skill brief, landmine 5).
 pub fn cmd_skill(args: &SkillArgs) -> i32 {
-    use crate::skill::{install_skills, SkillInstallError};
+    use crate::skill::{install_skills, install_targets, SkillInstallError};
 
     if args.action == "list" {
         if args.name.is_some() {
@@ -2135,6 +2630,17 @@ pub fn cmd_skill(args: &SkillArgs) -> i32 {
 
     if !Path::new(&args.dir).is_dir() {
         return usage_error(&format!("not a directory: {}", args.dir));
+    }
+    let targets = match install_targets(&args.dir, args.name.as_deref()) {
+        Ok(targets) => targets,
+        Err(SkillInstallError::NotFound(message)) => return usage_error(&message),
+        Err(SkillInstallError::FileExists(message)) | Err(SkillInstallError::Io(message)) => {
+            eprintln!("decided: {message}");
+            return EXIT_VALIDATION_FAILED;
+        }
+    };
+    if let Some(code) = refuse_read_only_targets(targets.iter().map(String::as_str)) {
+        return code;
     }
     let installation = match install_skills(&args.dir, args.name.as_deref()) {
         Ok(installation) => installation,
@@ -2168,7 +2674,7 @@ pub struct HookArgs {
 /// install the bundled git hooks. `list` ignores `--style`/`--dir`; an
 /// invalid style never reaches here (argparse choices fire first).
 pub fn cmd_hook(args: &HookArgs) -> i32 {
-    use crate::hook::{install_hook, HookInstallError};
+    use crate::hook::{install_hook, install_target, HookInstallError};
 
     if args.action == "list" {
         if args.json {
@@ -2181,6 +2687,17 @@ pub fn cmd_hook(args: &HookArgs) -> i32 {
 
     if !Path::new(&args.dir).is_dir() {
         return usage_error(&format!("not a directory: {}", args.dir));
+    }
+    let target = match install_target(&args.dir, &args.style) {
+        Ok(target) => target,
+        Err(HookInstallError::NotAGitWorkTree(message)) => return usage_error(&message),
+        Err(HookInstallError::FileExists(message)) | Err(HookInstallError::Io(message)) => {
+            eprintln!("decided: {message}");
+            return EXIT_VALIDATION_FAILED;
+        }
+    };
+    if let Some(code) = refuse_read_only_target(&target) {
+        return code;
     }
     let installation = match install_hook(&args.dir, &args.style) {
         Ok(installation) => installation,
@@ -2221,6 +2738,11 @@ pub fn cmd_eval(args: &EvalArgs) -> i32 {
         eprintln!("decided eval: {}", err.0);
         EXIT_USAGE
     };
+    if args.update_baseline {
+        if let Some(code) = refuse_read_only_target(&args.baseline) {
+            return code;
+        }
+    }
     let scorecard = match eval::run_eval(&args.root, &args.queries) {
         Ok(scorecard) => scorecard,
         Err(err) => return fail(err),
@@ -2376,17 +2898,22 @@ mod share_prompt_tests {
 pub struct InitArgs {
     pub directory: String,
     pub key: String,
+    /// Whether `--key` was present, distinct from its released default value.
+    pub key_explicit: bool,
     /// argparse-choice-validated ticketing provider.
     pub ticketing: Option<String>,
     /// argparse-choice-validated profile name.
     pub profile: Option<String>,
     /// Org endpoint URL (ADR-117); http(s)-validated in the service layer.
     pub org_endpoint: Option<String>,
+    /// Emit deterministic v2-first setup guidance for materialised parents.
+    pub parent_corpus: bool,
     pub json: bool,
 }
 
 /// `decided init [directory] [--key KEY] [--ticketing PROVIDER] [--profile
-/// NAME]` — establish (or confirm) the repository identity namespace.
+/// NAME] [--parent-corpus]` — establish (or confirm) the repository identity
+/// namespace.
 /// Invalid key exits 2; conflict/malformed config exit 1. A successful
 /// non-JSON init may ask the one-time sharing question (TTY-gated).
 pub fn cmd_init(args: &InitArgs) -> i32 {
@@ -2397,9 +2924,26 @@ pub fn cmd_init(args: &InitArgs) -> i32 {
     if let Some(code) = refuse_read_only_target(&args.directory) {
         return code;
     }
+    let repository_key = if args.parent_corpus
+        && !args.key_explicit
+        && Path::new(&args.directory)
+            .join(".decided/config.yaml")
+            .is_file()
+    {
+        match crate::scaffold::load_repository_config(&args.directory) {
+            Ok(Some(config)) => config.repository_key,
+            Ok(None) => args.key.clone(),
+            Err(error) => {
+                eprintln!("decided: {}", error.message());
+                return EXIT_VALIDATION_FAILED;
+            }
+        }
+    } else {
+        args.key.clone()
+    };
     let result = match crate::scaffold::init_repository(
         &args.directory,
-        &args.key,
+        &repository_key,
         args.ticketing.as_deref(),
         args.profile.as_deref(),
         args.org_endpoint.as_deref(),
@@ -2414,9 +2958,15 @@ pub fn cmd_init(args: &InitArgs) -> i32 {
         }
     };
     if args.json {
-        emit(output::render_init_json(&result));
+        emit(output::render_init_json_with_parent_corpus(
+            &result,
+            args.parent_corpus,
+        ));
     } else {
-        emit(output::render_init_human(&result));
+        emit(output::render_init_human_with_parent_corpus(
+            &result,
+            args.parent_corpus,
+        ));
         maybe_ask_usage_sharing();
     }
     EXIT_OK
@@ -2605,7 +3155,10 @@ pub fn cmd_rename(args: &RenameArgs) -> i32 {
         Err(code) => return code,
     };
     let plan = if let Some(corpus) = &composed {
-        let local: Vec<_> = corpus.local_items().cloned().collect();
+        let local = crate::federated_corpus::local_writable_projection(
+            &args.directory,
+            corpus,
+        );
         crate::rename::compute_rename_from_items(
             &args.directory,
             &args.old,
@@ -2655,21 +3208,114 @@ pub fn cmd_rename(args: &RenameArgs) -> i32 {
 pub struct CorpusDigestArgs {
     pub root: String,
     pub corpus: String,
+    pub version: u32,
 }
 
 /// Read-only operator calculation for the canonical parent corpus pin. The
 /// implementation consumes only local bytes below `root` and cannot write,
 /// fetch, refresh, or repin anything.
 pub fn cmd_corpus_digest(args: &CorpusDigestArgs) -> i32 {
-    match crate::federation::calculate_parent_digest(&args.root, &args.corpus) {
-        Ok(result) => {
-            emit(result.digest);
+    let result = if args.version == 2 {
+        crate::federation::calculate_parent_digest_v2(&args.root, &args.corpus)
+            .map(|result| result.digest)
+    } else {
+        crate::federation::calculate_parent_digest(&args.root, &args.corpus)
+            .map(|result| result.digest)
+    };
+    match result {
+        Ok(digest) => {
+            emit(digest);
             EXIT_OK
         }
         Err(error) => {
             eprintln!("decided: {error}");
             EXIT_VALIDATION_FAILED
         }
+    }
+}
+
+pub struct CorpusStatusArgs {
+    pub directory: String,
+    pub json: bool,
+}
+
+/// Verify the complete version-2 closure and render its retained topology.
+/// Loading is byte-identical to every other graph consumer and remains
+/// offline/read-only; success therefore means every displayed pin and route
+/// was checked during this invocation.
+pub fn cmd_corpus_status(args: &CorpusStatusArgs) -> i32 {
+    if !Path::new(&args.directory).is_dir() {
+        return usage_error(&format!("not a directory: {}", args.directory));
+    }
+    let corpus = match crate::federated_corpus::load_verified_graph_corpus(&args.directory) {
+        Ok(Some(corpus)) => corpus,
+        Ok(None) => {
+            eprintln!(
+                "decided: corpus status requires a manifest version 2 federation at {}",
+                args.directory
+            );
+            return EXIT_VALIDATION_FAILED;
+        }
+        Err(error) => {
+            eprintln!("decided: {error}");
+            return EXIT_VALIDATION_FAILED;
+        }
+    };
+    let report = crate::federation_observability::FederationStatusReport::from_corpus(&corpus);
+    emit(if args.json {
+        report.render_json()
+    } else {
+        report.render_human()
+    });
+    EXIT_OK
+}
+
+pub struct CorpusExplainArgs {
+    pub reference: String,
+    pub directory: String,
+    pub context: Option<String>,
+    pub json: bool,
+}
+
+/// Explain one source-contextual graph lookup, including historical
+/// candidates, the effective terminal, and explicit override provenance.
+pub fn cmd_corpus_explain(args: &CorpusExplainArgs) -> i32 {
+    if !Path::new(&args.directory).is_dir() {
+        return usage_error(&format!("not a directory: {}", args.directory));
+    }
+    let corpus = match crate::federated_corpus::load_verified_graph_corpus(&args.directory) {
+        Ok(Some(corpus)) => corpus,
+        Ok(None) => {
+            eprintln!(
+                "decided: corpus explain requires a manifest version 2 federation at {}",
+                args.directory
+            );
+            return EXIT_VALIDATION_FAILED;
+        }
+        Err(error) => {
+            eprintln!("decided: {error}");
+            return EXIT_VALIDATION_FAILED;
+        }
+    };
+    let context = args
+        .context
+        .as_deref()
+        .unwrap_or_else(|| corpus.composition.root_source());
+    let report = crate::federation_observability::FederationExplainReport::from_corpus(
+        &corpus,
+        context,
+        &args.reference,
+    );
+    let ok = report.ok();
+    emit(if args.json {
+        report.render_json()
+    } else {
+        report.render_human()
+    });
+    if ok {
+        EXIT_OK
+    } else {
+        EXIT_VALIDATION_FAILED
     }
 }
 
@@ -2820,6 +3466,8 @@ mod validation_provenance_tests {
                     Some(3),
                 )],
                 origin,
+                source_route: None,
+                route_count: None,
             }],
             okf: None,
         }
@@ -2866,6 +3514,58 @@ mod validation_provenance_tests {
         assert_eq!(
             composed_sarif["runs"][0]["results"][0]["properties"],
             composed_json["files"][0]["provenance"]
+        );
+    }
+
+    #[test]
+    fn topology_validation_retains_route_context_in_every_renderer() {
+        let result = DirectoryValidation {
+            directory: "decisions".to_string(),
+            recursive: true,
+            files: vec![FileValidation {
+                path: crate::federation::MANIFEST_RELATIVE_PATH.to_string(),
+                artifact_type: "corpus-manifest".to_string(),
+                status: STATUS_INVALID,
+                issues: vec![Issue::new(
+                    "error",
+                    "corpus-federation-invalid-node",
+                    "shared inherited node is invalid".to_string(),
+                    None,
+                )],
+                origin: Some(ArtifactOrigin {
+                    source: "acme/shared".to_string(),
+                    layer: crate::corpus::Layer::Inherited,
+                    pin: Some(format!("sha256-v2:{}", "a".repeat(64))),
+                    alias: None,
+                }),
+                source_route: Some(vec![
+                    "acme/root".to_string(),
+                    "acme/left".to_string(),
+                    "acme/shared".to_string(),
+                ]),
+                route_count: Some(2),
+            }],
+            okf: None,
+        };
+
+        let human = output::render_validate_dir_human(&result);
+        assert!(human.contains(
+            "source route: acme/root -> acme/left -> acme/shared (2 verified physical routes)"
+        ));
+
+        let json: serde_json::Value =
+            serde_json::from_str(&output::render_validate_dir_json(&result)).unwrap();
+        assert_eq!(
+            json["files"][0]["provenance"]["source_route"],
+            serde_json::json!(["acme/root", "acme/left", "acme/shared"])
+        );
+        assert_eq!(json["files"][0]["provenance"]["route_count"], 2);
+
+        let sarif: serde_json::Value =
+            serde_json::from_str(&output::render_validate_sarif(&result)).unwrap();
+        assert_eq!(
+            sarif["runs"][0]["results"][0]["properties"],
+            json["files"][0]["provenance"]
         );
     }
 

@@ -7,12 +7,12 @@
     "url": "https://github.com/asdecided/core",
     "source": "github"
   },
-  "version": "0.28.0",
+  "version": "0.29.0",
   "websiteUrl": "https://asdecided.com",
   "packages": [
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/asdecided/core:mcp-v0.28.0",
+      "identifier": "ghcr.io/asdecided/core:mcp-v0.29.0",
       "transport": {
         "type": "stdio"
       }

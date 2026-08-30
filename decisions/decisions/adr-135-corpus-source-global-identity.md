@@ -7,6 +7,13 @@ type: decision
 
 ## Context
 
+> **Clarified by ADR-144 and ADR-146.** Every logical graph node has one
+> explicit source distinct from every other logical node. Several physical
+> routes may reuse a source only when they verify the same canonical version-2
+> node digest and deduplicate to that one node. Version 2 permits the same
+> canonical artifact id in distinct source namespaces and treats unqualified
+> use as ambiguous unless explicit overrides converge every candidate.
+
 Federation needs an identity that survives checkout moves and distinguishes an
 artifact's corpus from the namespace used to mint its opaque ID. Existing
 `repository_key` values are short ID-generation prefixes and can be shared or
@@ -78,12 +85,14 @@ new pinned state of the same corpus.
 - adr-026
 - adr-074
 - adr-089
-- adr-133
 - adr-134
+- adr-144
+- adr-146
 
 ## Related Designs
 
 - corpus-federation-mechanism
+- corpus-federation-graph-composition
 
 ## Related Requirements
 

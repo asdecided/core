@@ -5,16 +5,18 @@
 //! (decision 9) — stdout stays byte-identical (empty on errors).
 
 use crate::commands::{
-    cmd_corpus_digest, cmd_coverage, cmd_decisions_for, cmd_diagnose, cmd_diff, cmd_doctor,
+    cmd_corpus_digest, cmd_corpus_explain, cmd_corpus_status, cmd_coverage, cmd_decisions_for,
+    cmd_diagnose, cmd_diff, cmd_doctor,
     cmd_eval, cmd_export, cmd_find, cmd_gate, cmd_herald, cmd_hook, cmd_improve, cmd_index,
     cmd_init, cmd_inspect, cmd_mcp_stats, cmd_migrate, cmd_new, cmd_portfolio, cmd_quickstart,
     cmd_relationships, cmd_rename, cmd_resolve, cmd_retrieve, cmd_review, cmd_schema, cmd_sentry,
     cmd_skill, cmd_stats, cmd_telemetry, cmd_templates, cmd_usage, cmd_validate,
-    CorpusDigestArgs, CoverageArgs, DecisionsForArgs, DiagnoseArgs, DiffArgs, DoctorArgs, EvalArgs,
-    ExportArgs, FindArgs, GateArgs, HeraldArgs, HookArgs, ImproveArgs, IndexArgs, InitArgs,
-    InspectArgs, McpStatsArgs, MigrateArgs, NewArgs, PortfolioArgs, QuickstartArgs,
-    RelationshipsArgs, RenameArgs, ResolveArgs, RetrieveArgs, ReviewArgs, SchemaArgs, SentryArgs,
-    SkillArgs, StatsArgs, TelemetryArgs, TemplatesArgs, UsageArgs, ValidateArgs, WatchkeeperArgs,
+    CorpusDigestArgs, CorpusExplainArgs, CorpusStatusArgs, CoverageArgs, DecisionsForArgs,
+    DiagnoseArgs, DiffArgs, DoctorArgs, EvalArgs, ExportArgs, FindArgs, GateArgs, HeraldArgs,
+    HookArgs, ImproveArgs, IndexArgs, InitArgs, InspectArgs, McpStatsArgs, MigrateArgs, NewArgs,
+    PortfolioArgs, QuickstartArgs, RelationshipsArgs, RenameArgs, ResolveArgs, RetrieveArgs,
+    ReviewArgs, SchemaArgs, SentryArgs, SkillArgs, StatsArgs, TelemetryArgs, TemplatesArgs,
+    UsageArgs, ValidateArgs, WatchkeeperArgs,
 };
 use crate::commands::cmd_watchkeeper;
 use crate::output::rac_version;
@@ -185,7 +187,7 @@ fn run_dispatch(args: &[String]) -> u8 {
     let order_aware = matches!(
         first.as_str(),
         "mcp-stats" | "telemetry" | "usage" | "skill" | "hook" | "eval" | "init" | "quickstart"
-            | "migrate" | "watchkeeper"
+            | "migrate" | "watchkeeper" | "corpus"
     );
     if !order_aware {
         if rest.iter().any(|a| a.as_str() == "--version") {
@@ -283,10 +285,24 @@ fn take_opt_value(
 }
 
 fn run_corpus(rest: &[&String]) -> u8 {
+    match rest.first().map(|action| action.as_str()) {
+        Some("status") => run_corpus_status(&rest[1..]),
+        Some("explain") => run_corpus_explain(&rest[1..]),
+        Some("-h" | "--help") => {
+            skip_usage_record();
+            print_stdout("usage: decided corpus {digest,status,explain} ...");
+            0
+        }
+        _ => run_corpus_digest(rest),
+    }
+}
+
+fn run_corpus_digest(rest: &[&String]) -> u8 {
     let prog = "decided corpus";
     let mut action: Option<String> = None;
     let mut root: Option<String> = None;
     let mut corpus: Option<String> = None;
+    let mut version: u32 = 1;
     let mut extras: Vec<String> = Vec::new();
     let mut positional_only = false;
 
@@ -299,7 +315,7 @@ fn run_corpus(rest: &[&String]) -> u8 {
                     return argparse_error(
                         prog,
                         &format!(
-                            "argument action: invalid choice: '{arg}' (choose from 'digest')"
+                            "argument action: invalid choice: '{arg}' (choose from 'digest', 'status', 'explain')"
                         ),
                     );
                 }
@@ -312,6 +328,13 @@ fn run_corpus(rest: &[&String]) -> u8 {
         }
         match arg {
             "--" => positional_only = true,
+            "-h" | "--help" => {
+                skip_usage_record();
+                print_stdout(
+                    "usage: decided corpus digest --root ROOT --corpus CORPUS [--version 2]",
+                );
+                return 0;
+            }
             other if other == "--root" || other.starts_with("--root=") => {
                 match take_opt_value(prog, "--root", other, rest, &mut i) {
                     Ok(value) => root = Some(value),
@@ -321,6 +344,18 @@ fn run_corpus(rest: &[&String]) -> u8 {
             other if other == "--corpus" || other.starts_with("--corpus=") => {
                 match take_opt_value(prog, "--corpus", other, rest, &mut i) {
                     Ok(value) => corpus = Some(value),
+                    Err(code) => return code,
+                }
+            }
+            other if other == "--version" || other.starts_with("--version=") => {
+                match take_opt_value(prog, "--version", other, rest, &mut i) {
+                    Ok(value) if value == "2" => version = 2,
+                    Ok(value) => {
+                        return argparse_error(
+                            prog,
+                            &format!("argument --version: invalid choice: '{value}' (choose from '2')"),
+                        )
+                    }
                     Err(code) => return code,
                 }
             }
@@ -351,7 +386,118 @@ fn run_corpus(rest: &[&String]) -> u8 {
     cmd_corpus_digest(&CorpusDigestArgs {
         root: root.expect("checked above"),
         corpus: corpus.expect("checked above"),
+        version,
     }) as u8
+}
+
+fn run_corpus_status(rest: &[&String]) -> u8 {
+    let mut directory: Option<String> = None;
+    let mut json = false;
+    let mut extras = Vec::new();
+    let mut positional_only = false;
+
+    for arg in rest {
+        let arg = arg.as_str();
+        if positional_only || arg == "-" || !arg.starts_with('-') {
+            if directory.is_none() {
+                directory = Some(arg.to_string());
+            } else {
+                extras.push(arg.to_string());
+            }
+            continue;
+        }
+        match arg {
+            "--" => positional_only = true,
+            "--json" => json = true,
+            "--version" => {
+                skip_usage_record();
+                print_stdout(&version_line());
+                return 0;
+            }
+            "-h" | "--help" => {
+                skip_usage_record();
+                print_stdout("usage: decided corpus status [DIRECTORY] [--json]");
+                return 0;
+            }
+            other => extras.push(other.to_string()),
+        }
+    }
+    if !extras.is_empty() {
+        return unrecognized(&extras);
+    }
+    cmd_corpus_status(&CorpusStatusArgs {
+        directory: directory.unwrap_or_else(default_corpus_directory),
+        json,
+    }) as u8
+}
+
+fn run_corpus_explain(rest: &[&String]) -> u8 {
+    let prog = "decided corpus explain";
+    let mut reference: Option<String> = None;
+    let mut directory: Option<String> = None;
+    let mut context: Option<String> = None;
+    let mut json = false;
+    let mut extras = Vec::new();
+    let mut positional_only = false;
+    let mut i = 0;
+    while i < rest.len() {
+        let arg = rest[i].as_str();
+        if positional_only || arg == "-" || !arg.starts_with('-') {
+            if reference.is_none() {
+                reference = Some(arg.to_string());
+            } else if directory.is_none() {
+                directory = Some(arg.to_string());
+            } else {
+                extras.push(arg.to_string());
+            }
+            i += 1;
+            continue;
+        }
+        match arg {
+            "--" => positional_only = true,
+            "--json" => json = true,
+            "--version" => {
+                skip_usage_record();
+                print_stdout(&version_line());
+                return 0;
+            }
+            "-h" | "--help" => {
+                skip_usage_record();
+                print_stdout(
+                    "usage: decided corpus explain REFERENCE [DIRECTORY] [--from SOURCE] [--json]",
+                );
+                return 0;
+            }
+            other if other == "--from" || other.starts_with("--from=") => {
+                match take_opt_value(prog, "--from", other, rest, &mut i) {
+                    Ok(value) => context = Some(value),
+                    Err(code) => return code,
+                }
+            }
+            other => extras.push(other.to_string()),
+        }
+        i += 1;
+    }
+    let Some(reference) = reference else {
+        return argparse_error(prog, "the following arguments are required: reference");
+    };
+    if !extras.is_empty() {
+        return unrecognized(&extras);
+    }
+    cmd_corpus_explain(&CorpusExplainArgs {
+        reference,
+        directory: directory.unwrap_or_else(default_corpus_directory),
+        context,
+        json,
+    }) as u8
+}
+
+fn default_corpus_directory() -> String {
+    if std::path::Path::new("decisions").is_dir() {
+        "decisions".to_string()
+    } else {
+        ".".to_string()
+    }
 }
 
 fn run_validate(rest: &[&String]) -> u8 {
@@ -2160,6 +2306,7 @@ fn run_export(rest: &[&String]) -> u8 {
     let mut check = false;
     let mut client: Vec<String> = Vec::new();
     let mut out: Option<String> = None;
+    let mut local_only = false;
     let mut extras: Vec<String> = Vec::new();
     let mut positional_only = false;
 
@@ -2263,6 +2410,7 @@ fn run_export(rest: &[&String]) -> u8 {
                 }
             }
             "--check" => check = true,
+            "--local-only" => local_only = true,
             "--client" => {
                 i += 1;
                 match rest.get(i) {
@@ -2318,6 +2466,7 @@ fn run_export(rest: &[&String]) -> u8 {
         check,
         client,
         out,
+        local_only,
     }) as u8
 }
 
@@ -2455,7 +2604,8 @@ fn run_new(rest: &[&String]) -> u8 {
 }
 
 /// `decided init [directory] [--key KEY] [--ticketing PROVIDER] [--profile
-/// NAME] [--json]` — order-aware: `--ticketing`/`--profile` are
+/// NAME] [--parent-corpus] [--json]` — order-aware:
+/// `--ticketing`/`--profile` are
 /// argparse-choice-validated when their VALUE is consumed (an invalid
 /// choice beats a later `--version`; an earlier `--version` wins), and a
 /// missing option value errors at its own position too.
@@ -2463,9 +2613,11 @@ fn run_init(rest: &[&String]) -> u8 {
     let prog = "decided init";
     let mut directory: Option<String> = None;
     let mut key: String = "RAC".to_string(); // init.DEFAULT_KEY
+    let mut key_explicit = false;
     let mut ticketing: Option<String> = None;
     let mut profile: Option<String> = None;
     let mut org_endpoint: Option<String> = None;
+    let mut parent_corpus = false;
     let mut json = false;
     let mut extras: Vec<String> = Vec::new();
     let mut positional_only = false;
@@ -2520,9 +2672,13 @@ fn run_init(rest: &[&String]) -> u8 {
                 return 0;
             }
             "--json" => json = true,
+            "--parent-corpus" => parent_corpus = true,
             other if other == "--key" || other.starts_with("--key=") => {
                 match take_opt_value(prog, "--key", other, rest, &mut i) {
-                    Ok(v) => key = v,
+                    Ok(v) => {
+                        key = v;
+                        key_explicit = true;
+                    }
                     Err(code) => return code,
                 }
             }
@@ -2568,9 +2724,11 @@ fn run_init(rest: &[&String]) -> u8 {
     cmd_init(&InitArgs {
         directory: directory.unwrap_or_else(|| ".".to_string()),
         key,
+        key_explicit,
         ticketing,
         profile,
         org_endpoint,
+        parent_corpus,
         json,
     }) as u8
 }

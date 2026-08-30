@@ -16,8 +16,27 @@ export interface CorpusMeta {
   sample?: boolean;
 }
 
+export interface SourceIdentity {
+  source: string;
+  id: string;
+}
+
+export interface OverrideProvenance {
+  state: 'overridden' | 'replacement';
+  parent: SourceIdentity;
+  replacement: SourceIdentity;
+  rationale: SourceIdentity;
+}
+
+export interface ArtifactProvenance {
+  source: string;
+  layer: 'local' | 'inherited';
+  pin?: string;
+  overrides?: OverrideProvenance[];
+}
+
 export interface Artifact {
-  /** Opaque stable artifact ID, e.g. "RAC-KTQ63DSC8SZW". Unique. */
+  /** Opaque stable artifact ID, unique within its owning source. */
   id: string;
   /** Human aliases, e.g. ["adr-027", "adr-027-ci-test-topology"]. */
   aliases: string[];
@@ -31,6 +50,8 @@ export interface Artifact {
   path: string;
   /** Body rendered to HTML at export time. Trusted — see contract. */
   body_html: string;
+  /** Present for manifest-backed exports; owns global record identity. */
+  provenance?: ArtifactProvenance;
 }
 
 export interface Relationship {
@@ -40,6 +61,11 @@ export interface Relationship {
   to: string;
   /** Edge type. Core emits only "relates-to"; the set stays open. */
   type: string;
+  /** Source-aware endpoints on manifest-backed exports. */
+  from_identity?: SourceIdentity;
+  to_identity?: SourceIdentity | null;
+  /** Provenance of the artifact which declared this edge. */
+  provenance?: ArtifactProvenance;
 }
 
 export interface AsDecidedExport {

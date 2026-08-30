@@ -16,6 +16,7 @@ use serde_json::Value;
 
 use crate::corpus::{ArtifactKey, ArtifactOrigin, ArtifactPath, CorpusLayer, Layer};
 use crate::derived::{CanonicalRedirect, DerivedIndex, SourceAwareArtifact};
+use crate::federation_generation::{GenerationMapping, GenerationRedirect, GRAPH_CONTRACT};
 use crate::index_format::{
     encode_segment, segment_payload, write_indexed, IndexFormatError, IndexedSegment, Reader,
     Writer,
@@ -33,6 +34,10 @@ pub const STORE_DIRNAME: &str = "store";
 /// deliberately never opened as v2; it therefore degrades to an ordinary
 /// cache miss instead of being reinterpreted without provenance (ADR-143).
 pub const STORE_LAYOUT_VERSION: &str = "v2";
+/// Graph-federation state is never decoded from the single-parent v2 tree.
+/// The segment schema is extended at the graph integration boundary, while
+/// this distinct namespace already guarantees old segments are cache misses.
+pub const GRAPH_STORE_LAYOUT_VERSION: &str = "v3";
 
 const SEG_HEADER: &str = "header.seg";
 const SEG_ENTRIES: &str = "entries.seg";
@@ -51,6 +56,7 @@ const SEG_KEYMAP: &str = "keymap.seg";
 const SEG_ARTIFACTPATHMAP: &str = "artifactpathmap.seg";
 const SEG_LAYERS: &str = "layers.seg";
 const SEG_REDIRECTS: &str = "redirects.seg";
+const SEG_GRAPH: &str = "graph.seg";
 
 const ALL_SEGMENTS: [&str; 17] = [
     SEG_HEADER,
@@ -110,11 +116,44 @@ pub fn corpus_content_hash(directory: &str, recursive: bool) -> String {
 // ---------------------------------------------------------------------------
 
 pub fn store_root(cache_dir: &Path) -> PathBuf {
-    cache_dir.join(STORE_DIRNAME).join(STORE_LAYOUT_VERSION)
+    store_root_for_layout(cache_dir, STORE_LAYOUT_VERSION)
 }
 
 pub fn store_dir(cache_dir: &Path, corpus_hash: &str) -> PathBuf {
-    store_root(cache_dir).join(corpus_hash)
+    store_dir_for_layout(cache_dir, STORE_LAYOUT_VERSION, corpus_hash)
+}
+
+pub fn graph_store_root(cache_dir: &Path) -> PathBuf {
+    store_root_for_layout(cache_dir, GRAPH_STORE_LAYOUT_VERSION)
+}
+
+pub fn graph_store_dir(cache_dir: &Path, generation: &str) -> Option<PathBuf> {
+    Some(store_dir_for_layout(
+        cache_dir,
+        GRAPH_STORE_LAYOUT_VERSION,
+        graph_store_directory_key(generation)?,
+    ))
+}
+
+fn graph_store_directory_key(generation: &str) -> Option<&str> {
+    valid_versioned_digest(generation, "sha256-v3:")
+}
+
+fn valid_versioned_digest<'a>(value: &'a str, prefix: &str) -> Option<&'a str> {
+    value.strip_prefix(prefix).filter(|digest| {
+        digest.len() == 64
+            && digest
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    })
+}
+
+fn store_root_for_layout(cache_dir: &Path, layout: &str) -> PathBuf {
+    cache_dir.join(STORE_DIRNAME).join(layout)
+}
+
+fn store_dir_for_layout(cache_dir: &Path, layout: &str, key: &str) -> PathBuf {
+    store_root_for_layout(cache_dir, layout).join(key)
 }
 
 // ---------------------------------------------------------------------------
@@ -642,27 +681,139 @@ pub fn write_store(
     bundle_version: &str,
     derived: &DerivedIndex,
 ) -> bool {
-    let root = store_root(cache_dir);
-    let final_dir = root.join(corpus_hash);
+    write_store_in_layout(
+        cache_dir,
+        STORE_LAYOUT_VERSION,
+        corpus_hash,
+        corpus_hash,
+        bundle_version,
+        derived,
+        None,
+    )
+}
+
+/// Stable graph-only state persisted beside the derived read model.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GraphStoreMetadata {
+    pub generation: String,
+    pub layers: Vec<CorpusLayer>,
+    pub mappings: Vec<GenerationMapping>,
+    pub terminal_redirects: Vec<GenerationRedirect>,
+}
+
+impl GraphStoreMetadata {
+    pub fn from_composition(
+        generation: impl Into<String>,
+        layers: Vec<CorpusLayer>,
+        composition: &crate::graph_composition::GraphComposition,
+    ) -> Self {
+        Self {
+            generation: generation.into(),
+            layers,
+            mappings: composition
+                .ordered_overrides()
+                .iter()
+                .map(|mapping| GenerationMapping {
+                    owner_rank: mapping.owner_rank,
+                    owner_source: mapping.owner_source.clone(),
+                    target: mapping.target.clone(),
+                    replacement: mapping.replacement.clone(),
+                    rationale: mapping.rationale.clone(),
+                })
+                .collect(),
+            terminal_redirects: composition
+                .terminal_redirects()
+                .iter()
+                .map(|(target, terminal)| GenerationRedirect {
+                    target: target.clone(),
+                    terminal: terminal.clone(),
+                })
+                .collect(),
+        }
+    }
+
+    /// Confirm that a fresh graph projection is the exact model described by
+    /// this metadata before it can become resident. Store opens perform the
+    /// same check after decoding; exposing the predicate keeps cache-disabled
+    /// graph reads on the identical fail-closed boundary.
+    pub fn matches_derived(&self, derived: &DerivedIndex) -> bool {
+        graph_metadata_matches_derived(self, derived)
+    }
+}
+
+/// Write one graph-federation generation under the isolated `store/v3`
+/// namespace. `generation` is the full canonical `sha256-v3:` text.
+pub fn write_graph_store(
+    cache_dir: &Path,
+    generation: &str,
+    bundle_version: &str,
+    derived: &DerivedIndex,
+    metadata: &GraphStoreMetadata,
+) -> bool {
+    let Some(directory_key) = graph_store_directory_key(generation) else {
+        return false;
+    };
+    if metadata.generation != generation || !graph_metadata_matches_derived(metadata, derived) {
+        return false;
+    }
+    write_store_in_layout(
+        cache_dir,
+        GRAPH_STORE_LAYOUT_VERSION,
+        directory_key,
+        generation,
+        bundle_version,
+        derived,
+        Some(metadata),
+    )
+}
+
+fn write_store_in_layout(
+    cache_dir: &Path,
+    layout: &str,
+    directory_key: &str,
+    corpus_hash: &str,
+    bundle_version: &str,
+    derived: &DerivedIndex,
+    graph_metadata: Option<&GraphStoreMetadata>,
+) -> bool {
+    let root = store_root_for_layout(cache_dir, layout);
+    let final_dir = root.join(directory_key);
     if final_dir.is_dir() {
         // Content addressing: a same-hash store is byte-equivalent within one
         // format. Probe readability with the full open; replace when bad.
-        if MmapIndexReader::open(&final_dir, corpus_hash, bundle_version).is_ok() {
+        let opened = MmapIndexReader::open(&final_dir, corpus_hash, bundle_version).ok();
+        let model_valid = opened.is_some()
+            && graph_metadata
+                .is_none_or(|expected| graph_metadata_matches_mapped(expected, opened.as_ref().unwrap()));
+        let graph_valid = graph_metadata.is_none_or(|expected| {
+            encode_graph_metadata(expected)
+                .ok()
+                .zip(fs::read(final_dir.join(SEG_GRAPH)).ok())
+                .is_some_and(|(expected_bytes, actual_bytes)| expected_bytes == actual_bytes)
+        });
+        if model_valid && graph_valid {
             return true;
         }
         remove_tree(&final_dir);
     }
     let encode_started = crate::timing::start();
-    let Ok(segments) = encode_segments(corpus_hash, bundle_version, derived) else {
+    let Ok(mut segments) = encode_segments(corpus_hash, bundle_version, derived) else {
         crate::timing::emit_since("store.encode", encode_started, &[("success", 0)]);
         return false;
     };
+    if let Some(metadata) = graph_metadata {
+        let Ok(payload) = encode_graph_metadata(metadata) else {
+            crate::timing::emit_since("store.encode", encode_started, &[("success", 0)]);
+            return false;
+        };
+        segments.push((SEG_GRAPH, payload));
+    }
     crate::timing::emit_since(
         "store.encode",
         encode_started,
         &[("success", 1), ("segments", segments.len() as u64)],
     );
-    let tmp = root.join(format!(".{corpus_hash}.tmp-{}", temp_suffix()));
+    let tmp = root.join(format!(".{directory_key}.tmp-{}", temp_suffix()));
     let timing = crate::timing::enabled();
     let mut write_duration = std::time::Duration::ZERO;
     let mut sync_duration = std::time::Duration::ZERO;
@@ -713,6 +864,13 @@ pub fn write_store(
 /// Best-effort removal of a store directory (used to clear a corrupt one).
 pub fn remove_store(cache_dir: &Path, corpus_hash: &str) {
     remove_tree(&store_dir(cache_dir, corpus_hash));
+}
+
+/// Best-effort removal of one graph-generation store.
+pub fn remove_graph_store(cache_dir: &Path, generation: &str) {
+    if let Some(directory) = graph_store_dir(cache_dir, generation) {
+        remove_tree(&directory);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1244,6 +1402,343 @@ pub fn open_store(
     MmapIndexReader::open(&directory, corpus_hash, bundle_version).ok()
 }
 
+/// Open one graph generation from `store/v3`, or return a cache miss. V1 and
+/// V2 directories are never considered by this path.
+pub fn open_graph_store(
+    cache_dir: &Path,
+    generation: &str,
+    bundle_version: &str,
+    expected: &GraphStoreMetadata,
+) -> Option<GraphMmapIndexReader> {
+    if expected.generation != generation {
+        return None;
+    }
+    let directory = graph_store_dir(cache_dir, generation)?;
+    if !directory.is_dir() {
+        return None;
+    }
+    let model = MmapIndexReader::open(&directory, generation, bundle_version).ok()?;
+    let metadata = decode_graph_metadata(&fs::read(directory.join(SEG_GRAPH)).ok()?).ok()?;
+    if metadata != canonical_graph_metadata(expected)
+        || !graph_metadata_matches_mapped(&metadata, &model)
+    {
+        return None;
+    }
+    Some(GraphMmapIndexReader { model, metadata })
+}
+
+/// One validated graph store. The derived segments and graph-only mapping
+/// state are opened atomically from the same versioned directory.
+pub struct GraphMmapIndexReader {
+    pub model: MmapIndexReader,
+    pub metadata: GraphStoreMetadata,
+}
+
+const MAX_GRAPH_LAYERS: usize = 257;
+const MAX_GRAPH_MAPPINGS: usize = 4_096;
+const MAX_GRAPH_REDIRECTS: usize = 4_096;
+
+fn canonical_graph_metadata(metadata: &GraphStoreMetadata) -> GraphStoreMetadata {
+    let mut canonical = metadata.clone();
+    canonical.layers.sort();
+    canonical.mappings.sort_by(graph_mapping_order);
+    canonical
+        .terminal_redirects
+        .sort_by(|left, right| left.target.cmp(&right.target));
+    canonical
+}
+
+fn graph_mapping_order(
+    left: &GenerationMapping,
+    right: &GenerationMapping,
+) -> std::cmp::Ordering {
+    (
+        left.owner_rank,
+        &left.owner_source,
+        &left.target,
+        &left.replacement,
+        &left.rationale,
+    )
+        .cmp(&(
+            right.owner_rank,
+            &right.owner_source,
+            &right.target,
+            &right.replacement,
+            &right.rationale,
+        ))
+}
+
+fn validate_graph_metadata_shape(metadata: &GraphStoreMetadata) -> Result<(), IndexFormatError> {
+    if graph_store_directory_key(&metadata.generation).is_none() {
+        return Err(IndexFormatError("invalid graph generation".into()));
+    }
+    if metadata.layers.is_empty() || metadata.layers.len() > MAX_GRAPH_LAYERS {
+        return Err(IndexFormatError("invalid graph layer count".into()));
+    }
+    if metadata.mappings.len() > MAX_GRAPH_MAPPINGS {
+        return Err(IndexFormatError("graph mapping limit exceeded".into()));
+    }
+    if metadata.terminal_redirects.len() > MAX_GRAPH_REDIRECTS {
+        return Err(IndexFormatError("graph redirect limit exceeded".into()));
+    }
+
+    let mut sources = std::collections::BTreeSet::new();
+    let mut local_count = 0usize;
+    for layer in &metadata.layers {
+        if !crate::scaffold::valid_corpus_source(&layer.source) || !sources.insert(&layer.source) {
+            return Err(IndexFormatError("invalid or duplicate graph source".into()));
+        }
+        match layer.layer {
+            Layer::Local => {
+                local_count += 1;
+                if layer.pin.is_some() || layer.alias.is_some() {
+                    return Err(IndexFormatError(
+                        "root graph layer must omit pin and alias".into(),
+                    ));
+                }
+            }
+            Layer::Inherited => {
+                if layer
+                    .pin
+                    .as_deref()
+                    .and_then(|pin| valid_versioned_digest(pin, "sha256-v2:"))
+                    .is_none()
+                    || layer.alias.is_some()
+                {
+                    return Err(IndexFormatError(
+                        "inherited graph layer requires a canonical v2 pin and no global alias"
+                            .into(),
+                    ));
+                }
+            }
+        }
+    }
+    if local_count != 1 {
+        return Err(IndexFormatError(
+            "graph metadata must contain exactly one root layer".into(),
+        ));
+    }
+
+    let valid_key = |key: &ArtifactKey| {
+        sources.contains(&key.source)
+            && !key.canonical_id.is_empty()
+            && key.canonical_id.len() <= 4096
+            && !key.canonical_id.contains("::")
+    };
+    let mut mapping_targets = std::collections::BTreeSet::new();
+    for mapping in &metadata.mappings {
+        if !sources.contains(&mapping.owner_source)
+            || !valid_key(&mapping.target)
+            || !valid_key(&mapping.replacement)
+            || !valid_key(&mapping.rationale)
+            || mapping.replacement.source != mapping.owner_source
+            || mapping.rationale.source != mapping.owner_source
+            || !mapping_targets.insert(&mapping.target)
+        {
+            return Err(IndexFormatError("invalid graph mapping row".into()));
+        }
+    }
+    let mut redirect_targets = std::collections::BTreeSet::new();
+    for redirect in &metadata.terminal_redirects {
+        if !valid_key(&redirect.target)
+            || !valid_key(&redirect.terminal)
+            || redirect.target == redirect.terminal
+            || !redirect_targets.insert(&redirect.target)
+        {
+            return Err(IndexFormatError("invalid graph redirect row".into()));
+        }
+    }
+    Ok(())
+}
+
+fn graph_metadata_matches_derived(metadata: &GraphStoreMetadata, derived: &DerivedIndex) -> bool {
+    if validate_graph_metadata_shape(metadata).is_err() {
+        return false;
+    }
+    let mut layers = derived.layers.clone();
+    layers.sort();
+    layers.dedup();
+    if layers != canonical_graph_metadata(metadata).layers {
+        return false;
+    }
+    let identity_keys: std::collections::BTreeSet<ArtifactKey> = derived
+        .resolution
+        .entries
+        .iter()
+        .filter_map(|entry| entry.key.clone())
+        .collect();
+    graph_rows_match_model(metadata, &identity_keys, &derived.resolution.canonical_redirects)
+}
+
+fn graph_metadata_matches_mapped(
+    metadata: &GraphStoreMetadata,
+    model: &MmapIndexReader,
+) -> bool {
+    if validate_graph_metadata_shape(metadata).is_err() {
+        return false;
+    }
+    let Ok(mut layers) = model.layers() else {
+        return false;
+    };
+    layers.sort();
+    layers.dedup();
+    if layers != canonical_graph_metadata(metadata).layers {
+        return false;
+    }
+    let Ok(identity_count) = model.identity_count() else {
+        return false;
+    };
+    let mut identity_keys = std::collections::BTreeSet::new();
+    for docid in 0..identity_count {
+        let Ok(entry) = model.identity_entry(docid) else {
+            return false;
+        };
+        let Some(key) = entry.key else {
+            return false;
+        };
+        identity_keys.insert(key);
+    }
+    let Ok(redirects) = model.canonical_redirects() else {
+        return false;
+    };
+    graph_rows_match_model(metadata, &identity_keys, &redirects)
+}
+
+fn graph_rows_match_model(
+    metadata: &GraphStoreMetadata,
+    identity_keys: &std::collections::BTreeSet<ArtifactKey>,
+    redirects: &[CanonicalRedirect],
+) -> bool {
+    let metadata_mappings: std::collections::BTreeSet<_> = metadata
+        .mappings
+        .iter()
+        .map(|mapping| {
+            (
+                mapping.target.clone(),
+                mapping.replacement.clone(),
+                mapping.rationale.clone(),
+            )
+        })
+        .collect();
+    let model_mappings: std::collections::BTreeSet<_> = redirects
+        .iter()
+        .map(|mapping| {
+            (
+                mapping.parent.clone(),
+                mapping.replacement.clone(),
+                mapping.rationale.clone(),
+            )
+        })
+        .collect();
+    metadata_mappings == model_mappings
+        && metadata.mappings.iter().all(|mapping| {
+            identity_keys.contains(&mapping.target)
+                && identity_keys.contains(&mapping.replacement)
+                && identity_keys.contains(&mapping.rationale)
+        })
+        && metadata.terminal_redirects.iter().all(|redirect| {
+            identity_keys.contains(&redirect.target) && identity_keys.contains(&redirect.terminal)
+        })
+}
+
+fn encode_graph_metadata(metadata: &GraphStoreMetadata) -> Result<Vec<u8>, IndexFormatError> {
+    validate_graph_metadata_shape(metadata)?;
+    let metadata = canonical_graph_metadata(metadata);
+    let mut writer = Writer::new();
+    writer.text(std::str::from_utf8(GRAPH_CONTRACT).expect("ASCII graph contract"))?;
+    writer.text(&metadata.generation)?;
+
+    writer.u32(metadata.layers.len() as u64)?;
+    for layer in &metadata.layers {
+        write_layer(&mut writer, layer)?;
+    }
+
+    writer.u32(metadata.mappings.len() as u64)?;
+    for mapping in &metadata.mappings {
+        writer.u32(mapping.owner_rank as u64)?;
+        writer.text(&mapping.owner_source)?;
+        write_required_artifact_key(&mut writer, &mapping.target)?;
+        write_required_artifact_key(&mut writer, &mapping.replacement)?;
+        write_required_artifact_key(&mut writer, &mapping.rationale)?;
+    }
+
+    writer.u32(metadata.terminal_redirects.len() as u64)?;
+    for redirect in &metadata.terminal_redirects {
+        write_required_artifact_key(&mut writer, &redirect.target)?;
+        write_required_artifact_key(&mut writer, &redirect.terminal)?;
+    }
+    Ok(encode_segment(&writer.payload()))
+}
+
+fn decode_graph_metadata(bytes: &[u8]) -> Result<GraphStoreMetadata, IndexFormatError> {
+    let payload = segment_payload(bytes)?;
+    let mut reader = Reader::new(payload);
+    if reader.text()?.as_bytes() != GRAPH_CONTRACT {
+        return Err(IndexFormatError("graph contract mismatch".into()));
+    }
+    let generation = reader.text()?;
+    let layer_count = reader.u32()?;
+    if layer_count as usize > MAX_GRAPH_LAYERS {
+        return Err(IndexFormatError("invalid graph layer count".into()));
+    }
+    let mut layers = Vec::with_capacity(layer_count.min(1 << 20) as usize);
+    for _ in 0..layer_count {
+        layers.push(read_layer(&mut reader)?);
+    }
+    let mapping_count = reader.u32()?;
+    if mapping_count as usize > MAX_GRAPH_MAPPINGS {
+        return Err(IndexFormatError("graph mapping limit exceeded".into()));
+    }
+    let mut mappings = Vec::with_capacity(mapping_count.min(1 << 20) as usize);
+    for _ in 0..mapping_count {
+        mappings.push(GenerationMapping {
+            owner_rank: reader.u32()? as usize,
+            owner_source: reader.text()?,
+            target: read_required_artifact_key(&mut reader)?,
+            replacement: read_required_artifact_key(&mut reader)?,
+            rationale: read_required_artifact_key(&mut reader)?,
+        });
+    }
+    let redirect_count = reader.u32()?;
+    if redirect_count as usize > MAX_GRAPH_REDIRECTS {
+        return Err(IndexFormatError("graph redirect limit exceeded".into()));
+    }
+    let mut terminal_redirects = Vec::with_capacity(redirect_count.min(1 << 20) as usize);
+    for _ in 0..redirect_count {
+        terminal_redirects.push(GenerationRedirect {
+            target: read_required_artifact_key(&mut reader)?,
+            terminal: read_required_artifact_key(&mut reader)?,
+        });
+    }
+    reader.finish()?;
+    let metadata = GraphStoreMetadata {
+        generation,
+        layers,
+        mappings,
+        terminal_redirects,
+    };
+    validate_graph_metadata_shape(&metadata)?;
+    if encode_graph_metadata(&metadata)? != bytes {
+        return Err(IndexFormatError(
+            "graph metadata is not in canonical order".into(),
+        ));
+    }
+    Ok(metadata)
+}
+
+fn write_required_artifact_key(
+    writer: &mut Writer,
+    key: &ArtifactKey,
+) -> Result<(), IndexFormatError> {
+    writer.text(&key.source)?;
+    writer.text(&key.canonical_id)?;
+    Ok(())
+}
+
+fn read_required_artifact_key(reader: &mut Reader<'_>) -> Result<ArtifactKey, IndexFormatError> {
+    Ok(ArtifactKey::new(reader.text()?, reader.text()?))
+}
+
 // ---------------------------------------------------------------------------
 // Per-file validation-result store (`.vseg`, ADR-106) — codec only here;
 // the incremental-validate seam consumes it (INDEX-PLAN B4).
@@ -1560,4 +2055,227 @@ fn atomic_write(root: &Path, key: &str, target: &Path, payload: &[u8]) -> bool {
         return false;
     }
     true
+}
+
+#[cfg(test)]
+mod graph_layout_tests {
+    use super::*;
+
+    fn graph_metadata_fixture() -> GraphStoreMetadata {
+        GraphStoreMetadata {
+            generation: format!("sha256-v3:{}", "b".repeat(64)),
+            layers: vec![
+                CorpusLayer {
+                    source: "acme/standards".into(),
+                    layer: Layer::Inherited,
+                    pin: Some(format!("sha256-v2:{}", "a".repeat(64))),
+                    alias: None,
+                },
+                CorpusLayer::local("acme/app"),
+            ],
+            mappings: vec![GenerationMapping {
+                owner_rank: 1,
+                owner_source: "acme/app".into(),
+                target: ArtifactKey::new("acme/standards", "STD-0123456789AB"),
+                replacement: ArtifactKey::new("acme/app", "APP-0123456789AB"),
+                rationale: ArtifactKey::new("acme/app", "APP-ABCDEFGHJKMN"),
+            }],
+            terminal_redirects: vec![GenerationRedirect {
+                target: ArtifactKey::new("acme/standards", "STD-0123456789AB"),
+                terminal: ArtifactKey::new("acme/app", "APP-0123456789AB"),
+            }],
+        }
+    }
+
+    fn identity_entry(key: &ArtifactKey, layer: &CorpusLayer) -> IndexEntry {
+        IndexEntry {
+            key: Some(key.clone()),
+            artifact_path: Some(ArtifactPath::new(
+                key.source.clone(),
+                format!("{}.md", key.canonical_id),
+            )),
+            origin: Some(layer.origin()),
+            id: key.canonical_id.clone(),
+            artifact_type: "decision".into(),
+            title: None,
+            path: format!("{}.md", key.canonical_id),
+            aliases: vec![key.canonical_id.clone()],
+            search_sections: Vec::new(),
+            inbound_count: 0,
+            tags: Vec::new(),
+        }
+    }
+
+    fn graph_derived_fixture(metadata: &GraphStoreMetadata) -> DerivedIndex {
+        let canonical = canonical_graph_metadata(metadata);
+        let layer_by_source: std::collections::BTreeMap<_, _> = canonical
+            .layers
+            .iter()
+            .map(|layer| (layer.source.clone(), layer))
+            .collect();
+        let mut keys = std::collections::BTreeSet::new();
+        for mapping in &canonical.mappings {
+            keys.extend([
+                mapping.target.clone(),
+                mapping.replacement.clone(),
+                mapping.rationale.clone(),
+            ]);
+        }
+        for redirect in &canonical.terminal_redirects {
+            keys.extend([redirect.target.clone(), redirect.terminal.clone()]);
+        }
+        let entries = keys
+            .iter()
+            .map(|key| identity_entry(key, layer_by_source[&key.source]))
+            .collect();
+        DerivedIndex {
+            layers: canonical.layers,
+            source_artifacts: Vec::new(),
+            resolution: Box::new(crate::derived::ResolutionProjection {
+                entries,
+                canonical_redirects: canonical
+                    .mappings
+                    .iter()
+                    .map(|mapping| CanonicalRedirect {
+                        parent: mapping.target.clone(),
+                        replacement: mapping.replacement.clone(),
+                        rationale: mapping.rationale.clone(),
+                    })
+                    .collect(),
+            }),
+            index_entries: Vec::new(),
+            field_tokens: Vec::new(),
+            relationships: Vec::new(),
+            live_decision_keys: Vec::new(),
+            live_decision_paths: Vec::new(),
+            portfolio_summary: serde_json::json!({}),
+            scope_rows: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn graph_store_isolated_from_v2_with_portable_directory_key() {
+        let cache = Path::new("cache");
+        let digest = "a".repeat(64);
+        let generation = format!("sha256-v3:{digest}");
+        assert_eq!(store_root(cache), cache.join("store/v2"));
+        assert_eq!(graph_store_root(cache), cache.join("store/v3"));
+        assert_eq!(
+            graph_store_dir(cache, &generation),
+            Some(cache.join("store/v3").join(digest))
+        );
+        assert_ne!(
+            graph_store_dir(cache, &generation),
+            Some(store_dir(cache, &generation))
+        );
+    }
+
+    #[test]
+    fn malformed_generation_cannot_escape_store_root() {
+        let cache = Path::new("cache");
+        assert!(graph_store_dir(cache, "sha256-v3:../../outside").is_none());
+        assert!(graph_store_dir(cache, &format!("sha256-v3:{}", "A".repeat(64))).is_none());
+    }
+
+    #[test]
+    fn graph_metadata_round_trips_in_canonical_order() {
+        let metadata = graph_metadata_fixture();
+        let encoded = encode_graph_metadata(&metadata).expect("encode graph metadata");
+        let decoded = decode_graph_metadata(&encoded).expect("decode graph metadata");
+        let mut expected = metadata;
+        expected.layers.sort();
+        assert_eq!(decoded, expected);
+
+        let mut trailing = segment_payload(&encoded).unwrap().to_vec();
+        trailing.push(0);
+        assert!(decode_graph_metadata(&encode_segment(&trailing)).is_err());
+    }
+
+    #[test]
+    fn graph_metadata_rejects_noncanonical_and_incomplete_rows() {
+        let mut metadata = GraphStoreMetadata {
+            generation: format!("sha256-v3:{}", "b".repeat(64)),
+            layers: vec![CorpusLayer::local("acme/app")],
+            mappings: Vec::new(),
+            terminal_redirects: Vec::new(),
+        };
+        assert!(encode_graph_metadata(&metadata).is_ok());
+
+        metadata.generation = "not-a-generation".into();
+        assert!(encode_graph_metadata(&metadata).is_err());
+        metadata.generation = format!("sha256-v3:{}", "b".repeat(64));
+        metadata.layers.push(CorpusLayer::local("acme/app"));
+        assert!(encode_graph_metadata(&metadata).is_err());
+    }
+
+    #[test]
+    fn graph_store_rejects_corrupt_or_request_mismatched_metadata() {
+        let cache = std::env::temp_dir().join(format!(
+            "asdecided-graph-store-{}-{}",
+            std::process::id(),
+            temp_suffix()
+        ));
+        let metadata = graph_metadata_fixture();
+        let derived = graph_derived_fixture(&metadata);
+        assert!(write_graph_store(
+            &cache,
+            &metadata.generation,
+            crate::derived::SCHEMA_VERSION,
+            &derived,
+            &metadata,
+        ));
+        assert!(open_store(
+            &cache,
+            &metadata.generation,
+            crate::derived::SCHEMA_VERSION
+        )
+        .is_none());
+        assert!(open_graph_store(
+            &cache,
+            &metadata.generation,
+            crate::derived::SCHEMA_VERSION,
+            &metadata,
+        )
+        .is_some());
+
+        let mut request_mismatch = metadata.clone();
+        request_mismatch.mappings.clear();
+        request_mismatch.terminal_redirects.clear();
+        assert!(open_graph_store(
+            &cache,
+            &metadata.generation,
+            crate::derived::SCHEMA_VERSION,
+            &request_mismatch,
+        )
+        .is_none());
+
+        let directory = graph_store_dir(&cache, &metadata.generation).unwrap();
+        let corrupt = encode_graph_metadata(&request_mismatch).unwrap();
+        std::fs::write(directory.join(SEG_GRAPH), corrupt).unwrap();
+        assert!(open_graph_store(
+            &cache,
+            &metadata.generation,
+            crate::derived::SCHEMA_VERSION,
+            &metadata,
+        )
+        .is_none());
+
+        let mut wrong_derived = graph_derived_fixture(&metadata);
+        wrong_derived.resolution.canonical_redirects.clear();
+        assert!(!write_graph_store(
+            &cache,
+            &metadata.generation,
+            crate::derived::SCHEMA_VERSION,
+            &wrong_derived,
+            &metadata,
+        ));
+        assert!(!write_graph_store(
+            &cache,
+            "not-a-generation",
+            crate::derived::SCHEMA_VERSION,
+            &derived,
+            &metadata,
+        ));
+        let _ = std::fs::remove_dir_all(cache);
+    }
 }

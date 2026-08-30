@@ -70,6 +70,19 @@ pub enum HookInstallError {
     Io(String),
 }
 
+/// Resolve the concrete hook destination after applying the released `.git`
+/// directory check. The command layer uses this path for read-only federation
+/// preflight before installation creates a hooks directory or file.
+pub fn install_target(target_dir: &str, style: &str) -> Result<String, HookInstallError> {
+    let git_dir = Path::new(target_dir).join(".git");
+    if !git_dir.is_dir() {
+        return Err(HookInstallError::NotAGitWorkTree(format!(
+            "no .git directory in {target_dir}; run `decided hook install` from a git repository root"
+        )));
+    }
+    Ok(py_join(target_dir, &[".git", "hooks", style]))
+}
+
 /// `install_hook(target_dir, style)` — write the bundled `style` script to
 /// `<dir>/.git/hooks/<style>` and make it executable (git requires the exec
 /// bit; the oracle ORs `S_IXUSR|S_IXGRP|S_IXOTH` onto the fresh file's mode,
@@ -78,13 +91,7 @@ pub fn install_hook(target_dir: &str, style: &str) -> Result<InstalledHook, Hook
     let content = hook_bytes(style).expect("argparse-validated style");
 
     let git_dir = Path::new(target_dir).join(".git");
-    if !git_dir.is_dir() {
-        return Err(HookInstallError::NotAGitWorkTree(format!(
-            "no .git directory in {target_dir}; run `decided hook install` from a git repository root"
-        )));
-    }
-
-    let dest_display = py_join(target_dir, &[".git", "hooks", style]);
+    let dest_display = install_target(target_dir, style)?;
     let dest = Path::new(&dest_display);
     if dest.exists() {
         return Err(HookInstallError::FileExists(format!(

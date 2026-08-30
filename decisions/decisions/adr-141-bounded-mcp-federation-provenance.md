@@ -7,6 +7,11 @@ type: decision
 
 ## Context
 
+> **Amended by ADR-146 and ADR-147.** Version-2 ID arguments also accept global
+> source qualification. Version-2 response provenance carries the complete
+> ordered override chain atomically or returns ADR-128's hard budget error;
+> audit records remain the smaller fixed identity and never copy mappings.
+
 MCP clients need to distinguish local and inherited results and identify the
 verified parent pin. Adding federation-specific tools would expand the standing
 surface and force agents to choose between local and federated retrieval.
@@ -90,14 +95,16 @@ Rejected. Federation does not get a context-flooding exception to ADR-128.
 - adr-127
 - adr-128
 - adr-135
-- adr-136
 - adr-138
 - adr-139
 - adr-140
+- adr-146
+- adr-147
 
 ## Related Designs
 
 - corpus-federation-mechanism
+- corpus-federation-graph-composition
 
 ## Related Requirements
 

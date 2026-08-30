@@ -87,6 +87,37 @@ Composition needs one resolver.
     )
 }
 
+fn item_with_canonical_and_legacy(
+    relative_path: &str,
+    canonical_id: &str,
+    legacy_id: &str,
+) -> CorpusItem {
+    let text = format!(
+        "---\nschema_version: 1\nid: {canonical_id}\ntype: decision\n---\n# Qualified fixture\n\n## ID\n\n{legacy_id}\n\n## Status\n\nAccepted\n\n## Context\n\nComposition fixture.\n\n## Decision\n\nKeep qualification canonical.\n\n## Consequences\n\nAliases cannot bypass qualification.\n"
+    );
+    let origin = CorpusLayer::inherited(
+        PARENT_SOURCE,
+        PARENT_ALIAS,
+        "sha256:0123456789abcdef",
+    )
+    .origin();
+    let display = format!("/runtime/{PARENT_SOURCE}/{relative_path}");
+    CorpusItem::new(
+        display.clone(),
+        relative_path.to_string(),
+        parse_text(&text, &display),
+        spec_for("decision"),
+        origin,
+        PhysicalArtifactLocator::new(
+            PhysicalCorpusLocator::new(
+                format!("/runtime/{PARENT_SOURCE}"),
+                format!("/runtime/{PARENT_SOURCE}/decisions"),
+            ),
+            display,
+        ),
+    )
+}
+
 fn declaration(parent_id: &str, replacement: &str, rationale: &str) -> OverrideDeclaration {
     OverrideDeclaration::parse(
         &format!("{PARENT_ALIAS}::{parent_id}"),
@@ -178,6 +209,15 @@ fn aliases_are_unique_only_and_qualification_requires_a_canonical_id() {
         corpus.resolve("shared"),
         Err(LookupError::Ambiguous(keys)) if keys.len() == 2
     ));
+    let duplicate = corpus.resolve_identity("shared");
+    assert_eq!(duplicate.outcome, rac_engine::resolve::OUTCOME_DUPLICATE);
+    assert_eq!(
+        duplicate.duplicate_paths,
+        vec![
+            "acme/app::shared.md".to_string(),
+            "acme/standards::shared.md".to_string(),
+        ]
+    );
     assert_eq!(
         lookup_error(&corpus, "standards::shared"),
         LookupError::QualifiedCanonicalRequired
@@ -188,6 +228,33 @@ fn aliases_are_unique_only_and_qualification_requires_a_canonical_id() {
     );
     let resolved = corpus.resolve("standards::std-001").unwrap();
     assert_eq!(resolved.key, ArtifactKey::new(PARENT_SOURCE, "STD-001"));
+}
+
+#[test]
+fn qualified_resolution_rejects_legacy_and_unknown_aliases() {
+    let inherited = item_with_canonical_and_legacy(
+        "qualified.md",
+        "STD-KWJ4VMKVSS66",
+        "standards::legacy-name",
+    );
+    let corpus = ComposedCorpus::compose(Vec::new(), vec![inherited], parent(), Vec::new());
+
+    assert_eq!(
+        corpus.resolve_identity("standards::STD-KWJ4VMKVSS66").outcome,
+        rac_engine::resolve::OUTCOME_RESOLVED
+    );
+    for invalid in [
+        "standards::legacy-name",
+        "other::STD-KWJ4VMKVSS66",
+        "standards::UNKNOWN",
+        "standards::STD::CANONICAL",
+    ] {
+        assert_eq!(
+            corpus.resolve_identity(invalid).outcome,
+            rac_engine::resolve::OUTCOME_NOT_FOUND,
+            "{invalid} must not bypass qualified canonical validation"
+        );
+    }
 }
 
 #[test]

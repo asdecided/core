@@ -22,6 +22,8 @@ fn artifact(path: String, id: &str, status: &str, title: &str, tags: &[&str]) ->
         path,
         body_html: String::new(),
         tags: tags.iter().map(|tag| (*tag).to_string()).collect(),
+        provenance: None,
+        graph_provenance: None,
     }
 }
 
@@ -58,6 +60,13 @@ fn exports_truthful_okf_v02_carrier() {
             from: "RAC-01JY4M8X2QZ7".to_string(),
             to: "RAC-01JY4M8X2QZ8".to_string(),
             edge_type: "related decisions".to_string(),
+            from_identity: None,
+            to_identity: None,
+            provenance: None,
+            graph_provenance: None,
+            authored_token: None,
+            historical_candidates: Vec::new(),
+            effective_terminal: None,
         }],
     };
     let recency = vec![

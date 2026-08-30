@@ -61,6 +61,22 @@ decisions/
 Existing artifact IDs such as `RAC-ABC123DEF456` are durable identities and do
 not change with the product name.
 
+## Federate corpora
+
+Manifest version 2 composes several pinned, materialised parent corpora into
+one source-aware DAG while preserving every source, diamond route, override,
+and read-only boundary:
+
+```sh
+decided corpus status decisions/
+decided corpus explain organization/standards::ADR-01K000000001 decisions/
+```
+
+Federation is fully offline and forge-neutral: the engine consumes verified
+working-tree bytes, not GitHub APIs or a hosted index. See the
+[federation guide](docs/federation.md) and
+[runnable multi-parent example](examples/federation/).
+
 ## Migrate an existing repository
 
 Migration is explicit and never runs during an ordinary command:

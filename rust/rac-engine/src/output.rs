@@ -12,7 +12,7 @@ use crate::classify::{TypeScore, CONFIDENCE_THRESHOLD};
 use crate::commands::{DirectoryValidation, StdinCorpusValidation, STATUS_INVALID};
 use crate::diff::Diff;
 use crate::doctor::{DoctorFinding, DoctorReport};
-use crate::export::{CorpusExport, DocumentsExport, GraphExport};
+use crate::export::{CorpusExport, DocumentsExport, ExportIdentity, GraphExport};
 use crate::gate::{GateFinding, GateReport};
 use crate::improve::ImprovementResult;
 use crate::inspect::{DirectoryInspection, InspectionResult};
@@ -336,6 +336,14 @@ pub fn render_validate_dir_human(result: &DirectoryValidation) -> String {
                 &issue.message,
             );
         }
+        if let (Some(source_route), Some(route_count)) = (&f.source_route, f.route_count) {
+            lines.push(format!(
+                "    source route: {} ({} verified physical route{})",
+                source_route.join(" -> "),
+                route_count,
+                if route_count == 1 { "" } else { "s" }
+            ));
+        }
         lines.push(String::new());
     }
 
@@ -411,8 +419,19 @@ pub fn render_validate_dir_json(result: &DirectoryValidation) -> String {
                 "issues".into(),
                 Value::Array(f.issues.iter().map(issue_value).collect()),
             );
-            if let Some(origin) = &f.origin {
-                m.insert("provenance".into(), artifact_origin_value(origin));
+            if f.origin.is_some() || f.source_route.is_some() || f.route_count.is_some() {
+                let mut provenance = f
+                    .origin
+                    .as_ref()
+                    .and_then(|origin| artifact_origin_value(origin).as_object().cloned())
+                    .unwrap_or_default();
+                if let Some(source_route) = &f.source_route {
+                    provenance.insert("source_route".into(), json!(source_route));
+                }
+                if let Some(route_count) = f.route_count {
+                    provenance.insert("route_count".into(), json!(route_count));
+                }
+                m.insert("provenance".into(), Value::Object(provenance));
             }
             Value::Object(m)
         })
@@ -572,7 +591,25 @@ pub fn render_validate_sarif(result: &DirectoryValidation) -> String {
                 message: issue.message.clone(),
                 uri: quote_uri(&file.path),
                 line: issue.line,
-                properties: file.origin.as_ref().map(artifact_origin_value),
+                properties: if file.origin.is_some()
+                    || file.source_route.is_some()
+                    || file.route_count.is_some()
+                {
+                    let mut properties = file
+                        .origin
+                        .as_ref()
+                        .and_then(|origin| artifact_origin_value(origin).as_object().cloned())
+                        .unwrap_or_default();
+                    if let Some(source_route) = &file.source_route {
+                        properties.insert("source_route".into(), json!(source_route));
+                    }
+                    if let Some(route_count) = file.route_count {
+                        properties.insert("route_count".into(), json!(route_count));
+                    }
+                    Some(Value::Object(properties))
+                } else {
+                    None
+                },
             });
         }
     }
@@ -697,6 +734,9 @@ pub fn render_relationships_json(report: &RelationshipReport) -> String {
             m.insert("path".into(), json!(artifact.path));
             m.insert("type".into(), json!(artifact.type_name));
             m.insert("relationships".into(), Value::Object(relationships));
+            if let Some(origin) = &artifact.origin {
+                m.insert("provenance".into(), artifact_origin_value(origin));
+            }
             Value::Object(m)
         })
         .collect();
@@ -727,7 +767,11 @@ pub fn render_relationships_human(report: &RelationshipReport) -> String {
 
     for artifact in &report.artifacts {
         lines.push(String::new());
-        lines.push(artifact.path.clone());
+        lines.push(format!(
+            "{}{}",
+            artifact.path,
+            human_origin_suffix(artifact.origin.as_ref())
+        ));
         for (section, refs) in &artifact.relationships {
             lines.push(format!("  {}:", relationship_label(section)));
             for reference in refs {
@@ -1559,14 +1603,31 @@ pub fn render_templates_json(names: &[&str]) -> String {
 
 const EMPTY_CORPUS_HINT: &str = "No artifacts yet — create your first with: decided quickstart";
 
-fn invalid_files_json(items: &[(&str, &[String])]) -> Value {
+fn human_origin_suffix(origin: Option<&crate::corpus::ArtifactOrigin>) -> String {
+    let Some(origin) = origin else {
+        return String::new();
+    };
+    let pin = origin
+        .pin
+        .as_ref()
+        .map(|pin| format!(" · {pin}"))
+        .unwrap_or_default();
+    format!("  [{} · {}{pin}]", origin.source, origin.layer.as_str())
+}
+
+fn invalid_files_json(
+    items: &[(&str, &[String], Option<&crate::corpus::ArtifactOrigin>)],
+) -> Value {
     Value::Array(
         items
             .iter()
-            .map(|(path, codes)| {
+            .map(|(path, codes, origin)| {
                 let mut m = Map::new();
                 m.insert("file".into(), json!(path));
                 m.insert("errors".into(), json!(codes));
+                if let Some(origin) = origin {
+                    m.insert("provenance".into(), artifact_origin_value(origin));
+                }
                 Value::Object(m)
             })
             .collect(),
@@ -1604,6 +1665,9 @@ pub fn render_stats_json(s: &PortfolioStats) -> String {
                 let mut m = Map::new();
                 m.insert("name".into(), json!(f.name));
                 m.insert("requirements".into(), json!(f.requirements));
+                if let Some(origin) = &f.origin {
+                    m.insert("provenance".into(), artifact_origin_value(origin));
+                }
                 Value::Object(m)
             }
             None => Value::Null,
@@ -1618,15 +1682,18 @@ pub fn render_stats_json(s: &PortfolioStats) -> String {
                     let mut m = Map::new();
                     m.insert("name".into(), json!(f.name));
                     m.insert("requirements".into(), json!(f.requirements));
+                    if let Some(origin) = &f.origin {
+                        m.insert("provenance".into(), artifact_origin_value(origin));
+                    }
                     Value::Object(m)
                 })
                 .collect(),
         ),
     );
-    let invalid: Vec<(&str, &[String])> = s
+    let invalid: Vec<(&str, &[String], Option<&crate::corpus::ArtifactOrigin>)> = s
         .invalid()
         .iter()
-        .map(|f| (f.path.as_str(), f.error_codes.as_slice()))
+        .map(|f| (f.path.as_str(), f.error_codes.as_slice(), f.origin.as_ref()))
         .collect();
     payload.insert("invalid".into(), invalid_files_json(&invalid));
 
@@ -1646,7 +1713,12 @@ pub fn render_stats_json(s: &PortfolioStats) -> String {
         payload.insert("decisions".into(), Value::Object(m));
     }
 
-    let mut family = |key: &str, count: usize, valid: usize, invalid: Vec<(&str, &[String])>| {
+    let mut family = |
+        key: &str,
+        count: usize,
+        valid: usize,
+        invalid: Vec<(&str, &[String], Option<&crate::corpus::ArtifactOrigin>)>,
+    | {
         let mut m = Map::new();
         m.insert("count".into(), json!(count));
         m.insert("valid".into(), json!(valid));
@@ -1655,26 +1727,26 @@ pub fn render_stats_json(s: &PortfolioStats) -> String {
     };
 
     if !s.roadmaps.is_empty() {
-        let invalid: Vec<(&str, &[String])> = s
+        let invalid: Vec<(&str, &[String], Option<&crate::corpus::ArtifactOrigin>)> = s
             .invalid_roadmaps()
             .iter()
-            .map(|r| (r.path.as_str(), r.error_codes.as_slice()))
+            .map(|r| (r.path.as_str(), r.error_codes.as_slice(), r.origin.as_ref()))
             .collect();
         family("roadmaps", s.roadmap_count(), s.valid_roadmaps(), invalid);
     }
     if !s.prompts.is_empty() {
-        let invalid: Vec<(&str, &[String])> = s
+        let invalid: Vec<(&str, &[String], Option<&crate::corpus::ArtifactOrigin>)> = s
             .invalid_prompts()
             .iter()
-            .map(|p| (p.path.as_str(), p.error_codes.as_slice()))
+            .map(|p| (p.path.as_str(), p.error_codes.as_slice(), p.origin.as_ref()))
             .collect();
         family("prompts", s.prompt_count(), s.valid_prompts(), invalid);
     }
     if !s.designs.is_empty() {
-        let invalid: Vec<(&str, &[String])> = s
+        let invalid: Vec<(&str, &[String], Option<&crate::corpus::ArtifactOrigin>)> = s
             .invalid_designs()
             .iter()
-            .map(|d| (d.path.as_str(), d.error_codes.as_slice()))
+            .map(|d| (d.path.as_str(), d.error_codes.as_slice(), d.origin.as_ref()))
             .collect();
         family("designs", s.design_count(), s.valid_designs(), invalid);
     }
@@ -1692,6 +1764,9 @@ pub fn render_stats_json(s: &PortfolioStats) -> String {
                         fm.insert("file".into(), json!(u.path));
                         fm.insert("name".into(), json!(u.name));
                         fm.insert("confidence".into(), crate::pyjson::py_float(py_round(u.confidence, 2)));
+                        if let Some(origin) = &u.origin {
+                            fm.insert("provenance".into(), artifact_origin_value(origin));
+                        }
                         Value::Object(fm)
                     })
                     .collect(),
@@ -1712,13 +1787,21 @@ pub fn render_stats_json(s: &PortfolioStats) -> String {
 }
 
 /// `  <red path> — <error codes | "unknown">` invalid-list line.
-fn invalid_reason_line(path: &str, error_codes: &[String]) -> String {
+fn invalid_reason_line(
+    path: &str,
+    error_codes: &[String],
+    origin: Option<&crate::corpus::ArtifactOrigin>,
+) -> String {
     let reasons = if error_codes.is_empty() {
         "unknown".to_string()
     } else {
         error_codes.join(", ")
     };
-    format!("  {} \u{2014} {reasons}", red(path))
+    format!(
+        "  {} \u{2014} {reasons}{}",
+        red(path),
+        human_origin_suffix(origin)
+    )
 }
 
 pub fn render_stats_human(s: &PortfolioStats) -> String {
@@ -1736,14 +1819,28 @@ pub fn render_stats_human(s: &PortfolioStats) -> String {
         String::new(),
     ];
 
-    let mut missing_block = |label: &str, names: &[&str]| {
-        lines.push(format!("{label}: {}", names.len()));
-        for name in names {
-            lines.push(format!("  - {name}"));
+    let mut missing_block = |label: &str, features: &[&crate::stats::FeatureStat]| {
+        lines.push(format!("{label}: {}", features.len()));
+        for feature in features {
+            lines.push(format!(
+                "  - {}{}",
+                feature.name,
+                human_origin_suffix(feature.origin.as_ref())
+            ));
         }
     };
-    missing_block("Features Missing Metrics", &s.missing_metrics());
-    missing_block("Features Missing Risks", &s.missing_risks());
+    let missing_metrics: Vec<_> = s
+        .features
+        .iter()
+        .filter(|feature| feature.success_metrics == 0)
+        .collect();
+    let missing_risks: Vec<_> = s
+        .features
+        .iter()
+        .filter(|feature| feature.risks == 0)
+        .collect();
+    missing_block("Features Missing Metrics", &missing_metrics);
+    missing_block("Features Missing Risks", &missing_risks);
     lines.push(format!(
         "Average Requirements Per Feature: {}",
         py_format_1f(s.average_requirements())
@@ -1751,8 +1848,10 @@ pub fn render_stats_human(s: &PortfolioStats) -> String {
 
     match s.largest_feature() {
         Some(f) => lines.push(format!(
-            "Largest Feature: {} ({} requirements)",
-            f.name, f.requirements
+            "Largest Feature: {} ({} requirements){}",
+            f.name,
+            f.requirements,
+            human_origin_suffix(f.origin.as_ref())
         )),
         None => lines.push("Largest Feature: (none)".to_string()),
     }
@@ -1765,7 +1864,12 @@ pub fn render_stats_human(s: &PortfolioStats) -> String {
     if !by_feature.is_empty() {
         let width = by_feature.iter().map(|f| f.name.chars().count()).max().unwrap_or(0) + 4;
         for f in &by_feature {
-            lines.push(format!("{}{}", ljust(&f.name, width), f.requirements));
+            lines.push(format!(
+                "{}{}{}",
+                ljust(&f.name, width),
+                f.requirements,
+                human_origin_suffix(f.origin.as_ref())
+            ));
         }
     } else {
         lines.push("(none)".to_string());
@@ -1776,7 +1880,11 @@ pub fn render_stats_human(s: &PortfolioStats) -> String {
         lines.push(String::new());
         lines.push(bold(&format!("Invalid Features ({})", invalid.len())));
         for f in &invalid {
-            lines.push(invalid_reason_line(&f.path, &f.error_codes));
+            lines.push(invalid_reason_line(
+                &f.path,
+                &f.error_codes,
+                f.origin.as_ref(),
+            ));
         }
     }
 
@@ -1812,7 +1920,11 @@ pub fn render_stats_human(s: &PortfolioStats) -> String {
             lines.push(String::new());
             lines.push(bold(&format!("{invalid_label} ({})", invalid.len())));
             for r in invalid {
-                lines.push(invalid_reason_line(&r.path, &r.error_codes));
+                lines.push(invalid_reason_line(
+                    &r.path,
+                    &r.error_codes,
+                    r.origin.as_ref(),
+                ));
             }
         }
     };
@@ -1838,7 +1950,11 @@ pub fn render_stats_human(s: &PortfolioStats) -> String {
             "{count} {noun} matched no known artifact schema (not errors — see ADR-010):"
         ));
         for u in &s.unrecognized {
-            lines.push(format!("  {}", u.path));
+            lines.push(format!(
+                "  {}{}",
+                u.path,
+                human_origin_suffix(u.origin.as_ref())
+            ));
         }
     }
 
@@ -1922,7 +2038,11 @@ pub fn render_portfolio_human(s: &PortfolioSummary) -> String {
             } else {
                 yellow("!")
             };
-            lines.push(format!("  {icon} {}", item.identifier));
+            lines.push(format!(
+                "  {icon} {}{}",
+                item.identifier,
+                human_origin_suffix(item.origin.as_ref())
+            ));
             lines.push(format!("      {}", item.message));
         }
     } else {
@@ -1980,11 +2100,12 @@ pub fn render_index_human(index: &crate::index::RepositoryIndex) -> String {
     let title_w = width(&|e| title_of(e).chars().count());
     for e in &index.artifacts {
         lines.push(format!(
-            "  {}  {}  {}  {}",
+            "  {}  {}  {}  {}{}",
             ljust(&e.id, id_w),
             ljust(&e.artifact_type, type_w),
             ljust(&title_of(e), title_w),
-            e.path
+            e.path,
+            human_origin_suffix(e.origin.as_ref())
         ));
     }
     lines.join("\n")
@@ -2003,6 +2124,9 @@ pub fn render_index_json(index: &crate::index::RepositoryIndex) -> String {
             m.insert("title".into(), json!(e.title));
             m.insert("path".into(), json!(e.path));
             m.insert("aliases".into(), json!(e.aliases));
+            if let Some(origin) = &e.origin {
+                m.insert("provenance".into(), artifact_origin_value(origin));
+            }
             Value::Object(m)
         })
         .collect();
@@ -2069,6 +2193,9 @@ pub fn portfolio_summary_value(s: &PortfolioSummary) -> Value {
             m.insert("severity".into(), json!(item.severity));
             m.insert("code".into(), json!(item.code));
             m.insert("message".into(), json!(item.message));
+            if let Some(origin) = &item.origin {
+                m.insert("provenance".into(), artifact_origin_value(origin));
+            }
             Value::Object(m)
         })
         .collect();
@@ -2124,7 +2251,12 @@ pub fn render_coverage_human(report: &CoverageReport) -> String {
         }
         lines.push(format!("{heading}: {}", members.len()));
         for gap in members {
-            lines.push(format!("  {}  {}", gap.id, gap.path));
+            lines.push(format!(
+                "  {}  {}{}",
+                gap.id,
+                gap.path,
+                human_origin_suffix(gap.origin.as_ref())
+            ));
         }
         lines.push(String::new());
     }
@@ -2154,6 +2286,9 @@ pub fn render_coverage_json(report: &CoverageReport) -> String {
             m.insert("type".into(), json!(g.artifact_type));
             m.insert("gap".into(), json!(g.gap));
             m.insert("missing".into(), json!(g.missing));
+            if let Some(origin) = &g.origin {
+                m.insert("provenance".into(), artifact_origin_value(origin));
+            }
             Value::Object(m)
         })
         .collect();
@@ -2768,6 +2903,13 @@ pub fn render_doctor_json(report: &DoctorReport) -> String {
 
 // --- export ------------------------------------------------------------------
 
+fn export_identity_value(identity: &ExportIdentity) -> Value {
+    let mut value = Map::new();
+    value.insert("source".into(), json!(identity.source));
+    value.insert("id".into(), json!(identity.id));
+    Value::Object(value)
+}
+
 pub fn render_export_json(export: &CorpusExport) -> String {
     let mut corpus = Map::new();
     corpus.insert("name".into(), json!(export.corpus_name));
@@ -2789,6 +2931,14 @@ pub fn render_export_json(export: &CorpusExport) -> String {
             m.insert("title".into(), json!(a.title));
             m.insert("path".into(), json!(a.path));
             m.insert("body_html".into(), json!(a.body_html));
+            if let Some(provenance) = &a.graph_provenance {
+                m.insert(
+                    "provenance".into(),
+                    graph_composed_provenance_value(provenance),
+                );
+            } else if let Some(provenance) = &a.provenance {
+                m.insert("provenance".into(), composed_provenance_value(provenance));
+            }
             Value::Object(m)
         })
         .collect();
@@ -2801,6 +2951,41 @@ pub fn render_export_json(export: &CorpusExport) -> String {
             m.insert("from".into(), json!(e.from));
             m.insert("to".into(), json!(e.to));
             m.insert("type".into(), json!(e.edge_type));
+            if let Some(identity) = &e.from_identity {
+                m.insert("from_identity".into(), export_identity_value(identity));
+            }
+            if let Some(identity) = &e.to_identity {
+                m.insert("to_identity".into(), export_identity_value(identity));
+            } else if e.provenance.is_some() || e.graph_provenance.is_some() {
+                m.insert("to_identity".into(), Value::Null);
+            }
+            if let Some(authored_token) = &e.authored_token {
+                m.insert("authored_token".into(), json!(authored_token));
+                m.insert(
+                    "historical_candidates".into(),
+                    Value::Array(
+                        e.historical_candidates
+                            .iter()
+                            .map(export_identity_value)
+                            .collect(),
+                    ),
+                );
+                m.insert(
+                    "effective_terminal".into(),
+                    e.effective_terminal
+                        .as_ref()
+                        .map(export_identity_value)
+                        .unwrap_or(Value::Null),
+                );
+            }
+            if let Some(provenance) = &e.graph_provenance {
+                m.insert(
+                    "provenance".into(),
+                    graph_composed_provenance_value(provenance),
+                );
+            } else if let Some(provenance) = &e.provenance {
+                m.insert("provenance".into(), composed_provenance_value(provenance));
+            }
             Value::Object(m)
         })
         .collect();
@@ -2917,7 +3102,25 @@ pub fn render_documents_jsonl(export: &DocumentsExport) -> String {
             meta.insert("path".into(), json!(d.path));
             meta.insert("aliases".into(), json!(d.aliases));
             meta.insert("tags".into(), json!(d.tags));
-            meta.insert("source".into(), json!(export.corpus_source));
+            let source = d
+                .graph_provenance
+                .as_ref()
+                .map(|provenance| provenance.origin.source.as_str())
+                .or_else(|| {
+                    d.provenance
+                        .as_ref()
+                        .map(|provenance| provenance.origin.source.as_str())
+                })
+                .unwrap_or(&export.corpus_source);
+            meta.insert("source".into(), json!(source));
+            if let Some(provenance) = &d.graph_provenance {
+                meta.insert(
+                    "provenance".into(),
+                    graph_composed_provenance_value(provenance),
+                );
+            } else if let Some(provenance) = &d.provenance {
+                meta.insert("provenance".into(), composed_provenance_value(provenance));
+            }
             let mut m = Map::new();
             m.insert("schema_version".into(), json!("1"));
             m.insert("id".into(), json!(d.id));
@@ -2942,6 +3145,14 @@ pub fn render_graph_json(export: &GraphExport) -> String {
             m.insert("type".into(), json!(n.artifact_type));
             m.insert("status".into(), json!(n.status));
             m.insert("title".into(), json!(n.title));
+            if let Some(provenance) = &n.graph_provenance {
+                m.insert(
+                    "provenance".into(),
+                    graph_composed_provenance_value(provenance),
+                );
+            } else if let Some(provenance) = &n.provenance {
+                m.insert("provenance".into(), composed_provenance_value(provenance));
+            }
             Value::Object(m)
         })
         .collect();
@@ -2957,6 +3168,41 @@ pub fn render_graph_json(export: &GraphExport) -> String {
             m.insert("resolved".into(), json!(e.resolved));
             m.insert("external".into(), json!(e.external));
             m.insert("provider".into(), json!(e.provider));
+            if let Some(identity) = &e.source_identity {
+                m.insert("source_identity".into(), export_identity_value(identity));
+            }
+            if let Some(identity) = &e.target_identity {
+                m.insert("target_identity".into(), export_identity_value(identity));
+            } else if e.provenance.is_some() || e.graph_provenance.is_some() {
+                m.insert("target_identity".into(), Value::Null);
+            }
+            if let Some(authored_token) = &e.authored_token {
+                m.insert("authored_token".into(), json!(authored_token));
+                m.insert(
+                    "historical_candidates".into(),
+                    Value::Array(
+                        e.historical_candidates
+                            .iter()
+                            .map(export_identity_value)
+                            .collect(),
+                    ),
+                );
+                m.insert(
+                    "effective_terminal".into(),
+                    e.effective_terminal
+                        .as_ref()
+                        .map(export_identity_value)
+                        .unwrap_or(Value::Null),
+                );
+            }
+            if let Some(provenance) = &e.graph_provenance {
+                m.insert(
+                    "provenance".into(),
+                    graph_composed_provenance_value(provenance),
+                );
+            } else if let Some(provenance) = &e.provenance {
+                m.insert("provenance".into(), composed_provenance_value(provenance));
+            }
             Value::Object(m)
         })
         .collect();
@@ -3059,6 +3305,68 @@ pub fn composed_provenance_value(
     Value::Object(value)
 }
 
+/// Version-2 fixed origin plus the complete graph-native override chain. The
+/// chain is serialized as one value and is never projected through the v1
+/// direct-mapping carrier.
+pub fn graph_composed_provenance_value(
+    provenance: &crate::export::GraphComposedProvenance,
+) -> Value {
+    graph_provenance_value(&provenance.origin, &provenance.overrides)
+}
+
+/// Version-2 graph provenance. The complete ordered mapping chain is one
+/// indivisible response fact; budget truncation may remove optional content or
+/// a whole result record, but never an individual hop.
+pub fn graph_provenance_value(
+    origin: &crate::corpus::ArtifactOrigin,
+    overrides: &[crate::graph_composition::GraphOverrideProvenance],
+) -> Value {
+    let mut value = artifact_origin_value(origin)
+        .as_object()
+        .cloned()
+        .expect("artifact origin is an object");
+    if !overrides.is_empty() {
+        value.insert(
+            "overrides".into(),
+            Value::Array(
+                overrides
+                    .iter()
+                    .map(|mapping| {
+                        json!({
+                            "state": mapping.state.as_str(),
+                            "owner_source": mapping.owner_source,
+                            "target": artifact_key_value(&mapping.target),
+                            "replacement": artifact_key_value(&mapping.replacement),
+                            "rationale": artifact_key_value(&mapping.rationale),
+                        })
+                    })
+                    .collect(),
+            ),
+        );
+    }
+    Value::Object(value)
+}
+
+/// Lossless provenance for either federation manifest version. Version 2 is
+/// never projected through the single-hop version-1 carrier.
+pub fn composed_artifact_provenance_value(
+    corpus: &crate::composition::ComposedCorpus,
+    key: &crate::corpus::ArtifactKey,
+) -> Option<Value> {
+    if corpus.is_graph() {
+        let item = corpus.item(key)?;
+        let overrides = corpus.graph_provenance_for(key)?.to_vec();
+        return Some(graph_composed_provenance_value(
+            &crate::export::GraphComposedProvenance {
+                origin: item.origin.clone(),
+                overrides,
+            },
+        ));
+    }
+    corpus
+        .provenance_for(key)
+        .map(|provenance| composed_provenance_value(&provenance))
+}
 /// Federated resolution JSON with additive source/layer/pin provenance.
 pub fn render_resolve_json_with_origin(
     result: &ResolutionResult,
@@ -3101,12 +3409,9 @@ pub fn render_resolve_json_with_composed(
     if let Some(provenance) = artifact
         .key
         .as_ref()
-        .and_then(|key| corpus.provenance_for(key))
+        .and_then(|key| composed_artifact_provenance_value(corpus, key))
     {
-        value.insert(
-            "provenance".into(),
-            composed_provenance_value(&provenance),
-        );
+        value.insert("provenance".into(), provenance);
     }
     dumps_indent2(&Value::Object(value))
 }
@@ -3331,15 +3636,38 @@ pub fn render_find_json_with_composed(
             let Some(provenance) = artifact
                 .key
                 .as_ref()
-                .and_then(|key| corpus.provenance_for(key))
+                .and_then(|key| composed_artifact_provenance_value(corpus, key))
             else {
                 continue;
             };
             if let Some(object) = matched.as_object_mut() {
-                object.insert(
-                    "provenance".into(),
-                    composed_provenance_value(&provenance),
-                );
+                object.insert("provenance".into(), provenance);
+            }
+        }
+    }
+    dumps_indent2(&payload)
+}
+
+pub fn render_find_json_with_graph(
+    result: &SearchResult,
+    explain: bool,
+    corpus: &crate::graph_federated_corpus::VerifiedGraphCorpus,
+) -> String {
+    let mut payload = search_result_value_with_origin(result, explain, true);
+    if let Some(matches) = payload.get_mut("matches").and_then(Value::as_array_mut) {
+        for (matched, artifact) in matches.iter_mut().zip(&result.matches) {
+            let Some(key) = artifact.key.as_ref() else {
+                continue;
+            };
+            let Some(item) = corpus.composition.item(key) else {
+                continue;
+            };
+            let provenance = graph_provenance_value(
+                &item.origin,
+                corpus.composition.provenance_for(key).unwrap_or(&[]),
+            );
+            if let Some(object) = matched.as_object_mut() {
+                object.insert("provenance".into(), provenance);
             }
         }
     }
@@ -3434,6 +3762,37 @@ pub fn render_diagnosis_human(diagnosis: &SearchDiagnosis) -> String {
 /// `render_find_human` — aligned match rows, or a valid empty result
 /// (PORT-CONTRACT.d/06 §13). `{query!r}` is Python string repr.
 pub fn render_find_human(result: &SearchResult, explain: bool) -> String {
+    render_find_human_with_suffix(result, explain, |_| None)
+}
+
+/// Graph-v2 human search keeps the released table shape while naming the
+/// exact source, layer, and inherited pin for every returned record.
+pub fn render_find_human_with_graph(
+    result: &SearchResult,
+    explain: bool,
+    corpus: &crate::graph_federated_corpus::VerifiedGraphCorpus,
+) -> String {
+    render_find_human_with_suffix(result, explain, |artifact| {
+        let key = artifact.key.as_ref()?;
+        let origin = &corpus.composition.item(key)?.origin;
+        let mut suffix = format!(
+            "  [source={} layer={}",
+            origin.source,
+            origin.layer.as_str()
+        );
+        if let Some(pin) = &origin.pin {
+            suffix.push_str(&format!(" pin={pin}"));
+        }
+        suffix.push(']');
+        Some(suffix)
+    })
+}
+
+fn render_find_human_with_suffix(
+    result: &SearchResult,
+    explain: bool,
+    suffix_for: impl Fn(&ResolvedArtifact) -> Option<String>,
+) -> String {
     if result.matches.is_empty() {
         return format!("No artifacts match {}.", py_repr_str(&result.query));
     }
@@ -3466,6 +3825,9 @@ pub fn render_find_human(result: &SearchResult, explain: bool) -> String {
                 };
                 row.push_str(&yellow(&marker));
             }
+        }
+        if let Some(suffix) = suffix_for(m) {
+            row.push_str(&suffix);
         }
         lines.push(row);
         if let Some(snippet) = &m.snippet {
@@ -3748,6 +4110,24 @@ pub fn render_new_json(created: &crate::scaffold::CreatedArtifact) -> String {
 /// Human `decided init`: the established identity namespace. The idempotent
 /// verb carries its own colon (`Already initialized:`).
 pub fn render_init_human(result: &crate::scaffold::InitResult) -> String {
+    render_init_human_with_parent_corpus(result, false)
+}
+
+const PARENT_CORPUS_MANIFEST: &str = ".decided/corpus.md";
+const PARENT_CORPUS_INHERITS_HEADING: &str = "## inherits";
+const PARENT_CORPUS_OVERRIDES_HEADING: &str = "## overrides";
+const PARENT_CORPUS_DIGEST_COMMAND_V1: &str =
+    "decided corpus digest --root <parent-root> --corpus <parent-corpus>";
+const PARENT_CORPUS_DIGEST_COMMAND_V2: &str =
+    "decided corpus digest --version 2 --root <parent-root> --corpus <parent-corpus>";
+
+/// Human init with the explicit ADR-088/145 setup guidance request. The
+/// ordinary renderer above stays byte-identical and the guidance never writes
+/// a manifest or parent bytes.
+pub(crate) fn render_init_human_with_parent_corpus(
+    result: &crate::scaffold::InitResult,
+    parent_corpus: bool,
+) -> String {
     let verb = if result.created {
         "Initialized"
     } else {
@@ -3764,12 +4144,40 @@ pub fn render_init_human(result: &crate::scaffold::InitResult) -> String {
         lines.push(format!("Org endpoint: {url}"));
     }
     lines.extend(result.files_written.iter().map(|p| format!("Wrote: {p}")));
+    if parent_corpus {
+        lines.extend([
+            "Parent corpus setup (manifest version 2):".to_string(),
+            "1. Materialise every parent inside this repository before calculating its digest; AsDecided does not fetch or refresh it."
+                .to_string(),
+            format!("2. Calculate each topology-binding digest: {PARENT_CORPUS_DIGEST_COMMAND_V2}"),
+            format!(
+                "3. Declare one to 32 verified parents in {} under {} using a version: 2 parents sequence.",
+                PARENT_CORPUS_MANIFEST, PARENT_CORPUS_INHERITS_HEADING
+            ),
+            format!(
+                "4. Record explicit replacements under {} using version: 2.",
+                PARENT_CORPUS_OVERRIDES_HEADING
+            ),
+            format!(
+                "Version 1 compatibility: existing single-parent manifests keep using {PARENT_CORPUS_DIGEST_COMMAND_V1}"
+            ),
+        ]);
+    }
     lines.join("\n")
 }
 
 /// JSON `decided init` (stable contract, ADR-007).
 pub fn render_init_json(result: &crate::scaffold::InitResult) -> String {
-    dumps_indent2(&json!({
+    render_init_json_with_parent_corpus(result, false)
+}
+
+/// JSON init with one additive field only for the explicit parent guidance
+/// request. The ordinary renderer above retains the released bytes.
+pub(crate) fn render_init_json_with_parent_corpus(
+    result: &crate::scaffold::InitResult,
+    parent_corpus: bool,
+) -> String {
+    let mut payload = json!({
         "schema_version": "1",
         "repository_key": result.repository_key,
         "config_path": result.config_path,
@@ -3777,7 +4185,27 @@ pub fn render_init_json(result: &crate::scaffold::InitResult) -> String {
         "profile": result.profile,
         "files_written": result.files_written,
         "org_endpoint": result.org_endpoint,
-    }))
+    });
+    if parent_corpus {
+        payload
+            .as_object_mut()
+            .expect("init JSON payload is an object")
+            .insert(
+                "parent_corpus_guidance".to_string(),
+                json!({
+                    "materialise_first": true,
+                    "manifest": PARENT_CORPUS_MANIFEST,
+                    "inherits_heading": PARENT_CORPUS_INHERITS_HEADING,
+                    "overrides_heading": PARENT_CORPUS_OVERRIDES_HEADING,
+                    "digest_command": PARENT_CORPUS_DIGEST_COMMAND_V1,
+                    "recommended_manifest_version": 2,
+                    "parents_field": "parents",
+                    "multiple_parents": true,
+                    "digest_command_v2": PARENT_CORPUS_DIGEST_COMMAND_V2,
+                }),
+            );
+    }
+    dumps_indent2(&payload)
 }
 
 /// Human `decided quickstart`: identity (`Initialized`/`Using`), first
@@ -4574,4 +5002,50 @@ pub fn watchkeeper_annotations(report: &WatchkeeperReport) -> Vec<String> {
         ));
     }
     lines
+}
+
+#[cfg(test)]
+mod init_output_tests {
+    use super::{
+        render_init_human, render_init_human_with_parent_corpus, render_init_json,
+        render_init_json_with_parent_corpus,
+    };
+    use crate::scaffold::InitResult;
+
+    fn init_result() -> InitResult {
+        InitResult {
+            repository_key: "RAC".to_string(),
+            config_path: "repo/.decided/config.yaml".to_string(),
+            created: true,
+            profile: None,
+            files_written: Vec::new(),
+            org_endpoint: None,
+        }
+    }
+
+    #[test]
+    fn unrequested_parent_guidance_preserves_init_output_bytes() {
+        let result = init_result();
+        assert_eq!(
+            render_init_human(&result),
+            "Initialized repository key RAC\nConfig: repo/.decided/config.yaml"
+        );
+        assert_eq!(
+            render_init_json(&result),
+            "{\n  \"schema_version\": \"1\",\n  \"repository_key\": \"RAC\",\n  \"config_path\": \"repo/.decided/config.yaml\",\n  \"created\": true,\n  \"profile\": null,\n  \"files_written\": [],\n  \"org_endpoint\": null\n}"
+        );
+    }
+
+    #[test]
+    fn requested_parent_guidance_has_one_deterministic_human_and_json_contract() {
+        let result = init_result();
+        assert_eq!(
+            render_init_human_with_parent_corpus(&result, true),
+            "Initialized repository key RAC\nConfig: repo/.decided/config.yaml\nParent corpus setup (manifest version 2):\n1. Materialise every parent inside this repository before calculating its digest; AsDecided does not fetch or refresh it.\n2. Calculate each topology-binding digest: decided corpus digest --version 2 --root <parent-root> --corpus <parent-corpus>\n3. Declare one to 32 verified parents in .decided/corpus.md under ## inherits using a version: 2 parents sequence.\n4. Record explicit replacements under ## overrides using version: 2.\nVersion 1 compatibility: existing single-parent manifests keep using decided corpus digest --root <parent-root> --corpus <parent-corpus>"
+        );
+        assert_eq!(
+            render_init_json_with_parent_corpus(&result, true),
+            "{\n  \"schema_version\": \"1\",\n  \"repository_key\": \"RAC\",\n  \"config_path\": \"repo/.decided/config.yaml\",\n  \"created\": true,\n  \"profile\": null,\n  \"files_written\": [],\n  \"org_endpoint\": null,\n  \"parent_corpus_guidance\": {\n    \"materialise_first\": true,\n    \"manifest\": \".decided/corpus.md\",\n    \"inherits_heading\": \"## inherits\",\n    \"overrides_heading\": \"## overrides\",\n    \"digest_command\": \"decided corpus digest --root <parent-root> --corpus <parent-corpus>\",\n    \"recommended_manifest_version\": 2,\n    \"parents_field\": \"parents\",\n    \"multiple_parents\": true,\n    \"digest_command_v2\": \"decided corpus digest --version 2 --root <parent-root> --corpus <parent-corpus>\"\n  }\n}"
+        );
+    }
 }
