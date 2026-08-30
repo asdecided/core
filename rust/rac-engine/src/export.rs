@@ -8,7 +8,7 @@ use crate::pycompat::py_strip;
 use crate::relationships::{
     corpus_items, edge_spec, relationships_from_corpus, CorpusItem,
 };
-use crate::scaffold::{load_repository_identity, ScaffoldError};
+use crate::scaffold::ScaffoldError;
 use crate::spec::ArtifactSpec;
 use crate::validate::load_ticketing_provider;
 
@@ -23,6 +23,12 @@ const DOCUMENTS_SCHEMA: &str =
     include_str!("../assets/schemas/export-documents-v1.schema.json");
 const GRAPH_SCHEMA: &str = include_str!("../assets/schemas/export-graph-v1.schema.json");
 
+/// Released display name; unlike source identity, this remains tied to the
+/// caller's directory spelling.
+fn corpus_name(directory: &str) -> String {
+    crate::corpus::compatible_corpus_name(directory)
+}
+
 /// Return the packaged Draft 2020-12 contract for an export projection.
 ///
 /// These bytes are the public resource surfaced by `decided export --schema`;
@@ -36,35 +42,11 @@ pub fn export_schema(name: &str) -> Option<&'static str> {
     }
 }
 
-/// `_corpus_name(directory)`.
-fn corpus_name(directory: &str) -> String {
-    let normalized = crate::walk::normalize_root(directory);
-    let trimmed = normalized.trim_end_matches('/');
-    let name = trimmed.rsplit('/').next().unwrap_or("");
-    if name.is_empty() || name == "." || name == ".." {
-        directory.to_string()
-    } else {
-        name.to_string()
-    }
-}
-
 /// The one non-federated source derivation shared by every JSON projection:
 /// explicit `corpus.source`, then the lower-case repository key, then the
 /// released directory-basename fallback (ADR-135).
 pub fn corpus_source(directory: &str) -> Result<String, ScaffoldError> {
-    let Some(identity) = load_repository_identity(directory)? else {
-        return Ok(corpus_name(directory));
-    };
-    if let Some(source) = identity.corpus_source {
-        return Ok(source);
-    }
-    if let Some(repository_key) = identity.repository_key {
-        return Ok(repository_key
-            .strip_suffix('\n')
-            .unwrap_or(&repository_key)
-            .to_ascii_lowercase());
-    }
-    Ok(corpus_name(directory))
+    crate::corpus::compatible_corpus_source(directory)
 }
 
 fn first_line(raw: &str) -> String {

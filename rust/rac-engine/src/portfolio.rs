@@ -5,7 +5,7 @@
 use crate::classify::missing_sections;
 use crate::pycompat::py_round;
 use crate::relationships::{
-    summary_from_rows, validation_from_rows, validation_row, CorpusItem, RelationshipSummary,
+    summary_from_rows, validation_from_rows, CorpusItem, RelationshipSummary,
     ValidationRow, ISSUE_SELF_REFERENCE, ISSUE_TARGET_AMBIGUOUS, ISSUE_TARGET_NOT_FOUND,
 };
 use crate::validate::{apply_overrides, has_errors, load_overrides, py_title, validate, SeverityOverrides};
@@ -99,7 +99,7 @@ pub fn portfolio_row(item: &CorpusItem) -> PortfolioRow {
         .spec
         .map(|s| s.name.clone())
         .unwrap_or_else(|| "unknown".to_string());
-    let vrow = validation_row(&path, &item.artifact, item.spec);
+    let vrow = crate::relationships::validation_row_from_item(item);
     match item.spec {
         None => PortfolioRow {
             path,

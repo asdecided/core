@@ -310,7 +310,8 @@ impl FreshnessTracker {
                     self.items.remove(rel); // removed
                 }
             }
-            let (parsed, workers) = crate::parallel_build::parallel_parse_paths(&present);
+            let (parsed, workers) =
+                crate::parallel_build::parallel_parse_paths(&self.root_str, &present);
             self.last_parse_workers = workers;
             self.last_parse_files = present.len();
             for item in parsed {
@@ -333,7 +334,8 @@ impl FreshnessTracker {
     fn reparse_full(&mut self) {
         let root = PathBuf::from(&self.root_str);
         let paths: Vec<PathBuf> = self.manifest.iter().map(|(rel, _)| root.join(rel)).collect();
-        let (parsed, workers) = crate::parallel_build::parallel_parse_paths(&paths);
+        let (parsed, workers) =
+            crate::parallel_build::parallel_parse_paths(&self.root_str, &paths);
         self.last_parse_workers = workers;
         self.last_parse_files = paths.len();
         self.items = parsed
@@ -374,7 +376,8 @@ impl FreshnessTracker {
             .filter(|rel| current.contains(rel.as_str()))
             .map(|rel| root.join(rel))
             .collect();
-        let (parsed, workers) = crate::parallel_build::parallel_parse_paths(&present);
+        let (parsed, workers) =
+            crate::parallel_build::parallel_parse_paths(&self.root_str, &present);
         self.last_parse_workers = workers;
         self.last_parse_files = present.len();
         let parsed: BTreeMap<String, CorpusItem> = parsed
@@ -490,7 +493,8 @@ impl FreshnessTracker {
             .iter()
             .map(|(rel, _)| root.join(rel))
             .collect();
-        let (parsed, workers) = crate::parallel_build::parallel_parse_paths(&paths);
+        let (parsed, workers) =
+            crate::parallel_build::parallel_parse_paths(&self.root_str, &paths);
         self.last_parse_workers = workers;
         self.last_parse_files = paths.len();
         let parsed: BTreeMap<String, CorpusItem> = parsed

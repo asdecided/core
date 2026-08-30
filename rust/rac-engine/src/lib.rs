@@ -46,6 +46,7 @@ pub mod walk;
 pub mod parse;
 pub mod classify;
 pub mod identity;
+pub mod corpus;
 pub mod validate;
 pub mod relationships;
 pub mod diff;

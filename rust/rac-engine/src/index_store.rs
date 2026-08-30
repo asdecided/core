@@ -540,6 +540,9 @@ impl MmapIndexReader {
         let aliases = reader.text_list()?;
         let tags = reader.text_list()?;
         Ok(IndexEntry {
+            key: None,
+            artifact_path: None,
+            origin: None,
             id,
             artifact_type,
             title,
@@ -563,6 +566,9 @@ impl MmapIndexReader {
         let inbound = reader.u32()?;
         let sections = self.read_sections(docid)?;
         Ok(IndexEntry {
+            key: None,
+            artifact_path: None,
+            origin: None,
             id,
             artifact_type,
             title,
@@ -773,9 +779,11 @@ impl MmapIndexReader {
         let mut result = Vec::with_capacity(count.min(1 << 20) as usize);
         for _ in 0..count {
             result.push(Relationship {
+                source_artifact: None,
                 source_path: reader.text()?,
                 relationship: reader.text()?,
                 target: reader.text()?,
+                resolved_artifact: None,
                 resolved_path: reader.opt_text()?,
                 issue: reader.opt_text()?,
             });

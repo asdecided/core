@@ -7,7 +7,7 @@ type: requirement
 
 ## Status
 
-Proposed
+Accepted
 
 Classification: `[internal]` — merge N corpora with zero collisions and give
 federated artifacts one source identity across every surface. Feature E of the
