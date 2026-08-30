@@ -31,6 +31,26 @@ on:
       - ".github/workflows/rust-spike.yml"
 
 jobs:
+  linux-arm64-build:
+    name: Linux ARM64 release build
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Install rust toolchain (pinned by rust/rust-toolchain.toml)
+        run: rustup show
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+
+      - name: Build shipped native binaries
+        working-directory: rust
+        run: cargo build --release --locked -p decided -p decided-mcp
+
   windows-runtime:
     name: Windows native runtime smoke
     runs-on: windows-latest

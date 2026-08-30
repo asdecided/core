@@ -971,7 +971,7 @@ fn scan_yaml_events(yaml: &str) -> Result<RestrictedYamlScan, (Option<u64>, Stri
             } else {
                 // SAFETY: libyaml exposes a NUL-terminated problem string while
                 // the parser is alive.
-                unsafe { CStr::from_ptr(parser.0.problem) }
+                unsafe { CStr::from_ptr(parser.0.problem.cast()) }
                     .to_string_lossy()
                     .into_owned()
             };
