@@ -204,6 +204,10 @@ fn a_verified_result_retains_manifest_and_snapshot_bytes() {
     child_manifest(&child, "acme/app", &calculated.digest, "acme/standards");
 
     let verified = verify_parent(&child).unwrap().unwrap();
+    assert_eq!(
+        verified.child_config_bytes,
+        fs::read(child.join(".decided/config.yaml")).unwrap()
+    );
     assert_eq!(verified.config_bytes, calculated.config_bytes);
     assert_eq!(verified.files, calculated.files);
     assert_eq!(
@@ -216,6 +220,7 @@ fn a_verified_result_retains_manifest_and_snapshot_bytes() {
         b"one\n"
     );
     assert!(verified.overrides.is_some());
+    assert!(verified.override_mapping_bytes.is_some());
     assert_eq!(
         verified.manifest_bytes,
         fs::read(child.join(".decided/corpus.md")).unwrap()

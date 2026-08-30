@@ -979,12 +979,8 @@ fn parse_severity_map(section: Option<&Yaml>, allowed: &[&str]) -> Vec<(String, 
     out
 }
 
-/// `load_overrides(start_dir)` (ADR-053).
-pub fn load_overrides(start_dir: &str) -> SeverityOverrides {
-    let Some(pairs) = load_config_mapping(start_dir) else {
-        return SeverityOverrides::default();
-    };
-    let Some(Yaml::Map(section)) = yaml_map_get(&pairs, "validation") else {
+fn overrides_from_mapping(pairs: &[(Yaml, Yaml)]) -> SeverityOverrides {
+    let Some(Yaml::Map(section)) = yaml_map_get(pairs, "validation") else {
         return SeverityOverrides::default();
     };
     SeverityOverrides {
@@ -994,6 +990,27 @@ pub fn load_overrides(start_dir: &str) -> SeverityOverrides {
         ),
         types: parse_severity_map(yaml_map_get(section, "types"), &["error", "warning"]),
     }
+}
+
+/// `load_overrides(start_dir)` (ADR-053).
+pub fn load_overrides(start_dir: &str) -> SeverityOverrides {
+    let Some(pairs) = load_config_mapping(start_dir) else {
+        return SeverityOverrides::default();
+    };
+    overrides_from_mapping(&pairs)
+}
+
+/// Parse validation overrides from the exact governing config snapshot.
+/// Federated cache builds use this seam so portfolio validation cannot observe
+/// config bytes newer than the logical generation it describes.
+pub fn overrides_from_config_bytes(bytes: &[u8]) -> SeverityOverrides {
+    let Ok(text) = std::str::from_utf8(bytes) else {
+        return SeverityOverrides::default();
+    };
+    let (Some(pairs), _issues) = load_frontmatter_mapping(text) else {
+        return SeverityOverrides::default();
+    };
+    overrides_from_mapping(&pairs)
 }
 
 /// `load_freshness_threshold(start_dir)` (ADR-045): the

@@ -423,8 +423,24 @@ fn governing_decisions(rows: &[ScopeRow], directory: &str, path: &str) -> Vec<Go
             }
         }
     }
+    let mut sources: Vec<&str> = matches
+        .iter()
+        .filter_map(|decision| decision.origin.as_ref().map(|origin| origin.source.as_str()))
+        .collect();
+    sources.sort_unstable();
+    sources.dedup();
+    let federated = sources.len() > 1;
     matches.sort_by(|a, b| {
-        (py_casefold(&a.id), &a.path).cmp(&(py_casefold(&b.id), &b.path))
+        py_casefold(&a.id)
+            .cmp(&py_casefold(&b.id))
+            .then_with(|| {
+                if federated {
+                    a.artifact_path.cmp(&b.artifact_path)
+                } else {
+                    a.path.cmp(&b.path)
+                }
+            })
+            .then_with(|| a.path.cmp(&b.path))
     });
     matches
 }
@@ -1155,7 +1171,7 @@ pub fn retrieve_grounding_from_store(
                 .docid_for_path(path)
                 .ok()
                 .flatten()
-                .and_then(|docid| reader.identity_entry(docid).ok())
+                .and_then(|docid| reader.full_entry(docid).ok())
         },
         status_of,
     )

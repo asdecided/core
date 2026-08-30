@@ -13,8 +13,8 @@ use crate::corpus::{ArtifactKey, ArtifactPath, Layer};
 use crate::pycompat::py_casefold;
 use crate::relationships::{
     resolution_index_from_rows, resolve_relationships, validation_from_rows_with_index,
-    validation_row_from_item, CorpusItem, Relationship, RelationshipValidation,
-    ResolutionCandidate, ResolutionIndex, ValidationRow,
+    validation_row_from_item, CorpusItem, Relationship, RelationshipSummary,
+    RelationshipValidation, ResolutionCandidate, ResolutionIndex, ValidationRow,
 };
 use crate::resolve::{entry_from_item, identity_entry_from_item, is_live_decision, IndexEntry};
 
@@ -717,6 +717,27 @@ impl ComposedCorpus {
         resolve_relationships(&self.catalog_rows, &self.resolution_index)
     }
 
+    /// Portfolio relationship metrics through the same qualified/redirect
+    /// index as lookup and graph construction.
+    pub fn relationship_summary(&self) -> RelationshipSummary {
+        let mut summary = crate::relationships::summary_from_rows_with_index(
+            &self.effective_rows,
+            &self.resolution_index,
+            true,
+        );
+        let before = summary.issues.len();
+        summary.issues.retain(|issue| {
+            !issue.origin.as_ref().is_some_and(|origin| {
+                origin.layer == Layer::Inherited
+                    && crate::relationships::relationship_severity(&issue.code) != "error"
+            })
+        });
+        let parent_owned = before - summary.issues.len();
+        summary.broken -= parent_owned;
+        summary.valid += parent_owned;
+        summary
+    }
+
     /// Run the existing relationship validator over source-aware keys. The
     /// child repository root is intentionally supplied here so inherited
     /// filesystem scope is checked against child code.
@@ -725,14 +746,22 @@ impl ComposedCorpus {
         child_directory: &str,
         recursive: bool,
     ) -> RelationshipValidation {
-        validation_from_rows_with_index(
+        let mut validation = validation_from_rows_with_index(
             child_directory,
             &self.effective_rows,
             &self.catalog_rows,
             recursive,
             &self.resolution_index,
             false,
-        )
+            true,
+        );
+        validation.issues.retain(|issue| {
+            !issue.origin.as_ref().is_some_and(|origin| {
+                origin.layer == Layer::Inherited
+                    && crate::relationships::relationship_severity(&issue.code) != "error"
+            })
+        });
+        validation
     }
 }
 
