@@ -185,7 +185,7 @@ fn run_dispatch(args: &[String]) -> u8 {
     let order_aware = matches!(
         first.as_str(),
         "mcp-stats" | "telemetry" | "usage" | "skill" | "hook" | "eval" | "init" | "quickstart"
-            | "migrate" | "watchkeeper"
+            | "migrate" | "watchkeeper" | "corpus"
     );
     if !order_aware {
         if rest.iter().any(|a| a.as_str() == "--version") {
@@ -287,6 +287,7 @@ fn run_corpus(rest: &[&String]) -> u8 {
     let mut action: Option<String> = None;
     let mut root: Option<String> = None;
     let mut corpus: Option<String> = None;
+    let mut version: u32 = 1;
     let mut extras: Vec<String> = Vec::new();
     let mut positional_only = false;
 
@@ -324,6 +325,18 @@ fn run_corpus(rest: &[&String]) -> u8 {
                     Err(code) => return code,
                 }
             }
+            other if other == "--version" || other.starts_with("--version=") => {
+                match take_opt_value(prog, "--version", other, rest, &mut i) {
+                    Ok(value) if value == "2" => version = 2,
+                    Ok(value) => {
+                        return argparse_error(
+                            prog,
+                            &format!("argument --version: invalid choice: '{value}' (choose from '2')"),
+                        )
+                    }
+                    Err(code) => return code,
+                }
+            }
             other => extras.push(other.to_string()),
         }
         i += 1;
@@ -351,6 +364,7 @@ fn run_corpus(rest: &[&String]) -> u8 {
     cmd_corpus_digest(&CorpusDigestArgs {
         root: root.expect("checked above"),
         corpus: corpus.expect("checked above"),
+        version,
     }) as u8
 }
 

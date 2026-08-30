@@ -2899,15 +2899,23 @@ pub fn cmd_rename(args: &RenameArgs) -> i32 {
 pub struct CorpusDigestArgs {
     pub root: String,
     pub corpus: String,
+    pub version: u32,
 }
 
 /// Read-only operator calculation for the canonical parent corpus pin. The
 /// implementation consumes only local bytes below `root` and cannot write,
 /// fetch, refresh, or repin anything.
 pub fn cmd_corpus_digest(args: &CorpusDigestArgs) -> i32 {
-    match crate::federation::calculate_parent_digest(&args.root, &args.corpus) {
-        Ok(result) => {
-            emit(result.digest);
+    let result = if args.version == 2 {
+        crate::federation::calculate_parent_digest_v2(&args.root, &args.corpus)
+            .map(|result| result.digest)
+    } else {
+        crate::federation::calculate_parent_digest(&args.root, &args.corpus)
+            .map(|result| result.digest)
+    };
+    match result {
+        Ok(digest) => {
+            emit(digest);
             EXIT_OK
         }
         Err(error) => {

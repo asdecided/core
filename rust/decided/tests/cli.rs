@@ -35,6 +35,46 @@ fn run(args: &[&str]) -> Output {
         .expect("run decided")
 }
 
+#[test]
+fn corpus_digest_version_two_is_explicit_and_keeps_v1_as_the_default() {
+    let root = empty_scratch_root("digest-v2");
+    fs::create_dir_all(root.join(".decided")).unwrap();
+    fs::create_dir_all(root.join("decisions")).unwrap();
+    fs::write(
+        root.join(".decided/config.yaml"),
+        "repository_key: STD\ncorpus:\n  source: acme/standards\n",
+    )
+    .unwrap();
+    fs::write(root.join("decisions/policy.md"), "policy\n").unwrap();
+    let root_text = root.to_string_lossy().into_owned();
+
+    let v1 = run(&[
+        "corpus",
+        "digest",
+        "--root",
+        &root_text,
+        "--corpus",
+        "decisions",
+    ]);
+    assert!(v1.status.success(), "{}", String::from_utf8_lossy(&v1.stderr));
+    assert!(String::from_utf8_lossy(&v1.stdout).starts_with("sha256:"));
+
+    let v2 = run(&[
+        "corpus",
+        "digest",
+        "--version",
+        "2",
+        "--root",
+        &root_text,
+        "--corpus",
+        "decisions",
+    ]);
+    assert!(v2.status.success(), "{}", String::from_utf8_lossy(&v2.stderr));
+    assert!(String::from_utf8_lossy(&v2.stdout).starts_with("sha256-v2:"));
+
+    fs::remove_dir_all(root).unwrap();
+}
+
 fn empty_scratch_root(label: &str) -> PathBuf {
     let root = std::env::temp_dir().join(format!("asdecided-cli-{label}-{}", scratch_suffix()));
     fs::create_dir_all(&root).expect("create empty CLI scratch repository");
