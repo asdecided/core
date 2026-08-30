@@ -411,6 +411,9 @@ pub fn render_validate_dir_json(result: &DirectoryValidation) -> String {
                 "issues".into(),
                 Value::Array(f.issues.iter().map(issue_value).collect()),
             );
+            if let Some(origin) = &f.origin {
+                m.insert("provenance".into(), artifact_origin_value(origin));
+            }
             Value::Object(m)
         })
         .collect();
@@ -569,7 +572,7 @@ pub fn render_validate_sarif(result: &DirectoryValidation) -> String {
                 message: issue.message.clone(),
                 uri: quote_uri(&file.path),
                 line: issue.line,
-                properties: None,
+                properties: file.origin.as_ref().map(artifact_origin_value),
             });
         }
     }
@@ -655,7 +658,7 @@ pub fn render_relationships_sarif(validation: &RelationshipValidation) -> String
                 message,
                 uri,
                 line: None,
-                properties: None,
+                properties: issue.origin.as_ref().map(artifact_origin_value),
             }
         })
         .collect();
@@ -760,6 +763,9 @@ fn relationship_issue_value(issue: &RelationshipIssue) -> Value {
         m.insert("relationship".into(), json!(issue.relationship));
         m.insert("target".into(), json!(issue.target));
         m.insert("code".into(), json!(issue.code));
+    }
+    if let Some(origin) = &issue.origin {
+        m.insert("provenance".into(), artifact_origin_value(origin));
     }
     Value::Object(m)
 }

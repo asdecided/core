@@ -7,7 +7,8 @@ use rac_engine::corpus::{
 };
 use rac_engine::parse::parse_text;
 use rac_engine::relationships::{
-    CorpusItem, ISSUE_RELATIONSHIP_CYCLE, ISSUE_TARGET_NOT_FOUND, ISSUE_TARGET_TYPE_MISMATCH,
+    CorpusItem, ISSUE_RELATIONSHIP_CYCLE, ISSUE_SELF_REFERENCE, ISSUE_TARGET_NOT_FOUND,
+    ISSUE_TARGET_TYPE_MISMATCH,
 };
 use rac_engine::spec::spec_for;
 
@@ -503,4 +504,45 @@ fn cross_source_cycles_are_computed_over_artifact_keys() {
             "/runtime/acme/standards/parent.md".to_string(),
         ]
     );
+}
+
+#[test]
+fn inherited_warnings_remain_parent_owned_while_local_findings_are_sourced() {
+    let local = item(
+        Layer::Local,
+        "local.md",
+        "APP-ADR",
+        "decision",
+        "Accepted",
+        "## Related Decisions\n\n- APP-ADR\n",
+    );
+    let inherited = item(
+        Layer::Inherited,
+        "parent.md",
+        "STD-ADR",
+        "decision",
+        "Accepted",
+        "## Related Decisions\n\n- STD-ADR\n",
+    );
+    let corpus = ComposedCorpus::compose(vec![local], vec![inherited], parent(), Vec::new());
+    let validation = corpus.validate_relationships(".", true);
+    assert_eq!(validation.issues.len(), 1);
+    let issue = &validation.issues[0];
+    assert_eq!(issue.code, ISSUE_SELF_REFERENCE);
+    assert_eq!(issue.origin.as_ref().unwrap().layer, Layer::Local);
+    assert_eq!(
+        issue.source_artifact.as_ref().unwrap(),
+        &ArtifactPath::new(LOCAL_SOURCE, "local.md")
+    );
+
+    let summary = corpus.relationship_summary();
+    assert_eq!(summary.issues.len(), 1);
+    assert_eq!(summary.broken, 1);
+    assert_eq!(summary.valid, 1);
+    let json: serde_json::Value = serde_json::from_str(
+        &rac_engine::output::render_relationship_validation_json(&validation),
+    )
+    .unwrap();
+    assert_eq!(json["issues"][0]["provenance"]["source"], LOCAL_SOURCE);
+    assert_eq!(json["issues"][0]["provenance"]["layer"], "local");
 }

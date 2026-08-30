@@ -1,7 +1,7 @@
-//! Index-store golden vectors (INDEX-PLAN B2) — the native writer must be
-//! byte-identical to the oracle's store over the pinned fixture corpora
-//! (`rust/spec/gen_vectors_index.py`), and the reader must fail closed on
-//! every corruption class and reproduce a fresh build on the good path.
+//! Index-store vectors (INDEX-PLAN B2). The v2 source-aware layout retains
+//! byte parity for unchanged v1 segments, pins deterministic whole-store
+//! output across two writes, and round-trips provenance. The reader must fail
+//! closed on every corruption class and reproduce a fresh build.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -63,7 +63,7 @@ fn fingerprint_matches_oracle() {
 /// repo-relative directory — and cwd is process-global, so everything
 /// cwd-dependent lives in this single test.
 #[test]
-fn store_bytes_match_oracle_goldens() {
+fn v2_store_is_deterministic_and_retains_unchanged_segment_vectors() {
     std::env::set_current_dir(repo_root()).expect("chdir repo root");
     let vectors = vectors();
     for (name, corpus) in vectors["corpora"].as_object().unwrap() {
@@ -87,10 +87,27 @@ fn store_bytes_match_oracle_goldens() {
         seen.sort();
         let golden = corpus["segments"].as_object().unwrap();
         let mut expected_names: Vec<String> = golden.keys().cloned().collect();
+        expected_names.extend(
+            [
+                "artifactpathmap.seg",
+                "identities.seg",
+                "keymap.seg",
+                "layers.seg",
+                "redirects.seg",
+            ]
+                .into_iter()
+                .map(str::to_string),
+        );
         expected_names.sort();
         assert_eq!(seen, expected_names, "segment file set for {name}");
 
         for (seg, meta) in golden {
+            if matches!(
+                seg.as_str(),
+                "entries.seg" | "relationships.seg" | "live.seg" | "scope.seg"
+            ) {
+                continue; // v2 appends source-aware identity to these rows
+            }
             let bytes = fs::read(seg_dir.join(seg)).unwrap();
             assert_eq!(
                 rac_engine::sha256::hexdigest(&bytes),
@@ -101,6 +118,23 @@ fn store_bytes_match_oracle_goldens() {
                 assert_eq!(hex(&bytes), raw, "segment {seg} raw bytes of {name}");
             }
         }
+
+        let second_cache = scratch_dir(&format!("golden-second-{name}"));
+        assert!(write_store(
+            &second_cache,
+            expected_hash,
+            SCHEMA_VERSION,
+            &derived
+        ));
+        let second_dir = store_dir(&second_cache, expected_hash);
+        for segment in &seen {
+            assert_eq!(
+                fs::read(seg_dir.join(segment)).unwrap(),
+                fs::read(second_dir.join(segment)).unwrap(),
+                "v2 segment {segment} of {name} is not deterministic"
+            );
+        }
+        let _ = fs::remove_dir_all(&second_cache);
 
         // Reader round-trip: the mapped base reproduces the fresh build.
         let reader = open_store(&cache_dir, expected_hash, SCHEMA_VERSION).expect("open");
@@ -126,8 +160,9 @@ fn store_bytes_match_oracle_goldens() {
                 "warm != cold for {query:?} over {name}"
             );
         }
-        let cold = rac_engine::read_model::find_decisions_in(
+        let cold = rac_engine::read_model::find_decisions_in_source_aware(
             &derived.index_entries,
+            &derived.live_decision_keys,
             &derived.live_decision_paths,
             "widget",
         );
@@ -151,6 +186,10 @@ fn reader_reproduces_fresh_build(
     derived: &rac_engine::derived::DerivedIndex,
 ) {
     assert_eq!(reader.doc_count as usize, derived.index_entries.len());
+    assert_eq!(
+        reader.identity_count().unwrap() as usize,
+        derived.resolution.entries.len()
+    );
     for (docid, entry) in derived.index_entries.iter().enumerate() {
         let docid = docid as u32;
         let full = reader.full_entry(docid).unwrap();
@@ -160,6 +199,9 @@ fn reader_reproduces_fresh_build(
         assert_eq!(full.path, entry.path);
         assert_eq!(full.aliases, entry.aliases);
         assert_eq!(full.tags, entry.tags);
+        assert_eq!(full.key, entry.key);
+        assert_eq!(full.artifact_path, entry.artifact_path);
+        assert_eq!(full.origin, entry.origin);
         assert_eq!(full.inbound_count, entry.inbound_count);
         assert_eq!(full.search_sections.len(), entry.search_sections.len());
         for (a, b) in full.search_sections.iter().zip(&entry.search_sections) {
@@ -179,6 +221,26 @@ fn reader_reproduces_fresh_build(
         // Path map answers this doc.
         assert_eq!(reader.docid_for_path(&entry.path).unwrap(), Some(docid));
     }
+    for (docid, entry) in derived.resolution.entries.iter().enumerate() {
+        let docid = docid as u32;
+        let identity = reader.identity_entry(docid).unwrap();
+        assert_eq!(identity.id, entry.id);
+        assert_eq!(identity.path, entry.path);
+        assert_eq!(identity.aliases, entry.aliases);
+        assert_eq!(identity.key, entry.key);
+        assert_eq!(identity.artifact_path, entry.artifact_path);
+        assert_eq!(identity.origin, entry.origin);
+        let source = reader.source_artifact(docid).unwrap();
+        assert_eq!(source.key, entry.key.clone().unwrap());
+        assert_eq!(source.path, entry.artifact_path.clone().unwrap());
+        assert!(reader.docids_for_key(&source.key).unwrap().contains(&docid));
+        assert_eq!(reader.docid_for_artifact_path(&source.path).unwrap(), Some(docid));
+    }
+    assert_eq!(reader.layers().unwrap(), derived.layers);
+    assert_eq!(
+        reader.canonical_redirects().unwrap(),
+        derived.resolution.canonical_redirects
+    );
     // Relationships / live / scope / portfolio round-trip.
     let rels = reader.relationships().unwrap();
     assert_eq!(rels.len(), derived.relationships.len());
@@ -188,14 +250,23 @@ fn reader_reproduces_fresh_build(
         assert_eq!(a.target, b.target);
         assert_eq!(a.resolved_path, b.resolved_path);
         assert_eq!(a.issue, b.issue);
+        assert_eq!(a.source_artifact, b.source_artifact);
+        assert_eq!(a.resolved_artifact, b.resolved_artifact);
     }
     assert_eq!(
         reader.live_decision_paths().unwrap(),
         derived.live_decision_paths
     );
+    assert_eq!(
+        reader.live_decision_keys().unwrap(),
+        derived.live_decision_keys
+    );
     let scope = reader.scope_rows().unwrap();
     assert_eq!(scope.len(), derived.scope_rows.len());
     for (a, b) in scope.iter().zip(&derived.scope_rows) {
+        assert_eq!(a.key, b.key);
+        assert_eq!(a.artifact_path, b.artifact_path);
+        assert_eq!(a.origin, b.origin);
         assert_eq!(a.id, b.id);
         assert_eq!(a.title, b.title);
         assert_eq!(a.status, b.status);
@@ -204,6 +275,12 @@ fn reader_reproduces_fresh_build(
     }
     assert_eq!(reader.portfolio_summary().unwrap(), derived.portfolio_summary);
     assert_eq!(reader.docid_for_path("no/such/path.md").unwrap(), None);
+    assert_eq!(
+        reader
+            .docid_for_key(&rac_engine::corpus::ArtifactKey::new("none/source", "none"))
+            .unwrap(),
+        None
+    );
     assert!(reader.alias_docids("no-such-alias").unwrap().is_empty());
 }
 
@@ -250,9 +327,14 @@ fn corruption_gates(cache_dir: &Path, corpus_hash: &str, seg_dir: &Path) {
     let derived = rac_engine::derived::DerivedIndex {
         layers: Vec::new(),
         source_artifacts: Vec::new(),
+        resolution: Box::new(rac_engine::derived::ResolutionProjection {
+            entries: Vec::new(),
+            canonical_redirects: Vec::new(),
+        }),
         index_entries: Vec::new(),
         field_tokens: Vec::new(),
         relationships: Vec::new(),
+        live_decision_keys: Vec::new(),
         live_decision_paths: Vec::new(),
         portfolio_summary: serde_json::json!({}),
         scope_rows: Vec::new(),

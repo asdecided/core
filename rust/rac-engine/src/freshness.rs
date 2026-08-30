@@ -26,7 +26,7 @@ use crate::relationships::CorpusItem;
 /// or the re-derived snapshot bundle (the delta window).
 pub enum TrackerModel {
     View(MmapIndexReader),
-    Snapshot(DerivedIndex),
+    Snapshot(Box<DerivedIndex>),
     /// P6 production generation. The document overlay is immutable for the
     /// lifetime of this served model and is published only after every
     /// incremental projection has been staged successfully.
@@ -362,7 +362,7 @@ impl FreshnessTracker {
         }
         let derived =
             build_derived_index_from_items(&self.root_str, &self.ordered_items(), true);
-        self.model = Some(TrackerModel::Snapshot(derived));
+        self.model = Some(TrackerModel::Snapshot(Box::new(derived)));
         self.serving_generation += 1;
     }
 

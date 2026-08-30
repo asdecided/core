@@ -1,31 +1,32 @@
 # Index store on-disk format (ADR-104 / ADR-106 / ADR-112)
 
-Durable byte-level specification of the persistent derived-index store,
-extracted from the frozen Python oracle (`src/asdecided/services/index_format.py`,
-`index_store.py`, `derived_cache.py`, `freshness.py`) for the native port
-(roadmap:native-derived-index). **Store byte-identity is the chosen parity
-surface**: for the same corpus bytes the Rust writer must produce a store
-directory whose every segment file is byte-identical to the oracle's.
-Everything below is deterministic — no timestamps, no pids, no floats on
-disk (temp-file *names* embed pid/random bytes but never survive the
-`os.replace`).
+Durable byte-level specification of the persistent derived-index store. The
+v1 format was extracted from the frozen Python oracle; ADR-143 cuts the native
+engine over to a source-aware v2 layout. Unchanged segment families retain
+their byte vectors, while v2 entries, relationships, liveness, scope, layers,
+and composite maps carry federation identity. Old `store/v1` directories are cache misses
+and are never decoded as v2. Everything below is deterministic — no
+timestamps, no pids, no floats on disk (temp-file *names* embed pid/random
+bytes but never survive the atomic rename).
 
 ## 1. Cache directory layout
 
 ```
 <cache_dir>/                              # default_cache_dir(), §8
   <corpus_hash>.json                      # marker (schema gate), §7
-  store/v1/<corpus_hash>/                 # one store dir per corpus hash
-    header.seg entries.seg sections.seg tokens.seg termdict.seg
+  store/v2/<generation_hash>/             # one store dir per logical generation
+    header.seg entries.seg identities.seg sections.seg tokens.seg termdict.seg
     postings.seg relationships.seg live.seg scope.seg portfolio.seg
-    aliasmap.seg pathmap.seg              # exactly these 12 files
+    aliasmap.seg pathmap.seg keymap.seg artifactpathmap.seg layers.seg
+    redirects.seg                           # exactly these 17 files
   validate/v1/<root_key>.vseg             # per-root validation rows, §9
   manifest/v1/<root_key>.fseg             # per-root stat manifest, §10
 ```
 
-- `STORE_DIRNAME = "store"`, `STORE_LAYOUT_VERSION = "v1"`.
-- `corpus_hash` = the corpus content hash (§6), lowercase hex sha256.
-- Writes are atomic: segments land in `store/v1/.<hash>.tmp-<pid>-<hex8>`,
+- `STORE_DIRNAME = "store"`, `STORE_LAYOUT_VERSION = "v2"`.
+- `generation_hash` is the single-corpus content hash (§6) when there is no
+  federation manifest, or the framed composed-generation hash (§6.1).
+- Writes are atomic: segments land in `store/v2/.<hash>.tmp-<pid>-<hex8>`,
   each file `fsync`ed, the dir fsynced (best-effort), then `os.replace`d
   onto the final name. `.vseg`/`.fseg` writes use the same temp+replace
   shape with one file.
@@ -74,19 +75,34 @@ rows     concatenated row blobs (no per-row length; offsets delimit)
 Reader gates: offset table must fit the payload; `row(k)` requires
 `0 <= k < count` and `data_start + offset <= len`.
 
-## 3. The 12 read-model segments
+## 3. The 17 read-model segments
 
-Docids are assigned in `index_entries` order — the corpus walk's
-sorted-path order (`sorted(Path)` over `find_markdown_files`, §6). All
-per-doc segments are indexed by that docid.
+Search docids are assigned in effective `index_entries` order. Identity
+docids are assigned independently in the central composition layer's exact
+point-resolution order. In a non-federated corpus both projections retain the
+corpus walk's sorted-path order (`sorted(Path)` over
+`find_markdown_files`, §6).
 
 Field order is a parity contract:
 `FIELDS = ("id", "title", "path", "heading", "body", "tags")`.
 
 - **entries.seg** (indexed, one row per doc):
   `text id | text type | opt_text title | text path | text_list aliases |
-  text_list tags | u32 inbound_count | 6 × u32 per-field token counts`
+  text_list tags | u32 inbound_count | 6 × u32 per-field token counts |
+  opt ArtifactKey | opt ArtifactPath | opt ArtifactOrigin`
   (field lengths in FIELDS order, `len(field_tokens[name])`).
+  Each `opt` uses a `u32` 0/1 presence flag. `ArtifactKey` is
+  `text source | text canonical_id`; `ArtifactPath` is
+  `text source | text relative_path`; `ArtifactOrigin` is
+  `text source | text layer | opt_text pin | opt_text alias`, where layer is
+  exactly `local` or `inherited`. Fresh v2 rows always carry all three values;
+  absence remains decodable only for compatibility fixtures.
+- **identities.seg** (indexed, one row per authorized point-resolution row):
+  `text id | text type | opt_text title | text path | text_list aliases |
+  text_list tags | opt ArtifactKey | opt ArtifactPath | opt ArtifactOrigin`.
+  It may retain an overridden parent under its qualified canonical alias while
+  attaching that parent's unqualified canonical id to the local replacement.
+  It deliberately has no search sections, inbound count, or field lengths.
 - **sections.seg** (indexed): `u32 nsections` then per section
   `text heading | text_list lines`.
 - **tokens.seg** (indexed): 6 × `u32_list` of term ids, FIELDS order,
@@ -100,16 +116,33 @@ Field order is a parity contract:
   id set).
 - **aliasmap.seg** (indexed): rows sorted by casefolded key (Python
   `str.casefold`, code-point sort); row = `text key | u32_list docids`
-  (ascending, consecutive-duplicate-guarded). Keys are the casefold of
-  every entry alias.
+  (ascending, consecutive-duplicate-guarded). Keys and docids refer to
+  `identities.seg`, so qualified parent lookup and override redirects survive
+  a warm open exactly as composed.
 - **pathmap.seg** (indexed): rows sorted by path *string* (not Path
   order); row = `text path | u32 docid`.
+- **keymap.seg** (indexed): rows sorted by `(source, canonical_id)`; row =
+  `text source | text canonical_id | u32_list identity_docids`. Multiple
+  docids retain a deterministic ambiguity instead of acquiring precedence.
+- **artifactpathmap.seg** (indexed): rows sorted by
+  `(source, relative_path)`; row =
+  `text source | text relative_path | u32 identity_docid`.
 - **relationships.seg** (plain): `u32 count` then per relationship
   `text source_path | text relationship | text target |
-  opt_text resolved_path | opt_text issue`.
-- **live.seg** (plain): `text_list live_decision_paths`.
+  opt_text resolved_path | opt_text issue | opt ArtifactPath source_artifact |
+  opt ArtifactPath resolved_artifact`.
+- **layers.seg** (plain): `u32 count` then per stable layer
+  `text source | text layer | opt_text pin | opt_text alias`.
+- **redirects.seg** (plain): `u32 count` then per validated mapping three
+  required ArtifactKeys in order: parent, replacement, rationale. Each key is
+  encoded with the standard `u32 present=1 | text source | text canonical_id`
+  shape. Raw manifest YAML is never persisted as resolution authority.
+- **live.seg** (plain): `u32 count` then per live decision
+  `required ArtifactKey | text display_path`. The key is the filtering
+  authority; the display path is retained for released single-corpus output.
 - **scope.seg** (plain): `u32 count` then per row
-  `text id | text title | text status | text path |
+  `opt ArtifactKey | opt ArtifactPath | opt ArtifactOrigin |
+  text id | text title | text status | text path |
   text_list scope_entries`.
 - **portfolio.seg** (plain): one `text` — the portfolio summary dict as
   `json.dumps(obj, ensure_ascii=False)` (compact-with-spaces default
@@ -121,7 +154,7 @@ Field order is a parity contract:
 
 ### 3.1 Header gates on open
 
-After framing checks on all 12 segments, the reader reads header.seg and
+After framing checks on all 17 segments, the reader reads header.seg and
 fails closed on: stored hash ≠ requested corpus hash; stored bundle ≠
 `SCHEMA_VERSION = "3"`; stored fingerprint ≠ the compiled-in
 `scoring_fingerprint()`. Fingerprint string (pinned):
@@ -166,6 +199,24 @@ fold `rel_posix_path utf8 | \0 | ascii hexdigest | \0` into one sha256;
 hexdigest is the corpus hash. `corpus_hash_from_manifest` reproduces
 this from cached per-file hashes (re-hashing any file absent from the
 manifest) — byte-identical for every non-S5 state.
+
+### 6.1 Federated logical generation hash
+
+A repository with a verified parent uses domain
+`asdecided-federated-generation-v1\0` and one-byte-tag + u64-big-endian-length
+frames over: the hash of the exact captured child path/byte snapshot; child
+source; exact child config bytes; exact manifest bytes; parent source;
+verified full parent digest; exact parent config bytes; parent alias; an
+explicitly presence-tagged override-mapping payload; the `local` / `inherited`
+layer labels; the recursive/top-level flag; and the child-repository-relative
+corpus root. Parent verification and child capture precede key construction
+and every cache reuse. The central composer consumes those captured child
+bytes and the verified parent's captured bytes without a second walk or read.
+Changing any child corpus/config/mode/root, manifest, alias, override, parent
+config/source, parent artifact, or pin input therefore selects a different
+generation. Checkout paths never enter the key or a public artifact path. A
+repository without the manifest continues to use the corpus hash above
+unchanged.
 
 ## 7. Marker file
 
