@@ -18,7 +18,7 @@
 //!   `**/` zero-or-more whole segments, `[...]` classes, `.`-collapse and
 //!   `..`-rejection in path normalisation).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use serde_json::{json, Map, Value};
@@ -467,6 +467,15 @@ pub fn decisions_for_path(directory: &str, path: &str, recursive: bool) -> Scope
 /// `ScopeLookupResult.to_dict()` — `{schema_version, query, in_repository,
 /// decisions}` in Python dict insertion order.
 pub fn scope_lookup_value(result: &ScopeLookupResult) -> Value {
+    scope_lookup_value_with_origin(result, false)
+}
+
+/// Federated scope payload. Origin is opt-in so a repository without a
+/// manifest retains the released JSON shape byte for byte.
+pub fn scope_lookup_value_with_origin(
+    result: &ScopeLookupResult,
+    include_origin: bool,
+) -> Value {
     let mut payload = Map::new();
     payload.insert("schema_version".to_string(), json!("1"));
     payload.insert("query".to_string(), json!(result.query));
@@ -481,11 +490,47 @@ pub fn scope_lookup_value(result: &ScopeLookupResult) -> Value {
             m.insert("status".to_string(), json!(d.status));
             m.insert("path".to_string(), json!(d.path));
             m.insert("matching_entry".to_string(), json!(d.matching_entry));
+            if include_origin {
+                if let Some(origin) = &d.origin {
+                    m.insert(
+                        "provenance".to_string(),
+                        crate::output::artifact_origin_value(origin),
+                    );
+                }
+            }
             Value::Object(m)
         })
         .collect();
     payload.insert("decisions".to_string(), Value::Array(decisions));
     Value::Object(payload)
+}
+
+pub fn scope_lookup_value_with_composed(
+    result: &ScopeLookupResult,
+    corpus: &crate::composition::ComposedCorpus,
+) -> Value {
+    let mut payload = scope_lookup_value_with_origin(result, true);
+    if let Some(decisions) = payload
+        .get_mut("decisions")
+        .and_then(Value::as_array_mut)
+    {
+        for (value, decision) in decisions.iter_mut().zip(&result.decisions) {
+            let Some(provenance) = decision
+                .key
+                .as_ref()
+                .and_then(|key| corpus.provenance_for(key))
+            else {
+                continue;
+            };
+            if let Some(object) = value.as_object_mut() {
+                object.insert(
+                    "provenance".to_string(),
+                    crate::output::composed_provenance_value(&provenance),
+                );
+            }
+        }
+    }
+    payload
 }
 
 /// `decisions_for_path` over ALREADY-DERIVED scope rows (ADR-103): the
@@ -580,6 +625,142 @@ struct ItemBuilder {
     path: String,
     /// Provenance keys in insertion order.
     provenance: Map<String, Value>,
+}
+
+struct ComposedItemBuilder {
+    key: ArtifactKey,
+    id: String,
+    item_type: String,
+    title: Option<String>,
+    status: String,
+    path: String,
+    provenance: Map<String, Value>,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn add_composed_item(
+    items: &mut Vec<ComposedItemBuilder>,
+    index_of: &mut HashMap<ArtifactKey, usize>,
+    key: &ArtifactKey,
+    path: &ArtifactPath,
+    origin: &ArtifactOrigin,
+    channel: &str,
+    item_id: &str,
+    item_type: &str,
+    title: Option<&str>,
+    status: &str,
+    matching_entry: Option<&str>,
+    superseded: Option<&str>,
+    evidence: Option<Value>,
+) {
+    let index = match index_of.get(key) {
+        Some(index) => *index,
+        None => {
+            let mut provenance = Map::new();
+            provenance.insert("channels".to_string(), json!([]));
+            provenance.insert("source".to_string(), json!(origin.source));
+            provenance.insert("layer".to_string(), json!(origin.layer.as_str()));
+            if let Some(pin) = &origin.pin {
+                provenance.insert("pin".to_string(), json!(pin));
+            }
+            items.push(ComposedItemBuilder {
+                key: key.clone(),
+                id: item_id.to_string(),
+                item_type: item_type.to_string(),
+                title: title.map(str::to_string),
+                status: status.to_string(),
+                path: path.relative_path.clone(),
+                provenance,
+            });
+            index_of.insert(key.clone(), items.len() - 1);
+            items.len() - 1
+        }
+    };
+    let provenance = &mut items[index].provenance;
+    let channels = provenance
+        .get_mut("channels")
+        .and_then(Value::as_array_mut)
+        .expect("channels array");
+    if !channels.iter().any(|value| value.as_str() == Some(channel)) {
+        channels.push(json!(channel));
+    }
+    if let Some(entry) = matching_entry {
+        provenance
+            .entry("matching_entry".to_string())
+            .or_insert_with(|| json!(entry));
+    }
+    if let Some(replaced_id) = superseded {
+        let replaced = provenance
+            .entry("superseded".to_string())
+            .or_insert_with(|| json!([]))
+            .as_array_mut()
+            .expect("superseded array");
+        if !replaced
+            .iter()
+            .any(|value| value.as_str() == Some(replaced_id))
+        {
+            replaced.push(json!(replaced_id));
+        }
+    }
+    if let Some(evidence) = evidence {
+        provenance
+            .entry("evidence".to_string())
+            .or_insert(evidence);
+    }
+}
+
+fn composed_successor_map(
+    relationships: &[Relationship],
+) -> HashMap<ArtifactPath, Vec<ArtifactPath>> {
+    let mut successors: HashMap<ArtifactPath, Vec<ArtifactPath>> = HashMap::new();
+    for relationship in relationships {
+        if relationship.relationship != SUPERSEDES {
+            continue;
+        }
+        let (Some(source), Some(target)) = (
+            relationship.source_artifact.as_ref(),
+            relationship.resolved_artifact.as_ref(),
+        ) else {
+            continue;
+        };
+        successors
+            .entry(target.clone())
+            .or_default()
+            .push(source.clone());
+    }
+    for paths in successors.values_mut() {
+        paths.sort();
+        paths.dedup();
+    }
+    successors
+}
+
+fn composed_live_successors(
+    path: &ArtifactPath,
+    successors: &HashMap<ArtifactPath, Vec<ArtifactPath>>,
+    is_retired: &dyn Fn(&ArtifactPath) -> bool,
+    visited: &mut HashSet<ArtifactPath>,
+) -> Vec<ArtifactPath> {
+    let mut result = Vec::new();
+    let Some(paths) = successors.get(path) else {
+        return result;
+    };
+    for successor in paths {
+        if !visited.insert(successor.clone()) {
+            continue;
+        }
+        if is_retired(successor) {
+            result.extend(composed_live_successors(
+                successor,
+                successors,
+                is_retired,
+                visited,
+            ));
+        } else {
+            result.push(successor.clone());
+        }
+    }
+    result
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -698,6 +879,178 @@ pub fn retrieve_grounding(
         |path| entry_by_path.get(path).map(|entry| (*entry).clone()),
         status_of,
     )
+}
+
+/// Grounding over the one verified composed snapshot. Identity, deduplication,
+/// successor traversal, excerpts, and provenance are all source-aware; no
+/// inherited path is reopened after verification.
+pub fn retrieve_grounding_from_composed(
+    directory: &str,
+    task: &str,
+    scope: Option<&str>,
+    top_k: i64,
+    budget: i64,
+    live_only: bool,
+    corpus: &crate::composition::ComposedCorpus,
+) -> Value {
+    let top_k = top_k.max(1);
+    let effective: Vec<_> = corpus.effective().cloned().collect();
+    let entries = corpus.effective_index();
+    let keyword = search_index(&entries, task, None, &[]);
+    let scope_rows = scope_rows_from_items(&effective);
+    let relationships = corpus.relationships();
+    let by_path: HashMap<ArtifactPath, &CorpusItem> = effective
+        .iter()
+        .map(|item| (item.artifact_path.clone(), item))
+        .collect();
+    let is_retired = |path: &ArtifactPath| -> bool {
+        by_path.get(path).is_some_and(|item| {
+            let artifact_type = item
+                .spec
+                .map(|spec| spec.name.as_str())
+                .unwrap_or("unknown");
+            is_retired_status(artifact_type, &artifact_status(&item.artifact))
+        })
+    };
+
+    let mut items = Vec::new();
+    let mut index_of = HashMap::new();
+    let scope = scope.filter(|value| !value.is_empty());
+    if let Some(scope_path) = scope {
+        for governing in governing_decisions(&scope_rows, directory, scope_path) {
+            let (Some(key), Some(path), Some(origin)) = (
+                governing.key.as_ref(),
+                governing.artifact_path.as_ref(),
+                governing.origin.as_ref(),
+            ) else {
+                continue;
+            };
+            add_composed_item(
+                &mut items,
+                &mut index_of,
+                key,
+                path,
+                origin,
+                CHANNEL_SCOPE,
+                &governing.id,
+                DECISION_TYPE,
+                (!governing.title.is_empty()).then_some(governing.title.as_str()),
+                &governing.status,
+                Some(&governing.matching_entry),
+                None,
+                None,
+            );
+        }
+    }
+
+    let successors = if live_only {
+        composed_successor_map(&relationships)
+    } else {
+        Default::default()
+    };
+    for matched in &keyword.matches {
+        let (Some(key), Some(path), Some(origin)) = (
+            matched.key.as_ref(),
+            matched.artifact_path.as_ref(),
+            matched.origin.as_ref(),
+        ) else {
+            continue;
+        };
+        if live_only && is_retired(path) {
+            let mut visited = HashSet::from([path.clone()]);
+            for successor_path in
+                composed_live_successors(path, &successors, &is_retired, &mut visited)
+            {
+                let Some(successor) = by_path.get(&successor_path) else {
+                    continue;
+                };
+                let artifact_type = successor
+                    .spec
+                    .map(|spec| spec.name.as_str())
+                    .unwrap_or("unknown");
+                add_composed_item(
+                    &mut items,
+                    &mut index_of,
+                    &successor.key,
+                    &successor.artifact_path,
+                    &successor.origin,
+                    CHANNEL_SUPERSEDES,
+                    &successor.key.canonical_id,
+                    artifact_type,
+                    successor.artifact.product.title.as_deref(),
+                    &artifact_status(&successor.artifact),
+                    None,
+                    Some(&matched.id),
+                    None,
+                );
+            }
+            continue;
+        }
+        add_composed_item(
+            &mut items,
+            &mut index_of,
+            key,
+            path,
+            origin,
+            CHANNEL_KEYWORD,
+            &matched.id,
+            &matched.artifact_type,
+            matched.title.as_deref(),
+            by_path
+                .get(path)
+                .map(|item| artifact_status(&item.artifact))
+                .unwrap_or_default()
+                .as_str(),
+            None,
+            None,
+            matched.evidence.as_ref().map(crate::output::evidence_value),
+        );
+    }
+
+    items.truncate((top_k as usize).min(items.len()));
+    let share = if items.is_empty() {
+        0
+    } else {
+        budget.div_euclid((top_k.min(items.len() as i64)).max(1))
+    };
+    let shaped: Vec<Value> = items
+        .into_iter()
+        .map(|mut item| {
+            let content = corpus
+                .content(&item.key)
+                .and_then(|bytes| std::str::from_utf8(bytes).ok())
+                .map(|text| text.replace("\r\n", "\n").replace('\r', "\n"))
+                .unwrap_or_default();
+            if let Some(overrides) = corpus
+                .provenance_for(&item.key)
+                .and_then(|provenance| {
+                    crate::output::composed_provenance_value(&provenance)
+                        .get("overrides")
+                        .cloned()
+                })
+            {
+                item.provenance.insert("overrides".to_string(), overrides);
+            }
+            let mut value = Map::new();
+            value.insert("id".to_string(), json!(item.id));
+            value.insert("type".to_string(), json!(item.item_type));
+            value.insert("title".to_string(), json!(item.title));
+            value.insert("status".to_string(), json!(item.status));
+            value.insert("path".to_string(), json!(item.path));
+            value.insert("excerpt".to_string(), json!(py_slice_to(&content, share)));
+            value.insert("provenance".to_string(), Value::Object(item.provenance));
+            Value::Object(value)
+        })
+        .collect();
+    let mut payload = Map::new();
+    payload.insert("schema_version".to_string(), json!("1"));
+    payload.insert("task".to_string(), json!(task));
+    if let Some(scope_path) = scope {
+        payload.insert("scope".to_string(), json!(scope_path));
+    }
+    payload.insert("live_only".to_string(), json!(live_only));
+    payload.insert("items".to_string(), Value::Array(shaped));
+    Value::Object(payload)
 }
 
 /// Grounding over an already-derived mutation-window snapshot. Only matched,

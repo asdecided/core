@@ -14,7 +14,6 @@ use serde_json::{json, Map, Value};
 
 use crate::identity::artifact_identifier;
 use crate::pycompat::{first_nonempty_line, py_casefold, read_text_universal};
-use crate::relationships::corpus_items;
 use crate::spec::spec_for;
 
 const DECISION_TYPE: &str = "decision";
@@ -179,9 +178,11 @@ fn is_live_decision(artifact: &crate::parse::Artifact) -> bool {
 }
 
 /// `build_agent_rules_block(directory)` → ordered entries + digest.
-fn build_projection(directory: &str) -> (Vec<AgentRulesEntry>, String) {
+fn build_projection(directory: &str) -> Result<(Vec<AgentRulesEntry>, String), String> {
     let mut entries: Vec<AgentRulesEntry> = Vec::new();
-    for item in corpus_items(directory, true) {
+    for item in crate::federated_corpus::local_writable_items(directory, true)
+        .map_err(|error| error.to_string())?
+    {
         let Some(spec) = item.spec else { continue };
         if spec.name != DECISION_TYPE || !is_live_decision(&item.artifact) {
             continue;
@@ -215,7 +216,7 @@ fn build_projection(directory: &str) -> (Vec<AgentRulesEntry>, String) {
         .collect();
     let canonical = crate::pyjson::dumps_canonical_sorted(&Value::Array(payload));
     let digest = crate::sha256::hexdigest(canonical.as_bytes());
-    (entries, digest)
+    Ok((entries, digest))
 }
 
 /// `render_managed_block(projection)` — markers + distilled pointers, no
@@ -298,7 +299,7 @@ pub fn generate_agent_rules(
     root: &str,
     clients: &[String],
 ) -> Result<AgentRulesResult, String> {
-    let (entries, digest) = build_projection(directory);
+    let (entries, digest) = build_projection(directory)?;
     let block = render_managed_block(&entries, &digest);
 
     let mut files: Vec<AgentRulesFileResult> = Vec::new();
@@ -349,8 +350,12 @@ pub fn generate_agent_rules(
 
 /// `check_agent_rules(directory, root, clients)` — never writes; compares
 /// each present target's embedded digest to the live projection.
-pub fn check_agent_rules(directory: &str, root: &str, clients: &[String]) -> AgentRulesResult {
-    let (_, digest) = build_projection(directory);
+pub fn check_agent_rules(
+    directory: &str,
+    root: &str,
+    clients: &[String],
+) -> Result<AgentRulesResult, String> {
+    let (_, digest) = build_projection(directory)?;
 
     let mut files: Vec<AgentRulesFileResult> = Vec::new();
     for target in targets_for(clients) {
@@ -371,12 +376,12 @@ pub fn check_agent_rules(directory: &str, root: &str, clients: &[String]) -> Age
         });
     }
 
-    AgentRulesResult {
+    Ok(AgentRulesResult {
         mode: "check",
         digest,
         root: root.to_string(),
         files,
-    }
+    })
 }
 
 #[cfg(test)]

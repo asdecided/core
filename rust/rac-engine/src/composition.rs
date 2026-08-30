@@ -7,6 +7,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
+use std::path::{Path, PathBuf};
 
 use crate::corpus::{ArtifactKey, ArtifactPath, Layer};
 use crate::pycompat::py_casefold;
@@ -15,7 +16,7 @@ use crate::relationships::{
     validation_row_from_item, CorpusItem, Relationship, RelationshipValidation,
     ResolutionCandidate, ResolutionIndex, ValidationRow,
 };
-use crate::resolve::is_live_decision;
+use crate::resolve::{entry_from_item, identity_entry_from_item, is_live_decision, IndexEntry};
 
 pub const FINDING_CANONICAL_COLLISION: &str = "cross-corpus-canonical-id-collision";
 pub const FINDING_INVALID_OVERRIDE: &str = "cross-corpus-invalid-override";
@@ -226,6 +227,35 @@ pub struct ValidatedOverride {
     pub rationale: ArtifactKey,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum OverrideRole {
+    Overridden,
+    Replacement,
+}
+
+impl OverrideRole {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Overridden => "overridden",
+            Self::Replacement => "replacement",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ArtifactOverrideProvenance {
+    pub state: OverrideRole,
+    pub parent: ArtifactKey,
+    pub replacement: ArtifactKey,
+    pub rationale: ArtifactKey,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ComposedProvenance {
+    pub origin: crate::corpus::ArtifactOrigin,
+    pub overrides: Vec<ArtifactOverrideProvenance>,
+}
+
 /// Exact lookup failure against the composed effective view.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LookupError {
@@ -239,6 +269,8 @@ pub enum LookupError {
 /// and effective corpora are stable ordered projections over it.
 pub struct ComposedCorpus {
     items: Vec<CorpusItem>,
+    child_source: Option<String>,
+    read_only_root: Option<PathBuf>,
     local: Vec<usize>,
     effective: Vec<usize>,
     parent: Option<ParentIdentity>,
@@ -256,7 +288,18 @@ impl ComposedCorpus {
     /// before manifest activation.
     pub fn local(mut items: Vec<CorpusItem>) -> Self {
         items.sort_by(stable_item_order);
-        Self::build(items, None, Vec::new(), HashMap::new())
+        let child_source = items
+            .iter()
+            .find(|item| item.origin.layer == Layer::Local)
+            .map(|item| item.origin.source.clone());
+        Self::build(
+            items,
+            child_source,
+            None,
+            None,
+            Vec::new(),
+            HashMap::new(),
+        )
     }
 
     /// Compose one writable child with one already-verified read-only parent.
@@ -268,7 +311,22 @@ impl ComposedCorpus {
     ) -> Self {
         local.append(&mut inherited);
         local.sort_by(stable_item_order);
-        Self::build(local, Some(parent), overrides, HashMap::new())
+        let child_source = local
+            .iter()
+            .find(|item| item.origin.layer == Layer::Local)
+            .map(|item| item.origin.source.clone());
+        let read_only_root = local
+            .iter()
+            .find(|item| item.origin.layer == Layer::Inherited)
+            .map(|item| item.locator.corpus.repository_root.clone());
+        Self::build(
+            local,
+            child_source,
+            read_only_root,
+            Some(parent),
+            overrides,
+            HashMap::new(),
+        )
     }
 
     /// Compose from verification-time snapshots. Captured bytes are owned by
@@ -283,8 +341,41 @@ impl ComposedCorpus {
     ) -> Self {
         local.append(&mut inherited);
         local.sort_by(stable_item_order);
+        let child_source = local
+            .iter()
+            .find(|item| item.origin.layer == Layer::Local)
+            .map(|item| item.origin.source.clone());
+        let read_only_root = local
+            .iter()
+            .find(|item| item.origin.layer == Layer::Inherited)
+            .map(|item| item.locator.corpus.repository_root.clone());
         Self::build(
             local,
+            child_source,
+            read_only_root,
+            Some(parent),
+            overrides,
+            captured_content.into_iter().collect(),
+        )
+    }
+
+    /// Verified-loader constructor. The explicit child identity survives an
+    /// inherited-only composition where no local artifact can carry it.
+    pub fn compose_verified(
+        mut local: Vec<CorpusItem>,
+        mut inherited: Vec<CorpusItem>,
+        child_source: String,
+        read_only_root: PathBuf,
+        parent: ParentIdentity,
+        overrides: Vec<OverrideDeclaration>,
+        captured_content: impl IntoIterator<Item = (ArtifactKey, Vec<u8>)>,
+    ) -> Self {
+        local.append(&mut inherited);
+        local.sort_by(stable_item_order);
+        Self::build(
+            local,
+            Some(child_source),
+            Some(read_only_root),
             Some(parent),
             overrides,
             captured_content.into_iter().collect(),
@@ -293,6 +384,8 @@ impl ComposedCorpus {
 
     fn build(
         items: Vec<CorpusItem>,
+        child_source: Option<String>,
+        read_only_root: Option<PathBuf>,
         parent: Option<ParentIdentity>,
         mut declarations: Vec<OverrideDeclaration>,
         mut captured_content: HashMap<ArtifactKey, Vec<u8>>,
@@ -389,6 +482,8 @@ impl ComposedCorpus {
 
         Self {
             items,
+            child_source,
+            read_only_root,
             local,
             effective,
             parent,
@@ -418,8 +513,48 @@ impl ComposedCorpus {
         self.parent.as_ref()
     }
 
+    pub fn child_source(&self) -> Option<&str> {
+        self.child_source.as_deref()
+    }
+
+    pub fn read_only_root(&self) -> Option<&Path> {
+        self.read_only_root.as_deref()
+    }
+
     pub fn overrides(&self) -> &[ValidatedOverride] {
         &self.overrides
+    }
+
+    /// Shared additive provenance for every public projection. Override roles
+    /// attach only to the retained parent and effective replacement; a
+    /// rationale-only artifact is not itself marked as overridden.
+    pub fn provenance_for(&self, key: &ArtifactKey) -> Option<ComposedProvenance> {
+        let item = self.item(key)?;
+        let mut overrides: Vec<_> = self
+            .overrides
+            .iter()
+            .filter_map(|mapping| {
+                let state = if &mapping.parent == key {
+                    OverrideRole::Overridden
+                } else if &mapping.replacement == key {
+                    OverrideRole::Replacement
+                } else {
+                    return None;
+                };
+                Some(ArtifactOverrideProvenance {
+                    state,
+                    parent: mapping.parent.clone(),
+                    replacement: mapping.replacement.clone(),
+                    rationale: mapping.rationale.clone(),
+                })
+            })
+            .collect();
+        overrides.sort();
+        overrides.dedup();
+        Some(ComposedProvenance {
+            origin: item.origin.clone(),
+            overrides,
+        })
     }
 
     pub fn findings(&self) -> &[CompositionFinding] {
@@ -439,6 +574,82 @@ impl ComposedCorpus {
     /// on `item` for operations that explicitly need physical provenance.
     pub fn content(&self, key: &ArtifactKey) -> Option<&[u8]> {
         self.captured_content.get(key).map(Vec::as_slice)
+    }
+
+    /// Iterate the exact snapshot bytes retained by stable identity. This is
+    /// the bounded handoff used by long-lived readers which must serve an
+    /// inherited body without reopening its materialisation path.
+    pub fn captured_contents(&self) -> impl Iterator<Item = (&ArtifactKey, &[u8])> {
+        self.captured_content
+            .iter()
+            .map(|(key, bytes)| (key, bytes.as_slice()))
+    }
+
+    /// Search/ranking projection over only the effective corpus. Inbound graph
+    /// counts come from this composition's source-aware resolver, including
+    /// qualified cross-source edges and canonical override redirects.
+    pub fn effective_index(&self) -> Vec<IndexEntry> {
+        let key_by_path: HashMap<&ArtifactPath, &ArtifactKey> = self
+            .items
+            .iter()
+            .map(|item| (&item.artifact_path, &item.key))
+            .collect();
+        let mut inbound: HashMap<&ArtifactKey, i64> = HashMap::new();
+        for relationship in self.relationships() {
+            let Some(path) = relationship.resolved_artifact.as_ref() else {
+                continue;
+            };
+            if let Some(key) = key_by_path.get(path) {
+                *inbound.entry(*key).or_insert(0) += 1;
+            }
+        }
+        self.effective()
+            .map(|item| entry_from_item(item, inbound.get(&item.key).copied().unwrap_or(0)))
+            .collect()
+    }
+
+    /// Exact-identity projection over the retained catalog. Unqualified
+    /// aliases occur only on effective items; overridden parent history keeps
+    /// only its qualified canonical address, and replacement rows receive the
+    /// explicitly authorized parent-canonical redirect.
+    pub fn identity_index(&self) -> Vec<IndexEntry> {
+        let effective: BTreeSet<&ArtifactKey> = self.effective().map(|item| &item.key).collect();
+        let mut entries: Vec<IndexEntry> = self
+            .catalog()
+            .map(|item| {
+                let mut entry = identity_entry_from_item(item);
+                if !effective.contains(&item.key) {
+                    entry.aliases.clear();
+                }
+                if item.origin.layer == Layer::Inherited {
+                    if let Some(parent) = &self.parent {
+                        entry
+                            .aliases
+                            .push(format!("{}::{}", parent.alias, item.key.canonical_id));
+                    }
+                }
+                entry
+            })
+            .collect();
+        let entry_by_key: HashMap<ArtifactKey, usize> = entries
+            .iter()
+            .enumerate()
+            .filter_map(|(index, entry)| entry.key.clone().map(|key| (key, index)))
+            .collect();
+        for mapping in &self.overrides {
+            let Some(index) = entry_by_key.get(&mapping.replacement).copied() else {
+                continue;
+            };
+            let alias = mapping.parent.canonical_id.clone();
+            if !entries[index]
+                .aliases
+                .iter()
+                .any(|existing| py_casefold(existing) == py_casefold(&alias))
+            {
+                entries[index].aliases.push(alias);
+            }
+        }
+        entries
     }
 
     /// Resolve against the effective unqualified view, or the retained parent

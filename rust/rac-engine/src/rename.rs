@@ -697,6 +697,29 @@ pub fn compute_rename(
     new_ref: &str,
     recursive: bool,
 ) -> RenamePlan {
+    compute_rename_internal(directory, old_ref, new_ref, recursive, None)
+}
+
+/// Compute a rename against an explicitly bounded writable layer. Federated
+/// command paths pass `ComposedCorpus::local_items()` so a root-level walk
+/// cannot plan edits inside the materialised parent.
+pub fn compute_rename_from_items(
+    directory: &str,
+    old_ref: &str,
+    new_ref: &str,
+    recursive: bool,
+    items: &[crate::relationships::CorpusItem],
+) -> RenamePlan {
+    compute_rename_internal(directory, old_ref, new_ref, recursive, Some(items))
+}
+
+fn compute_rename_internal(
+    directory: &str,
+    old_ref: &str,
+    new_ref: &str,
+    recursive: bool,
+    supplied_items: Option<&[crate::relationships::CorpusItem]>,
+) -> RenamePlan {
     let new_ref = py_strip(new_ref).to_string();
     if !valid_new_ref(&new_ref) {
         return refused(directory, recursive, old_ref, &new_ref, None, REASON_NEW_INVALID);
@@ -716,7 +739,14 @@ pub fn compute_rename(
         }
     };
 
-    let items = corpus_items(directory, recursive);
+    let owned_items;
+    let items = match supplied_items {
+        Some(items) => items,
+        None => {
+            owned_items = corpus_items(directory, recursive);
+            &owned_items
+        }
+    };
     let rows: Vec<ValidationRow> = items
         .iter()
         .map(crate::relationships::validation_row_from_item)
@@ -781,7 +811,7 @@ pub fn compute_rename(
         }
     };
 
-    let mut edits = match reference_edits(&items, &root, old_ref, &new_ref) {
+    let mut edits = match reference_edits(items, &root, old_ref, &new_ref) {
         Ok(edits) => edits,
         Err(issue) => {
             return refused(
