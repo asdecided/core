@@ -34,6 +34,7 @@
 //! - `watchkeeper`: the watchkeeper report and review verdict.
 //! - `output`: human/JSON/SARIF renderers per command.
 //! - `commands`: CLI command entry points (argv already parsed).
+//! - `federation`: strict offline parent-manifest and byte-snapshot verification.
 //! - `cli`: argv parsing and exit codes matching the oracle's argparse
 //!   surface (PORT-CONTRACT.d/01).
 
@@ -76,6 +77,7 @@ pub mod sentry;
 pub mod doctor;
 pub mod mdhtml;
 pub mod export;
+pub mod federation;
 pub mod portal;
 pub mod agent_rules;
 pub mod okf;

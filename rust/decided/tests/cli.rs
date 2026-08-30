@@ -171,3 +171,87 @@ fn export_rejects_an_invalid_configured_corpus_source() {
 
     fs::remove_dir_all(root).expect("remove CLI smoke corpus");
 }
+
+#[test]
+fn corpus_digest_prints_the_canonical_read_only_pin() {
+    let root = scratch_root();
+    fs::create_dir_all(root.join(".decided")).unwrap();
+    fs::create_dir_all(root.join("decisions/sub")).unwrap();
+    fs::write(
+        root.join(".decided/config.yaml"),
+        b"repository_key: STD\ncorpus:\n  source: acme/standards\n",
+    )
+    .unwrap();
+    fs::write(root.join("decisions/a.md"), b"alpha\n").unwrap();
+    fs::write(root.join("decisions/sub/b.md"), b"beta\r\n").unwrap();
+    fs::write(root.join("decisions/ignored.MD"), b"ignored\n").unwrap();
+    let before_config = fs::read(root.join(".decided/config.yaml")).unwrap();
+    let before_a = fs::read(root.join("decisions/a.md")).unwrap();
+    let root_text = root.to_string_lossy().into_owned();
+
+    let output = run(&[
+        "corpus",
+        "digest",
+        "--root",
+        &root_text,
+        "--corpus",
+        "decisions",
+    ]);
+    assert!(
+        output.status.success(),
+        "stdout={}, stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        output.stdout,
+        b"sha256:899d5cdfa52b90a157b018dceb20f4f2901e0d56c91b089c12286c0b8b7b3325\n"
+    );
+    assert!(output.stderr.is_empty());
+    assert_eq!(fs::read(root.join(".decided/config.yaml")).unwrap(), before_config);
+    assert_eq!(fs::read(root.join("decisions/a.md")).unwrap(), before_a);
+
+    fs::remove_dir_all(root).expect("remove CLI digest corpus");
+}
+
+#[test]
+fn corpus_digest_bounds_config_and_rejects_escaping_corpus_paths() {
+    let root = scratch_root();
+    fs::create_dir_all(root.join("parent/decisions")).unwrap();
+    fs::write(root.join("parent/decisions/a.md"), b"alpha\n").unwrap();
+    fs::create_dir_all(root.join(".decided")).unwrap();
+    fs::write(
+        root.join(".decided/config.yaml"),
+        b"repository_key: CHILD\ncorpus:\n  source: acme/child\n",
+    )
+    .unwrap();
+    let parent = root.join("parent").to_string_lossy().into_owned();
+
+    let missing = run(&[
+        "corpus",
+        "digest",
+        "--root",
+        &parent,
+        "--corpus",
+        "decisions",
+    ]);
+    assert_eq!(missing.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&missing.stderr).contains("parent-corpus-config-missing")
+    );
+
+    let escaping = run(&[
+        "corpus",
+        "digest",
+        "--root",
+        &parent,
+        "--corpus",
+        "../decisions",
+    ]);
+    assert_eq!(escaping.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&escaping.stderr).contains("parent-corpus-path-escape")
+    );
+
+    fs::remove_dir_all(root).expect("remove CLI digest corpus");
+}

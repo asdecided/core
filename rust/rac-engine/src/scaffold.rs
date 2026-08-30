@@ -209,7 +209,7 @@ fn valid_repository_key(key: &str) -> bool {
 /// A configured corpus source is a stable, lower-case, slash-namespaced
 /// identity such as `asdecided/core` (ADR-135). Each segment starts and ends
 /// with an ASCII letter or digit; `.`, `_`, and `-` are allowed internally.
-fn valid_corpus_source(source: &str) -> bool {
+pub(crate) fn valid_corpus_source(source: &str) -> bool {
     fn valid_segment(segment: &str) -> bool {
         let bytes = segment.as_bytes();
         let endpoint = |byte: u8| byte.is_ascii_lowercase() || byte.is_ascii_digit();
@@ -263,12 +263,13 @@ fn yaml_get<'a>(
 /// Read the two independent identity values from one config. Unknown sections
 /// remain additive; the recognised identity fields are strict so an invalid
 /// configured source can never silently fall through to another namespace.
-fn read_identity_config(config_path: &str) -> Result<RepositoryIdentityConfig, ScaffoldError> {
+pub(crate) fn parse_identity_config(
+    config_path: &str,
+    text: &str,
+) -> Result<RepositoryIdentityConfig, ScaffoldError> {
     use crate::frontmatter::Yaml;
 
-    let text = std::fs::read_to_string(config_path)
-        .map_err(|e| malformed_config(config_path, &format!("invalid YAML: {e}")))?;
-    let data = crate::frontmatter::yaml_load_config(&text)
+    let data = crate::frontmatter::yaml_load_config(text)
         .map_err(|problem| malformed_config(config_path, &format!("invalid YAML: {problem}")))?;
     let Yaml::Map(pairs) = data else {
         return Err(malformed_config(
@@ -330,6 +331,14 @@ fn read_identity_config(config_path: &str) -> Result<RepositoryIdentityConfig, S
         corpus_source,
         config_path: config_path.to_string(),
     })
+}
+
+pub(crate) fn read_identity_config(
+    config_path: &str,
+) -> Result<RepositoryIdentityConfig, ScaffoldError> {
+    let text = std::fs::read_to_string(config_path)
+        .map_err(|e| malformed_config(config_path, &format!("invalid YAML: {e}")))?;
+    parse_identity_config(config_path, &text)
 }
 
 /// `_read_config(config_path)` — strict read of one config file: YAML must

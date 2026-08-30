@@ -2244,6 +2244,27 @@ pub fn cmd_rename(args: &RenameArgs) -> i32 {
     EXIT_OK
 }
 
+pub struct CorpusDigestArgs {
+    pub root: String,
+    pub corpus: String,
+}
+
+/// Read-only operator calculation for the canonical parent corpus pin. The
+/// implementation consumes only local bytes below `root` and cannot write,
+/// fetch, refresh, or repin anything.
+pub fn cmd_corpus_digest(args: &CorpusDigestArgs) -> i32 {
+    match crate::federation::calculate_parent_digest(&args.root, &args.corpus) {
+        Ok(result) => {
+            emit(result.digest);
+            EXIT_OK
+        }
+        Err(error) => {
+            eprintln!("decided: {error}");
+            EXIT_VALIDATION_FAILED
+        }
+    }
+}
+
 pub struct TelemetryArgs {
     /// Validated positional choice; argparse default is `status`.
     pub action: String,
