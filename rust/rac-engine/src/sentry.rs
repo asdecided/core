@@ -307,11 +307,11 @@ fn parse_document(item: &CorpusItem) -> Result<Option<ConstraintDocument>, Box<S
 /// not require a repository tree and therefore fail the ordinary corpus gate
 /// even when code enforcement was not requested.
 pub fn validate_artifact(artifact: &Artifact) -> Vec<Issue> {
-    let item = CorpusItem {
-        path: String::new(),
-        artifact: artifact.clone(),
-        spec: spec_for("decision"),
-    };
+    let item = CorpusItem::compatible_local_file(
+        "",
+        artifact.clone(),
+        spec_for("decision"),
+    );
     match parse_document(&item) {
         Err(finding) => vec![Issue::new("error", finding.code, finding.message, None)],
         _ => Vec::new(),

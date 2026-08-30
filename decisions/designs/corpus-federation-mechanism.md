@@ -145,6 +145,19 @@ unsupported transitive declaration, and a stale digest are distinct stable
 error findings. No parent artifact enters the effective corpus until all four
 checks pass.
 
+The version-one byte contract is fixed. The hash begins with the ASCII domain
+separator `asdecided-corpus-digest-v1\0`. Every following value is framed as a
+one-byte tag, an unsigned 64-bit big-endian byte length, and the exact value
+bytes. Tag `0x01` carries the UTF-8 parent source, tag `0x02` carries the exact
+governing config bytes, and each Markdown file contributes tag `0x03` with its
+corpus-relative POSIX UTF-8 path followed by tag `0x04` with its exact content
+bytes. Files are ordered by those path bytes. No newline, Unicode, YAML, or
+Markdown normalisation occurs. The operator surface is the read-only command
+`decided corpus digest --root <parent-root> --corpus <parent-corpus>`; it reads
+the source from the bounded parent config and prints `sha256:` followed by 64
+lowercase hexadecimal characters. The command never edits the manifest or
+parent and never performs network I/O.
+
 ### One source-aware read model
 
 The engine introduces source-aware equivalents of its path-only concepts:
@@ -221,6 +234,12 @@ An absent, ambiguous, cross-type, retired-rationale, or parent-to-parent
 mapping is a validation error. There is no implicit child-wins or parent-wins
 rule.
 
+All three override operands are canonical IDs. `parent` is qualified; `with`
+and `rationale` are canonical local IDs and do not accept aliases. An override
+redirects only the parent's canonical ID in the effective unqualified view;
+it does not turn the parent's legacy or title aliases into aliases of the
+replacement.
+
 ### Validation semantics
 
 The parent is validated as a source corpus before overlay. A structural or
@@ -261,11 +280,24 @@ They do not copy artifact bodies, excerpts, override mappings, or the full
 response provenance. Because ADR-127 pins the current path-only shape, ADR-141
 must amend that decision explicitly before these fields ship.
 
+Public `path` values remain corpus-relative paths within the artifact's owning
+source; they never expose or encode the vendored or submodule checkout path.
+The accompanying `source` disambiguates equal paths across layers. Federated
+CLI and MCP records carry `source`, `layer`, and `pin` in their existing
+provenance object, with `pin` present only for inherited records. Export
+records carry the same facts in their projection-specific metadata. A
+repository without a manifest retains its existing shapes byte for byte.
+
 Default reads use the effective combined corpus. Human-facing diagnostic and
 export commands may request `--local-only` to inspect the child layer. MCP and
 enforcement do not expose a local-only bypass: an agent connected to a
 federated repository and `decided gate --code` both receive inherited
 governance.
+
+The first increment exposes `--local-only` on viewer, documents, and graph
+exports. Other human diagnostic reads may adopt the same projection later;
+they are not required for the first implementation and must never weaken MCP,
+routing, or enforcement.
 
 ### Code scope and enforcement
 

@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 
 use crate::pycompat::{py_casefold, py_is_space, py_splitlines, py_strip};
 use crate::relationships::{
-    corpus_items, resolution_index_from_rows, validation_row, CorpusItem, ValidationRow,
+    corpus_items, resolution_index_from_rows, CorpusItem, ValidationRow,
 };
 use crate::spec::RELATIONSHIP_SECTIONS;
 
@@ -719,7 +719,7 @@ pub fn compute_rename(
     let items = corpus_items(directory, recursive);
     let rows: Vec<ValidationRow> = items
         .iter()
-        .map(|item| validation_row(&item.path, &item.artifact, item.spec))
+        .map(crate::relationships::validation_row_from_item)
         .collect();
     let index = resolution_index_from_rows(&rows);
     let mut targets: Vec<&str> = index

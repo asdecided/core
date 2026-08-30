@@ -10,6 +10,10 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::classify::classify;
+use crate::corpus::{
+    compatible_local_layer, ArtifactKey, ArtifactOrigin, ArtifactPath,
+    PhysicalArtifactLocator, PhysicalCorpusLocator,
+};
 use crate::identity::{artifact_identifier, artifact_identifiers, strip_list_marker};
 use crate::parse::{parse_file, Artifact};
 use crate::pycompat::{py_casefold, py_splitlines, py_strip};
@@ -265,6 +269,9 @@ fn is_retired(artifact: &Artifact, spec: &ArtifactSpec) -> bool {
 
 #[derive(Debug, Clone)]
 pub struct ValidationRow {
+    pub key: ArtifactKey,
+    pub artifact_path: ArtifactPath,
+    pub origin: ArtifactOrigin,
     pub path: String,
     /// Artifact type name, or None for an Unknown/untyped document.
     pub spec_name: Option<String>,
@@ -282,10 +289,56 @@ pub fn validation_row(
     artifact: &Artifact,
     spec: Option<&ArtifactSpec>,
 ) -> ValidationRow {
+    let parent = std::path::Path::new(path)
+        .parent()
+        .and_then(std::path::Path::to_str)
+        .unwrap_or(".");
+    let layer = compatible_local_layer(parent);
+    let origin = layer.origin();
+    let relative_path = std::path::Path::new(path)
+        .file_name()
+        .and_then(std::ffi::OsStr::to_str)
+        .unwrap_or(path);
     let identifiers = artifact_identifiers(artifact, spec, path);
     let canonical_id = artifact_identifier(artifact, spec, path);
+    validation_row_with_identity(
+        path,
+        artifact,
+        spec,
+        origin.key(canonical_id),
+        origin.path(relative_path),
+        origin,
+        identifiers,
+    )
+}
+
+pub(crate) fn validation_row_from_item(item: &CorpusItem) -> ValidationRow {
+    validation_row_with_identity(
+        &item.path,
+        &item.artifact,
+        item.spec,
+        item.key.clone(),
+        item.artifact_path.clone(),
+        item.origin.clone(),
+        artifact_identifiers(&item.artifact, item.spec, &item.path),
+    )
+}
+
+fn validation_row_with_identity(
+    path: &str,
+    artifact: &Artifact,
+    spec: Option<&ArtifactSpec>,
+    key: ArtifactKey,
+    artifact_path: ArtifactPath,
+    origin: ArtifactOrigin,
+    identifiers: Vec<String>,
+) -> ValidationRow {
+    let canonical_id = key.canonical_id.clone();
     match spec {
         None => ValidationRow {
+            key,
+            artifact_path,
+            origin,
             path: path.to_string(),
             spec_name: None,
             canonical_id,
@@ -295,6 +348,9 @@ pub fn validation_row(
             edges: Vec::new(),
         },
         Some(spec) => ValidationRow {
+            key,
+            artifact_path,
+            origin,
             path: path.to_string(),
             spec_name: Some(spec.name.clone()),
             canonical_id,
@@ -911,11 +967,7 @@ pub fn build_relationship_report(directory: &str, recursive: bool) -> Relationsh
 pub fn build_relationship_report_file(path: &str) -> RelationshipReport {
     let artifact = parse_file(path);
     let spec = spec_for(&classify(&artifact).artifact_type);
-    let items = vec![CorpusItem {
-        path: path.to_string(),
-        artifact,
-        spec,
-    }];
+    let items = vec![CorpusItem::compatible_local_file(path, artifact, spec)];
     build_report(path, items, false)
 }
 
@@ -923,12 +975,68 @@ pub fn build_relationship_report_file(path: &str) -> RelationshipReport {
 // Corpus entry points
 // ---------------------------------------------------------------------------
 
-/// One parsed + classified item: `(display path, artifact, spec)`.
+/// One parsed + classified item with stable identity and a separate runtime
+/// locator. `path` remains the released display string.
 #[derive(Clone)]
 pub struct CorpusItem {
+    pub key: ArtifactKey,
+    pub artifact_path: ArtifactPath,
+    pub origin: ArtifactOrigin,
+    pub locator: PhysicalArtifactLocator,
     pub path: String,
     pub artifact: Artifact,
     pub spec: Option<&'static ArtifactSpec>,
+}
+
+impl CorpusItem {
+    pub fn new(
+        path: String,
+        relative_path: String,
+        artifact: Artifact,
+        spec: Option<&'static ArtifactSpec>,
+        origin: ArtifactOrigin,
+        locator: PhysicalArtifactLocator,
+    ) -> Self {
+        let canonical_id = artifact_identifier(&artifact, spec, &path);
+        Self {
+            key: origin.key(canonical_id),
+            artifact_path: origin.path(relative_path),
+            origin,
+            locator,
+            path,
+            artifact,
+            spec,
+        }
+    }
+
+    /// Compatibility constructor for single-file and synthetic validation
+    /// seams that do not begin with a corpus walk.
+    pub fn compatible_local_file(
+        path: &str,
+        artifact: Artifact,
+        spec: Option<&'static ArtifactSpec>,
+    ) -> Self {
+        let file = std::path::Path::new(path);
+        let corpus_root = file.parent().unwrap_or_else(|| std::path::Path::new("."));
+        let corpus_root_text = corpus_root.to_string_lossy();
+        let origin = compatible_local_layer(&corpus_root_text).origin();
+        let relative_path = file
+            .file_name()
+            .and_then(std::ffi::OsStr::to_str)
+            .unwrap_or(path)
+            .to_string();
+        Self::new(
+            path.to_string(),
+            relative_path,
+            artifact,
+            spec,
+            origin,
+            PhysicalArtifactLocator::new(
+                PhysicalCorpusLocator::local(corpus_root),
+                file,
+            ),
+        )
+    }
 }
 
 /// `_corpus_items(directory, recursive)` — the sorted-path walk, parsed and
@@ -941,16 +1049,22 @@ pub struct CorpusItem {
 /// Rendering stays sequential over the ordered results.
 pub fn corpus_items(directory: &str, recursive: bool) -> Vec<CorpusItem> {
     use rayon::prelude::*;
+    let origin = compatible_local_layer(directory).origin();
+    let physical_corpus = PhysicalCorpusLocator::local(directory);
     find_markdown_files(directory, recursive)
         .into_par_iter()
         .map(|entry| {
+            let relative_path = entry.rel();
             let artifact = parse_file(&entry.display);
             let spec = spec_for(&classify(&artifact).artifact_type);
-            CorpusItem {
-                path: entry.display,
+            CorpusItem::new(
+                entry.display,
+                relative_path,
                 artifact,
                 spec,
-            }
+                origin.clone(),
+                PhysicalArtifactLocator::new(physical_corpus.clone(), entry.abs),
+            )
         })
         .collect()
 }
@@ -958,7 +1072,7 @@ pub fn corpus_items(directory: &str, recursive: bool) -> Vec<CorpusItem> {
 fn rows_from_items(items: &[CorpusItem]) -> Vec<ValidationRow> {
     items
         .iter()
-        .map(|item| validation_row(&item.path, &item.artifact, item.spec))
+        .map(validation_row_from_item)
         .collect()
 }
 
@@ -991,7 +1105,7 @@ pub fn validate_document_against_corpus(
         if py_casefold(&ident) == proposed_ident {
             continue; // the on-disk counterpart of the document being edited
         }
-        rows.push(validation_row(&item.path, &item.artifact, item.spec));
+        rows.push(validation_row_from_item(item));
     }
     rows.push(validation_row(source_path, artifact, spec));
     let result = validation_from_rows(directory, &rows, recursive);
@@ -1017,9 +1131,15 @@ pub fn validate_document_against_corpus(
 /// uniquely to another artifact.
 #[derive(Debug, Clone)]
 pub struct Relationship {
+    /// Stable source-aware endpoint. `None` only when reconstructed from the
+    /// pre-federation v1 persistent store; the v2 cutover owns its codec.
+    pub source_artifact: Option<ArtifactPath>,
     pub source_path: String,
     pub relationship: String,
     pub target: String,
+    /// Stable resolved endpoint, present for a uniquely resolved internal
+    /// edge built from the in-memory read model.
+    pub resolved_artifact: Option<ArtifactPath>,
     pub resolved_path: Option<String>,
     pub issue: Option<String>,
 }
@@ -1031,15 +1151,21 @@ pub fn resolve_relationships(
     index: &ResolutionIndex,
 ) -> Vec<Relationship> {
     let mut out = Vec::new();
+    let artifact_paths: HashMap<&str, &ArtifactPath> = rows
+        .iter()
+        .map(|row| (row.path.as_str(), &row.artifact_path))
+        .collect();
     for row in rows {
         for (section, refs) in &row.edges {
             let external = edge_spec(section).is_some_and(|e| e.external);
             for reference in refs {
                 if external {
                     out.push(Relationship {
+                        source_artifact: Some(row.artifact_path.clone()),
                         source_path: row.path.clone(),
                         relationship: section.clone(),
                         target: reference.clone(),
+                        resolved_artifact: None,
                         resolved_path: None,
                         issue: None,
                     });
@@ -1057,10 +1183,16 @@ pub fn resolve_relationships(
                         (None, Some(ISSUE_SELF_REFERENCE.to_string()))
                     }
                 };
+                let resolved_artifact = resolved
+                    .as_deref()
+                    .and_then(|path| artifact_paths.get(path).copied())
+                    .cloned();
                 out.push(Relationship {
+                    source_artifact: Some(row.artifact_path.clone()),
                     source_path: row.path.clone(),
                     relationship: section.clone(),
                     target: reference.clone(),
+                    resolved_artifact,
                     resolved_path: resolved,
                     issue,
                 });

@@ -248,6 +248,8 @@ fn corruption_gates(cache_dir: &Path, corpus_hash: &str, seg_dir: &Path) {
     // A same-hash rewrite over a CORRUPT store replaces it (self-heal).
     fs::write(&target, &original[..10]).unwrap();
     let derived = rac_engine::derived::DerivedIndex {
+        layers: Vec::new(),
+        source_artifacts: Vec::new(),
         index_entries: Vec::new(),
         field_tokens: Vec::new(),
         relationships: Vec::new(),

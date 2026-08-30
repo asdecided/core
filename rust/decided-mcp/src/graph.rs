@@ -191,6 +191,9 @@ impl GraphView {
             artifact_id: artifact_id.to_string(),
             outcome: OUTCOME_RESOLVED,
             artifact: Some(ResolvedArtifact {
+                key: entry.key.clone(),
+                artifact_path: entry.artifact_path.clone(),
+                origin: entry.origin.clone(),
                 id: entry.id.clone(),
                 artifact_type: entry.artifact_type.clone(),
                 title: entry.title.clone(),
@@ -406,6 +409,9 @@ impl GraphView {
 
 fn identity_projection(entry: &IndexEntry) -> IndexEntry {
     IndexEntry {
+        key: entry.key.clone(),
+        artifact_path: entry.artifact_path.clone(),
+        origin: entry.origin.clone(),
         id: entry.id.clone(),
         artifact_type: entry.artifact_type.clone(),
         title: entry.title.clone(),

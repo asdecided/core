@@ -7,6 +7,7 @@
 
 use serde_json::Value;
 
+use crate::corpus::{ArtifactKey, ArtifactOrigin, ArtifactPath, CorpusLayer};
 use crate::relationships::{corpus_items, relationships_from_corpus, CorpusItem, Relationship};
 use crate::resolve::{entry_from_item, field_tokens_of, is_live_decision, FieldTokens, IndexEntry};
 use crate::retrieve::{scope_rows_from_items, ScopeRow};
@@ -16,8 +17,24 @@ pub const SCHEMA_VERSION: &str = "3";
 
 pub(crate) const DECISION_TYPE: &str = "decision";
 
+/// The source-aware identity projection parallel to the existing searchable
+/// rows. It remains in memory while the frozen v1 store is the compatibility
+/// format; the versioned store cutover will persist these exact values.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceAwareArtifact {
+    pub key: ArtifactKey,
+    pub path: ArtifactPath,
+    pub origin: ArtifactOrigin,
+    /// Released display path retained independently from stable path identity.
+    pub display_path: String,
+}
+
 /// The expensive derived structures for one corpus snapshot.
 pub struct DerivedIndex {
+    /// Stable layer identities represented in this generation.
+    pub layers: Vec<CorpusLayer>,
+    /// Per-document source identity in the same order as `index_entries`.
+    pub source_artifacts: Vec<SourceAwareArtifact>,
     /// Repository index rows in walk (sorted-path) order — docid order.
     pub index_entries: Vec<IndexEntry>,
     /// Per-entry BM25F field-token vectors, parallel to `index_entries`.
@@ -54,6 +71,24 @@ pub fn build_derived_index_from_items(
         })
         .collect();
     let field_tokens: Vec<FieldTokens> = index_entries.iter().map(field_tokens_of).collect();
+    let source_artifacts: Vec<SourceAwareArtifact> = items
+        .iter()
+        .map(|item| SourceAwareArtifact {
+            key: item.key.clone(),
+            path: item.artifact_path.clone(),
+            origin: item.origin.clone(),
+            display_path: item.path.clone(),
+        })
+        .collect();
+    let mut layers: Vec<CorpusLayer> = items
+        .iter()
+        .map(|item| CorpusLayer::from(&item.origin))
+        .collect();
+    layers.sort();
+    layers.dedup();
+    if layers.is_empty() {
+        layers.push(crate::corpus::compatible_local_layer(directory));
+    }
     let live_decision_paths: Vec<String> = items
         .iter()
         .filter(|item| {
@@ -64,6 +99,8 @@ pub fn build_derived_index_from_items(
         .collect();
     let summary = crate::portfolio::portfolio_from_corpus(directory, items, recursive);
     DerivedIndex {
+        layers,
+        source_artifacts,
         index_entries,
         field_tokens,
         relationships,
