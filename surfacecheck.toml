@@ -1,0 +1,78 @@
+[project]
+name = "AsDecided"
+version_source = "rust/Cargo.toml"
+repository = "https://github.com/asdecided/core"
+homepage = "https://asdecided.com"
+install = "brew install asdecided/tap/asdecided-core"
+release_url = "https://github.com/asdecided/core/releases/tag/v{version}"
+
+[[surface]]
+name = "README"
+kind = "markdown"
+path = "README.md"
+require = [
+  "{install}",
+  "cargo install decided",
+  "cargo install decided-mcp",
+  "https://asdecided.com/changelog",
+]
+
+[[surface]]
+name = "Repository changelog"
+kind = "markdown"
+path = "CHANGELOG.md"
+require = ["## v{version}"]
+
+[[surface]]
+name = "Homepage"
+kind = "url"
+url = "https://asdecided.com/"
+require = ["CURRENT / v{version}", "{install}"]
+canonical = "{homepage}"
+
+[[surface]]
+name = "Public changelog"
+kind = "url"
+url = "https://asdecided.com/changelog"
+require = ["v{version}", "/changelog/v{version}"]
+canonical = "https://asdecided.com/changelog"
+
+[[surface]]
+name = "Release record"
+kind = "url"
+url = "https://asdecided.com/changelog/v{version}"
+require = ["v{version}", "{release_url}"]
+canonical = "https://asdecided.com/changelog/v{version}"
+
+[[surface]]
+name = "Documentation"
+kind = "url"
+url = "https://asdecided.com/docs/"
+require = ["Current product release", "v{version}"]
+canonical = "https://asdecided.com/docs/"
+
+[[surface]]
+name = "Sitemap"
+kind = "sitemap"
+url = "https://asdecided.com/sitemap.xml"
+require = [
+  "https://asdecided.com/changelog/v{version}",
+  "https://asdecided.com/docs/vendor/core/federation/",
+  "https://asdecided.com/docs/vendor/core/export-contracts/",
+]
+
+[[surface]]
+name = "llms.txt"
+kind = "llms"
+url = "https://asdecided.com/llms.txt"
+require = [
+  "Current product release: v{version}",
+  "https://github.com/asdecided/core/releases/tag/v{version}",
+  "https://asdecided.com/docs/vendor/core/federation/",
+]
+
+[github]
+repository = "asdecided/core"
+homepage = "https://asdecided.com"
+description = "Native deterministic engine and read-only MCP server for engineering decisions."
+check_latest_release = true
