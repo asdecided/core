@@ -801,6 +801,9 @@ impl MmapIndexReader {
         let mut rows = Vec::with_capacity(count.min(1 << 20) as usize);
         for _ in 0..count {
             rows.push(crate::retrieve::ScopeRow {
+                key: None,
+                artifact_path: None,
+                origin: None,
                 id: reader.text()?,
                 title: reader.text()?,
                 status: reader.text()?,

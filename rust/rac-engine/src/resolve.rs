@@ -173,16 +173,15 @@ pub(crate) fn entry_from_item(item: &CorpusItem, inbound: i64) -> IndexEntry {
     }
 }
 
-/// `inbound_counts_from_corpus`: `{path -> count of resolved edges pointing
-/// at it}` — resolved, unique, non-self edges only; external edges (ADR-087)
-/// never resolve.
-fn inbound_counts(items: &[CorpusItem]) -> HashMap<String, i64> {
+/// `inbound_counts_from_corpus`: `{ArtifactKey -> count}` for resolved,
+/// unique, non-self edges. External edges (ADR-087) never resolve.
+fn inbound_counts(items: &[CorpusItem]) -> HashMap<ArtifactKey, i64> {
     let rows: Vec<_> = items
         .iter()
         .map(validation_row_from_item)
         .collect();
     let index = resolution_index_from_rows(&rows);
-    let mut counts: HashMap<String, i64> = HashMap::new();
+    let mut counts: HashMap<ArtifactKey, i64> = HashMap::new();
     for row in &rows {
         for (section, refs) in &row.edges {
             let external = edge_spec(section).map(|e| e.external).unwrap_or(false);
@@ -191,8 +190,8 @@ fn inbound_counts(items: &[CorpusItem]) -> HashMap<String, i64> {
             }
             for r in refs {
                 let targets = index.get(&py_casefold(r));
-                if targets.len() == 1 && targets[0].0 != row.path {
-                    *counts.entry(targets[0].0.clone()).or_insert(0) += 1;
+                if targets.len() == 1 && targets[0].key != row.key {
+                    *counts.entry(targets[0].key.clone()).or_insert(0) += 1;
                 }
             }
         }
@@ -210,7 +209,7 @@ pub fn index_from_items(items: &[CorpusItem]) -> Vec<IndexEntry> {
     let inbound = inbound_counts(items);
     items
         .iter()
-        .map(|item| entry_from_item(item, *inbound.get(&item.path).unwrap_or(&0)))
+        .map(|item| entry_from_item(item, *inbound.get(&item.key).unwrap_or(&0)))
         .collect()
 }
 
