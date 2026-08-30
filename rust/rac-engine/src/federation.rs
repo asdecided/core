@@ -1418,7 +1418,10 @@ struct StableFileIdentity {
 }
 
 #[cfg(unix)]
-fn stable_file_identity(metadata: &std::fs::Metadata) -> Result<StableFileIdentity, ()> {
+fn stable_file_identity(
+    _path: &Path,
+    metadata: &std::fs::Metadata,
+) -> Result<StableFileIdentity, ()> {
     use std::os::unix::fs::MetadataExt;
     Ok(StableFileIdentity {
         device: metadata.dev(),
@@ -1431,20 +1434,82 @@ fn stable_file_identity(metadata: &std::fs::Metadata) -> Result<StableFileIdenti
 }
 
 #[cfg(windows)]
-fn stable_file_identity(metadata: &std::fs::Metadata) -> Result<StableFileIdentity, ()> {
-    use std::os::windows::fs::MetadataExt;
+fn stable_file_identity(
+    path: &Path,
+    _metadata: &std::fs::Metadata,
+) -> Result<StableFileIdentity, ()> {
+    use std::ffi::c_void;
+    use std::mem::MaybeUninit;
+    use std::os::windows::fs::OpenOptionsExt;
+    use std::os::windows::io::AsRawHandle;
+
+    #[repr(C)]
+    struct FileTime {
+        low: u32,
+        high: u32,
+    }
+
+    #[repr(C)]
+    struct ByHandleFileInformation {
+        _file_attributes: u32,
+        _creation_time: FileTime,
+        _last_access_time: FileTime,
+        last_write_time: FileTime,
+        volume_serial_number: u32,
+        file_size_high: u32,
+        file_size_low: u32,
+        number_of_links: u32,
+        file_index_high: u32,
+        file_index_low: u32,
+    }
+
+    #[link(name = "Kernel32")]
+    unsafe extern "system" {
+        fn GetFileInformationByHandle(
+            file: *mut c_void,
+            information: *mut ByHandleFileInformation,
+        ) -> i32;
+    }
+
+    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+        .open(path)
+        .map_err(|_| ())?;
+    let mut information = MaybeUninit::<ByHandleFileInformation>::uninit();
+    // SAFETY: `file` keeps a valid owned handle alive for the call and the
+    // Win32 function initializes the complete output structure on success.
+    let succeeded = unsafe {
+        GetFileInformationByHandle(
+            file.as_raw_handle().cast::<c_void>(),
+            information.as_mut_ptr(),
+        )
+    };
+    if succeeded == 0 {
+        return Err(());
+    }
+    // SAFETY: the successful Win32 call above initialized every field.
+    let information = unsafe { information.assume_init() };
+    let last_write = ((information.last_write_time.high as u64) << 32)
+        | information.last_write_time.low as u64;
     Ok(StableFileIdentity {
-        device: metadata.volume_serial_number().ok_or(())? as u64,
-        inode: metadata.file_index().ok_or(())?,
-        links: metadata.number_of_links().ok_or(())? as u64,
-        length: metadata.file_size(),
-        changed_seconds: (metadata.last_write_time() / 10_000_000) as i64,
-        changed_nanos: ((metadata.last_write_time() % 10_000_000) * 100) as i64,
+        device: information.volume_serial_number as u64,
+        inode: ((information.file_index_high as u64) << 32)
+            | information.file_index_low as u64,
+        links: information.number_of_links as u64,
+        length: ((information.file_size_high as u64) << 32)
+            | information.file_size_low as u64,
+        changed_seconds: (last_write / 10_000_000) as i64,
+        changed_nanos: ((last_write % 10_000_000) * 100) as i64,
     })
 }
 
 #[cfg(not(any(unix, windows)))]
-fn stable_file_identity(_metadata: &std::fs::Metadata) -> Result<StableFileIdentity, ()> {
+fn stable_file_identity(
+    _path: &Path,
+    _metadata: &std::fs::Metadata,
+) -> Result<StableFileIdentity, ()> {
     Err(())
 }
 
@@ -1475,7 +1540,7 @@ fn read_stable_regular(
             ),
         ));
     }
-    let before_identity = stable_file_identity(&before).map_err(|_| {
+    let before_identity = stable_file_identity(path, &before).map_err(|_| {
         ParentCorpusError::at(
             ParentCorpusErrorCode::UnsupportedFilesystem,
             path,
@@ -1550,7 +1615,7 @@ fn read_stable_regular(
             ),
         )
     })?;
-    let after_identity = stable_file_identity(&after).map_err(|_| {
+    let after_identity = stable_file_identity(path, &after).map_err(|_| {
         ParentCorpusError::at(
             ParentCorpusErrorCode::UnsupportedFilesystem,
             path,
@@ -1616,7 +1681,7 @@ fn directory_device(path: &Path) -> Result<u64, ParentCorpusError> {
             ),
         ));
     }
-    stable_file_identity(&metadata)
+    stable_file_identity(path, &metadata)
         .map(|identity| identity.device)
         .map_err(|_| {
             ParentCorpusError::at(
@@ -1652,7 +1717,7 @@ fn snapshot_directory_v2(
             ),
         )
     })?;
-    let directory_identity = stable_file_identity(&directory_before).map_err(|_| {
+    let directory_identity = stable_file_identity(directory, &directory_before).map_err(|_| {
         ParentCorpusError::at(
             ParentCorpusErrorCode::UnsupportedFilesystem,
             directory,
@@ -1792,7 +1857,7 @@ fn snapshot_directory_v2(
             ),
         )
     })?;
-    let after_identity = stable_file_identity(&directory_after).map_err(|_| {
+    let after_identity = stable_file_identity(directory, &directory_after).map_err(|_| {
         ParentCorpusError::at(
             ParentCorpusErrorCode::UnsupportedFilesystem,
             directory,

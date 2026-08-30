@@ -418,10 +418,12 @@ mod tests {
 
     #[test]
     fn every_answer_affecting_section_changes_generation() {
+        type GenerationMutation = Box<dyn Fn(&mut GraphGenerationInput)>;
+
         let original = fixture();
         let expected = closure_generation(&original);
 
-        let mut mutations: Vec<Box<dyn Fn(&mut GraphGenerationInput)>> = vec![
+        let mut mutations: Vec<GenerationMutation> = vec![
             Box::new(|input| input.recursive = false),
             Box::new(|input| input.root_source.push('2')),
             Box::new(|input| input.root_corpus_path.push('2')),
