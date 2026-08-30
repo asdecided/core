@@ -32,6 +32,7 @@ pub struct AttentionItem {
     pub severity: String,
     pub code: String,
     pub message: String,
+    pub origin: Option<crate::corpus::ArtifactOrigin>,
 }
 
 #[derive(Debug)]
@@ -91,6 +92,7 @@ pub struct PortfolioRow {
     validate_issues: Vec<crate::parse::Issue>,
     recommended_slots: usize,
     missing_recommended: Vec<String>,
+    origin: crate::corpus::ArtifactOrigin,
 }
 
 pub fn portfolio_row(item: &CorpusItem) -> PortfolioRow {
@@ -109,6 +111,7 @@ pub fn portfolio_row(item: &CorpusItem) -> PortfolioRow {
             validate_issues: Vec::new(),
             recommended_slots: 0,
             missing_recommended: Vec::new(),
+            origin: item.origin.clone(),
         },
         Some(spec) => {
             let (_, missing_rec) = missing_sections(&item.artifact, spec);
@@ -122,6 +125,7 @@ pub fn portfolio_row(item: &CorpusItem) -> PortfolioRow {
                 validate_issues: validate(&item.artifact, None, Some(&artifact_type)),
                 recommended_slots: spec.recommended.len(),
                 missing_recommended: missing_rec,
+                origin: item.origin.clone(),
             }
         }
     }
@@ -159,6 +163,48 @@ pub fn portfolio_from_corpus(
     portfolio_from_rows(directory, &rows, recursive)
 }
 
+/// Portfolio over the authoritative composed effective view. Relationship
+/// metrics and validation come from the same source-aware resolver as lookup
+/// and enforcement rather than an items-only overlay.
+pub fn portfolio_from_composed(
+    directory: &str,
+    corpus: &crate::composition::ComposedCorpus,
+    recursive: bool,
+) -> PortfolioSummary {
+    let items: Vec<CorpusItem> = corpus.effective().cloned().collect();
+    let overrides = load_overrides(directory);
+    portfolio_from_corpus_with_analysis(
+        directory,
+        &items,
+        recursive,
+        &overrides,
+        corpus.relationship_summary(),
+        corpus.validate_relationships(directory, recursive).ok(),
+    )
+}
+
+/// Local-subject portfolio used by doctor/review. Child rows resolve through
+/// the composed catalog, while inherited warnings and advisories remain owned
+/// by the parent corpus.
+pub fn local_portfolio_from_composed(
+    directory: &str,
+    corpus: &crate::composition::ComposedCorpus,
+    recursive: bool,
+) -> PortfolioSummary {
+    let items: Vec<CorpusItem> = corpus.local_items().cloned().collect();
+    let overrides = load_overrides(directory);
+    portfolio_from_corpus_with_analysis(
+        directory,
+        &items,
+        recursive,
+        &overrides,
+        corpus.local_relationship_summary(),
+        corpus
+            .validate_local_relationships(directory, recursive)
+            .ok(),
+    )
+}
+
 pub fn portfolio_from_rows(
     directory: &str,
     rows: &[PortfolioRow],
@@ -176,12 +222,13 @@ pub fn portfolio_from_rows(
         &overrides,
         rel_summary,
         relationships_ok,
+        false,
     )
 }
 
 /// Build a portfolio from the central composed relationship projection and
 /// the exact child-config snapshot belonging to the generation.
-pub(crate) fn portfolio_from_corpus_with_analysis(
+pub fn portfolio_from_corpus_with_analysis(
     directory: &str,
     items: &[CorpusItem],
     recursive: bool,
@@ -189,7 +236,17 @@ pub(crate) fn portfolio_from_corpus_with_analysis(
     relationship_summary: RelationshipSummary,
     relationships_ok: bool,
 ) -> PortfolioSummary {
-    let rows: Vec<PortfolioRow> = items.iter().map(portfolio_row).collect();
+    let rows: Vec<PortfolioRow> = items
+        .iter()
+        .map(|item| {
+            let mut row = portfolio_row(item);
+            if item.origin.layer == crate::corpus::Layer::Inherited {
+                row.validate_issues.clear();
+                row.missing_recommended.clear();
+            }
+            row
+        })
+        .collect();
     portfolio_from_rows_with_analysis(
         directory,
         &rows,
@@ -197,6 +254,7 @@ pub(crate) fn portfolio_from_corpus_with_analysis(
         overrides,
         relationship_summary,
         relationships_ok,
+        true,
     )
 }
 
@@ -207,6 +265,7 @@ fn portfolio_from_rows_with_analysis(
     overrides: &SeverityOverrides,
     rel_summary: RelationshipSummary,
     relationships_ok: bool,
+    include_provenance: bool,
 ) -> PortfolioSummary {
 
     let mut by_type: Vec<(String, usize)> =
@@ -227,6 +286,10 @@ fn portfolio_from_rows_with_analysis(
     let mut unknown_paths: Vec<String> = Vec::new();
     let mut path_to_identifier: std::collections::HashMap<String, String> =
         std::collections::HashMap::new();
+    let mut artifact_path_to_identifier: std::collections::HashMap<
+        crate::corpus::ArtifactPath,
+        String,
+    > = std::collections::HashMap::new();
 
     for row in rows {
         bump(&mut by_type, &row.artifact_type);
@@ -235,6 +298,10 @@ fn portfolio_from_rows_with_analysis(
             continue;
         }
         path_to_identifier.insert(row.path.clone(), row.identifier.clone());
+        artifact_path_to_identifier.insert(
+            row.validation.artifact_path.clone(),
+            row.identifier.clone(),
+        );
 
         let issues = apply_overrides(row.validate_issues.clone(), &row.artifact_type, overrides);
         if has_errors(&issues) {
@@ -250,6 +317,7 @@ fn portfolio_from_rows_with_analysis(
                 severity: "error".to_string(),
                 code: ATTENTION_INVALID.to_string(),
                 message: format!("Validation errors: {}", error_codes.join(", ")),
+                origin: include_provenance.then(|| row.origin.clone()),
             });
         } else {
             valid_count += 1;
@@ -267,6 +335,7 @@ fn portfolio_from_rows_with_analysis(
                 severity: "warning".to_string(),
                 code: ATTENTION_MISSING_RECOMMENDED.to_string(),
                 message: format!("Missing recommended sections: {}", names.join(", ")),
+                origin: include_provenance.then(|| row.origin.clone()),
             });
         }
     }
@@ -275,10 +344,19 @@ fn portfolio_from_rows_with_analysis(
         let source = issue.source_path.clone().unwrap_or_default();
         let label = py_title(&issue.relationship.clone().unwrap_or_default().replace('_', " "));
         let phrase = rel_issue_phrase(&issue.code);
-        let identifier = path_to_identifier
-            .get(&source)
-            .cloned()
-            .unwrap_or_else(|| source.clone());
+        let identifier = if include_provenance {
+            issue
+                .source_artifact
+                .as_ref()
+                .and_then(|path| artifact_path_to_identifier.get(path))
+                .cloned()
+                .unwrap_or_else(|| source.clone())
+        } else {
+            path_to_identifier
+                .get(&source)
+                .cloned()
+                .unwrap_or_else(|| source.clone())
+        };
         attention.push(AttentionItem {
             path: source,
             identifier,
@@ -288,6 +366,11 @@ fn portfolio_from_rows_with_analysis(
                 "{label} {phrase}: {}",
                 issue.target.clone().unwrap_or_default()
             ),
+            origin: if include_provenance {
+                issue.origin.clone()
+            } else {
+                None
+            },
         });
     }
 

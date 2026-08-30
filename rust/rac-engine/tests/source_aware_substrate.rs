@@ -121,6 +121,7 @@ fn no_manifest_keeps_the_released_index_projection_byte_exact() {
                 title: item.artifact.product.title.clone(),
                 path: item.path.clone(),
                 aliases: artifact_identifiers(&item.artifact, item.spec, &item.path),
+                origin: None,
             })
             .collect(),
     };
@@ -155,6 +156,41 @@ fn no_manifest_keeps_the_released_index_projection_byte_exact() {
 
     // ADR-143 gates source-aware persisted rows behind an explicit layout.
     assert_eq!(rac_engine::index_store::STORE_LAYOUT_VERSION, "v2");
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn explicit_item_projections_add_index_and_stats_provenance() {
+    let root = scratch("read-projections");
+    fs::write(root.join("decisions/req-002.md"), REQUIREMENT).unwrap();
+    let directory = corpus_arg(&root);
+    let items = rac_engine::relationships::corpus_items(&directory, true);
+
+    let legacy_index = rac_engine::index::build_repository_index(&directory, true);
+    assert!(legacy_index.artifacts.iter().all(|row| row.origin.is_none()));
+    assert!(!rac_engine::output::render_index_json(&legacy_index).contains("provenance"));
+    let projected_index =
+        rac_engine::index::build_repository_index_from_items(&directory, &items, true);
+    assert_eq!(
+        projected_index.artifacts[0].origin.as_ref(),
+        Some(&items[0].origin)
+    );
+    assert!(rac_engine::output::render_index_json(&projected_index).contains("provenance"));
+    assert!(rac_engine::output::render_index_human(&projected_index).contains("acme/app · local"));
+
+    let legacy_stats = rac_engine::stats::collect_stats(&directory);
+    assert!(legacy_stats.features.iter().all(|row| row.origin.is_none()));
+    assert!(!rac_engine::output::render_stats_json(&legacy_stats).contains("provenance"));
+    let projected_stats = rac_engine::stats::collect_stats_from_items(&directory, &items);
+    let feature = projected_stats.features.first().expect("requirement feature");
+    let matching_item = items
+        .iter()
+        .find(|item| item.path == feature.path)
+        .expect("projected feature item");
+    assert_eq!(feature.origin.as_ref(), Some(&matching_item.origin));
+    assert!(rac_engine::output::render_stats_json(&projected_stats).contains("provenance"));
+    assert!(rac_engine::output::render_stats_human(&projected_stats).contains("acme/app · local"));
 
     let _ = fs::remove_dir_all(root);
 }

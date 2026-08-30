@@ -364,8 +364,7 @@ fn truncate_optional_strategy(payload: &Value, budget: i64) -> (Value, bool) {
     // These fields are derived context, not the artifact identity itself. Drop
     // them in a fixed order only after whole-item collection truncation has
     // been exhausted. The marker tells the caller that context was omitted.
-    const OPTIONAL: [&str; 10] = [
-        "provenance",
+    const OPTIONAL: [&str; 9] = [
         "evidence",
         "outgoing",
         "incoming",
@@ -378,6 +377,51 @@ fn truncate_optional_strategy(payload: &Value, budget: i64) -> (Value, bool) {
     ];
     let mut candidate = object.clone();
     let mut changed = false;
+
+    let has_override_provenance = candidate
+        .get("provenance")
+        .and_then(Value::as_object)
+        .is_some_and(|provenance| provenance.contains_key("overrides"));
+    // An override record is one provenance fact: parent, replacement, and
+    // rationale must survive together. If that fixed record cannot fit after
+    // other reductions, `serialize` returns the explicit budget error.
+    if candidate.contains_key("provenance")
+        && !has_override_provenance
+        && length(&Value::Object(candidate.clone())) > budget
+    {
+        let protected = candidate
+            .get("provenance")
+            .and_then(Value::as_object)
+            .filter(|provenance| {
+                provenance.contains_key("source") && provenance.contains_key("layer")
+            })
+            .map(|provenance| {
+                let mut fixed = Map::new();
+                for key in ["source", "layer", "pin"] {
+                    if let Some(value) = provenance.get(key) {
+                        fixed.insert(key.to_string(), value.clone());
+                    }
+                }
+                Value::Object(fixed)
+            });
+        match protected {
+            Some(provenance) => {
+                if candidate.get("provenance") != Some(&provenance) {
+                    candidate.insert("provenance".to_string(), provenance);
+                    changed = true;
+                }
+            }
+            None => {
+                candidate.remove("provenance");
+                changed = true;
+            }
+        }
+        if changed {
+            candidate.insert(MARKER_TRUNCATED.to_string(), json!(true));
+            candidate.insert(MARKER_OMITTED.to_string(), json!(existing_omitted(payload)));
+            candidate.insert(MARKER_HINT.to_string(), json!(HINT_RELATED));
+        }
+    }
     for key in OPTIONAL {
         if candidate.contains_key(key) && length(&Value::Object(candidate.clone())) > budget {
             candidate.remove(key);
@@ -465,6 +509,77 @@ mod tests {
         assert!(char_len(&text) <= MIN_BUDGET);
         let value: Value = serde_json::from_str(&text).expect("budget error is JSON");
         assert_eq!(value["error"], json!(BUDGET_ERROR));
+    }
+
+    #[test]
+    fn federation_origin_survives_optional_context_truncation() {
+        let payload = json!({
+            "schema_version": "1",
+            "id": "ADR-001",
+            "content": "x".repeat(20_000),
+            "provenance": {
+                "source": "acme/standards",
+                "layer": "inherited",
+                "pin": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                "status": "Accepted",
+                "status_history": repeated("history", 32)
+            }
+        });
+        let text = serialize(&payload, 384);
+        assert!(char_len(&text) <= 384, "{} characters", char_len(&text));
+        let value: Value = serde_json::from_str(&text).expect("budget result is JSON");
+        assert_eq!(value["provenance"]["source"], json!("acme/standards"));
+        assert_eq!(value["provenance"]["layer"], json!("inherited"));
+        assert_eq!(
+            value["provenance"]["pin"],
+            json!("sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+        );
+    }
+
+    fn assert_complete_override_or_budget_error(state: &str, source: &str) {
+        let payload = json!({
+            "schema_version": "1",
+            "id": "STD-01JY4M8X2QZ7",
+            "content": "x".repeat(20_000),
+            "provenance": {
+                "source": source,
+                "layer": if state == "overridden" { "inherited" } else { "local" },
+                "pin": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                "status": "Accepted",
+                "overrides": [{
+                    "state": state,
+                    "parent": {"source": "acme/standards", "id": "STD-01JY4M8X2QZ7"},
+                    "replacement": {"source": "acme/app", "id": "APP-01JY4M8X2QZ8"},
+                    "rationale": {"source": "acme/app", "id": "APP-01JY4M8X2QZ9"}
+                }]
+            }
+        });
+        for budget in [384, 512, 768] {
+            let text = serialize(&payload, budget);
+            assert!(char_len(&text) <= budget, "{} characters", char_len(&text));
+            let value: Value = serde_json::from_str(&text).expect("budget result is JSON");
+            if value["error"] == json!(BUDGET_ERROR) {
+                continue;
+            }
+            let mapping = &value["provenance"]["overrides"][0];
+            assert_eq!(mapping["state"], json!(state));
+            assert_eq!(mapping["parent"]["source"], json!("acme/standards"));
+            assert_eq!(mapping["parent"]["id"], json!("STD-01JY4M8X2QZ7"));
+            assert_eq!(mapping["replacement"]["source"], json!("acme/app"));
+            assert_eq!(mapping["replacement"]["id"], json!("APP-01JY4M8X2QZ8"));
+            assert_eq!(mapping["rationale"]["source"], json!("acme/app"));
+            assert_eq!(mapping["rationale"]["id"], json!("APP-01JY4M8X2QZ9"));
+        }
+    }
+
+    #[test]
+    fn tight_budget_preserves_overridden_parent_provenance_or_errors() {
+        assert_complete_override_or_budget_error("overridden", "acme/standards");
+    }
+
+    #[test]
+    fn tight_budget_preserves_replacement_provenance_or_errors() {
+        assert_complete_override_or_budget_error("replacement", "acme/app");
     }
 
     #[test]

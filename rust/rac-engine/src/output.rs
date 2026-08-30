@@ -697,6 +697,9 @@ pub fn render_relationships_json(report: &RelationshipReport) -> String {
             m.insert("path".into(), json!(artifact.path));
             m.insert("type".into(), json!(artifact.type_name));
             m.insert("relationships".into(), Value::Object(relationships));
+            if let Some(origin) = &artifact.origin {
+                m.insert("provenance".into(), artifact_origin_value(origin));
+            }
             Value::Object(m)
         })
         .collect();
@@ -727,7 +730,11 @@ pub fn render_relationships_human(report: &RelationshipReport) -> String {
 
     for artifact in &report.artifacts {
         lines.push(String::new());
-        lines.push(artifact.path.clone());
+        lines.push(format!(
+            "{}{}",
+            artifact.path,
+            human_origin_suffix(artifact.origin.as_ref())
+        ));
         for (section, refs) in &artifact.relationships {
             lines.push(format!("  {}:", relationship_label(section)));
             for reference in refs {
@@ -1559,14 +1566,31 @@ pub fn render_templates_json(names: &[&str]) -> String {
 
 const EMPTY_CORPUS_HINT: &str = "No artifacts yet — create your first with: decided quickstart";
 
-fn invalid_files_json(items: &[(&str, &[String])]) -> Value {
+fn human_origin_suffix(origin: Option<&crate::corpus::ArtifactOrigin>) -> String {
+    let Some(origin) = origin else {
+        return String::new();
+    };
+    let pin = origin
+        .pin
+        .as_ref()
+        .map(|pin| format!(" · {pin}"))
+        .unwrap_or_default();
+    format!("  [{} · {}{pin}]", origin.source, origin.layer.as_str())
+}
+
+fn invalid_files_json(
+    items: &[(&str, &[String], Option<&crate::corpus::ArtifactOrigin>)],
+) -> Value {
     Value::Array(
         items
             .iter()
-            .map(|(path, codes)| {
+            .map(|(path, codes, origin)| {
                 let mut m = Map::new();
                 m.insert("file".into(), json!(path));
                 m.insert("errors".into(), json!(codes));
+                if let Some(origin) = origin {
+                    m.insert("provenance".into(), artifact_origin_value(origin));
+                }
                 Value::Object(m)
             })
             .collect(),
@@ -1604,6 +1628,9 @@ pub fn render_stats_json(s: &PortfolioStats) -> String {
                 let mut m = Map::new();
                 m.insert("name".into(), json!(f.name));
                 m.insert("requirements".into(), json!(f.requirements));
+                if let Some(origin) = &f.origin {
+                    m.insert("provenance".into(), artifact_origin_value(origin));
+                }
                 Value::Object(m)
             }
             None => Value::Null,
@@ -1618,15 +1645,18 @@ pub fn render_stats_json(s: &PortfolioStats) -> String {
                     let mut m = Map::new();
                     m.insert("name".into(), json!(f.name));
                     m.insert("requirements".into(), json!(f.requirements));
+                    if let Some(origin) = &f.origin {
+                        m.insert("provenance".into(), artifact_origin_value(origin));
+                    }
                     Value::Object(m)
                 })
                 .collect(),
         ),
     );
-    let invalid: Vec<(&str, &[String])> = s
+    let invalid: Vec<(&str, &[String], Option<&crate::corpus::ArtifactOrigin>)> = s
         .invalid()
         .iter()
-        .map(|f| (f.path.as_str(), f.error_codes.as_slice()))
+        .map(|f| (f.path.as_str(), f.error_codes.as_slice(), f.origin.as_ref()))
         .collect();
     payload.insert("invalid".into(), invalid_files_json(&invalid));
 
@@ -1646,7 +1676,12 @@ pub fn render_stats_json(s: &PortfolioStats) -> String {
         payload.insert("decisions".into(), Value::Object(m));
     }
 
-    let mut family = |key: &str, count: usize, valid: usize, invalid: Vec<(&str, &[String])>| {
+    let mut family = |
+        key: &str,
+        count: usize,
+        valid: usize,
+        invalid: Vec<(&str, &[String], Option<&crate::corpus::ArtifactOrigin>)>,
+    | {
         let mut m = Map::new();
         m.insert("count".into(), json!(count));
         m.insert("valid".into(), json!(valid));
@@ -1655,26 +1690,26 @@ pub fn render_stats_json(s: &PortfolioStats) -> String {
     };
 
     if !s.roadmaps.is_empty() {
-        let invalid: Vec<(&str, &[String])> = s
+        let invalid: Vec<(&str, &[String], Option<&crate::corpus::ArtifactOrigin>)> = s
             .invalid_roadmaps()
             .iter()
-            .map(|r| (r.path.as_str(), r.error_codes.as_slice()))
+            .map(|r| (r.path.as_str(), r.error_codes.as_slice(), r.origin.as_ref()))
             .collect();
         family("roadmaps", s.roadmap_count(), s.valid_roadmaps(), invalid);
     }
     if !s.prompts.is_empty() {
-        let invalid: Vec<(&str, &[String])> = s
+        let invalid: Vec<(&str, &[String], Option<&crate::corpus::ArtifactOrigin>)> = s
             .invalid_prompts()
             .iter()
-            .map(|p| (p.path.as_str(), p.error_codes.as_slice()))
+            .map(|p| (p.path.as_str(), p.error_codes.as_slice(), p.origin.as_ref()))
             .collect();
         family("prompts", s.prompt_count(), s.valid_prompts(), invalid);
     }
     if !s.designs.is_empty() {
-        let invalid: Vec<(&str, &[String])> = s
+        let invalid: Vec<(&str, &[String], Option<&crate::corpus::ArtifactOrigin>)> = s
             .invalid_designs()
             .iter()
-            .map(|d| (d.path.as_str(), d.error_codes.as_slice()))
+            .map(|d| (d.path.as_str(), d.error_codes.as_slice(), d.origin.as_ref()))
             .collect();
         family("designs", s.design_count(), s.valid_designs(), invalid);
     }
@@ -1692,6 +1727,9 @@ pub fn render_stats_json(s: &PortfolioStats) -> String {
                         fm.insert("file".into(), json!(u.path));
                         fm.insert("name".into(), json!(u.name));
                         fm.insert("confidence".into(), crate::pyjson::py_float(py_round(u.confidence, 2)));
+                        if let Some(origin) = &u.origin {
+                            fm.insert("provenance".into(), artifact_origin_value(origin));
+                        }
                         Value::Object(fm)
                     })
                     .collect(),
@@ -1712,13 +1750,21 @@ pub fn render_stats_json(s: &PortfolioStats) -> String {
 }
 
 /// `  <red path> — <error codes | "unknown">` invalid-list line.
-fn invalid_reason_line(path: &str, error_codes: &[String]) -> String {
+fn invalid_reason_line(
+    path: &str,
+    error_codes: &[String],
+    origin: Option<&crate::corpus::ArtifactOrigin>,
+) -> String {
     let reasons = if error_codes.is_empty() {
         "unknown".to_string()
     } else {
         error_codes.join(", ")
     };
-    format!("  {} \u{2014} {reasons}", red(path))
+    format!(
+        "  {} \u{2014} {reasons}{}",
+        red(path),
+        human_origin_suffix(origin)
+    )
 }
 
 pub fn render_stats_human(s: &PortfolioStats) -> String {
@@ -1736,14 +1782,28 @@ pub fn render_stats_human(s: &PortfolioStats) -> String {
         String::new(),
     ];
 
-    let mut missing_block = |label: &str, names: &[&str]| {
-        lines.push(format!("{label}: {}", names.len()));
-        for name in names {
-            lines.push(format!("  - {name}"));
+    let mut missing_block = |label: &str, features: &[&crate::stats::FeatureStat]| {
+        lines.push(format!("{label}: {}", features.len()));
+        for feature in features {
+            lines.push(format!(
+                "  - {}{}",
+                feature.name,
+                human_origin_suffix(feature.origin.as_ref())
+            ));
         }
     };
-    missing_block("Features Missing Metrics", &s.missing_metrics());
-    missing_block("Features Missing Risks", &s.missing_risks());
+    let missing_metrics: Vec<_> = s
+        .features
+        .iter()
+        .filter(|feature| feature.success_metrics == 0)
+        .collect();
+    let missing_risks: Vec<_> = s
+        .features
+        .iter()
+        .filter(|feature| feature.risks == 0)
+        .collect();
+    missing_block("Features Missing Metrics", &missing_metrics);
+    missing_block("Features Missing Risks", &missing_risks);
     lines.push(format!(
         "Average Requirements Per Feature: {}",
         py_format_1f(s.average_requirements())
@@ -1751,8 +1811,10 @@ pub fn render_stats_human(s: &PortfolioStats) -> String {
 
     match s.largest_feature() {
         Some(f) => lines.push(format!(
-            "Largest Feature: {} ({} requirements)",
-            f.name, f.requirements
+            "Largest Feature: {} ({} requirements){}",
+            f.name,
+            f.requirements,
+            human_origin_suffix(f.origin.as_ref())
         )),
         None => lines.push("Largest Feature: (none)".to_string()),
     }
@@ -1765,7 +1827,12 @@ pub fn render_stats_human(s: &PortfolioStats) -> String {
     if !by_feature.is_empty() {
         let width = by_feature.iter().map(|f| f.name.chars().count()).max().unwrap_or(0) + 4;
         for f in &by_feature {
-            lines.push(format!("{}{}", ljust(&f.name, width), f.requirements));
+            lines.push(format!(
+                "{}{}{}",
+                ljust(&f.name, width),
+                f.requirements,
+                human_origin_suffix(f.origin.as_ref())
+            ));
         }
     } else {
         lines.push("(none)".to_string());
@@ -1776,7 +1843,11 @@ pub fn render_stats_human(s: &PortfolioStats) -> String {
         lines.push(String::new());
         lines.push(bold(&format!("Invalid Features ({})", invalid.len())));
         for f in &invalid {
-            lines.push(invalid_reason_line(&f.path, &f.error_codes));
+            lines.push(invalid_reason_line(
+                &f.path,
+                &f.error_codes,
+                f.origin.as_ref(),
+            ));
         }
     }
 
@@ -1812,7 +1883,11 @@ pub fn render_stats_human(s: &PortfolioStats) -> String {
             lines.push(String::new());
             lines.push(bold(&format!("{invalid_label} ({})", invalid.len())));
             for r in invalid {
-                lines.push(invalid_reason_line(&r.path, &r.error_codes));
+                lines.push(invalid_reason_line(
+                    &r.path,
+                    &r.error_codes,
+                    r.origin.as_ref(),
+                ));
             }
         }
     };
@@ -1838,7 +1913,11 @@ pub fn render_stats_human(s: &PortfolioStats) -> String {
             "{count} {noun} matched no known artifact schema (not errors — see ADR-010):"
         ));
         for u in &s.unrecognized {
-            lines.push(format!("  {}", u.path));
+            lines.push(format!(
+                "  {}{}",
+                u.path,
+                human_origin_suffix(u.origin.as_ref())
+            ));
         }
     }
 
@@ -1922,7 +2001,11 @@ pub fn render_portfolio_human(s: &PortfolioSummary) -> String {
             } else {
                 yellow("!")
             };
-            lines.push(format!("  {icon} {}", item.identifier));
+            lines.push(format!(
+                "  {icon} {}{}",
+                item.identifier,
+                human_origin_suffix(item.origin.as_ref())
+            ));
             lines.push(format!("      {}", item.message));
         }
     } else {
@@ -1980,11 +2063,12 @@ pub fn render_index_human(index: &crate::index::RepositoryIndex) -> String {
     let title_w = width(&|e| title_of(e).chars().count());
     for e in &index.artifacts {
         lines.push(format!(
-            "  {}  {}  {}  {}",
+            "  {}  {}  {}  {}{}",
             ljust(&e.id, id_w),
             ljust(&e.artifact_type, type_w),
             ljust(&title_of(e), title_w),
-            e.path
+            e.path,
+            human_origin_suffix(e.origin.as_ref())
         ));
     }
     lines.join("\n")
@@ -2003,6 +2087,9 @@ pub fn render_index_json(index: &crate::index::RepositoryIndex) -> String {
             m.insert("title".into(), json!(e.title));
             m.insert("path".into(), json!(e.path));
             m.insert("aliases".into(), json!(e.aliases));
+            if let Some(origin) = &e.origin {
+                m.insert("provenance".into(), artifact_origin_value(origin));
+            }
             Value::Object(m)
         })
         .collect();
@@ -2069,6 +2156,9 @@ pub fn portfolio_summary_value(s: &PortfolioSummary) -> Value {
             m.insert("severity".into(), json!(item.severity));
             m.insert("code".into(), json!(item.code));
             m.insert("message".into(), json!(item.message));
+            if let Some(origin) = &item.origin {
+                m.insert("provenance".into(), artifact_origin_value(origin));
+            }
             Value::Object(m)
         })
         .collect();
@@ -2124,7 +2214,12 @@ pub fn render_coverage_human(report: &CoverageReport) -> String {
         }
         lines.push(format!("{heading}: {}", members.len()));
         for gap in members {
-            lines.push(format!("  {}  {}", gap.id, gap.path));
+            lines.push(format!(
+                "  {}  {}{}",
+                gap.id,
+                gap.path,
+                human_origin_suffix(gap.origin.as_ref())
+            ));
         }
         lines.push(String::new());
     }
@@ -2154,6 +2249,9 @@ pub fn render_coverage_json(report: &CoverageReport) -> String {
             m.insert("type".into(), json!(g.artifact_type));
             m.insert("gap".into(), json!(g.gap));
             m.insert("missing".into(), json!(g.missing));
+            if let Some(origin) = &g.origin {
+                m.insert("provenance".into(), artifact_origin_value(origin));
+            }
             Value::Object(m)
         })
         .collect();
