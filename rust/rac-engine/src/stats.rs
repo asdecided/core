@@ -5,9 +5,10 @@
 //! plus declared relationship-presence counts. Pure and deterministic.
 
 use crate::classify::classify;
+use crate::corpus::ArtifactOrigin;
 use crate::parse::Artifact;
 use crate::pycompat::first_nonempty_line;
-use crate::relationships::corpus_items;
+use crate::relationships::{corpus_items, CorpusItem};
 use crate::spec::{spec_for, ArtifactSpec, RELATIONSHIP_SECTIONS};
 use crate::validate::validate;
 
@@ -20,6 +21,8 @@ pub struct FeatureStat {
     pub requirements: usize,
     pub success_metrics: usize,
     pub risks: usize,
+    /// Present only when the row came from an explicit composed projection.
+    pub origin: Option<ArtifactOrigin>,
 }
 
 /// Per-file result for a Decision artifact.
@@ -28,6 +31,8 @@ pub struct DecisionStat {
     pub name: String,
     pub status: Option<String>,
     pub category: Option<String>,
+    /// Present only when the row came from an explicit composed projection.
+    pub origin: Option<ArtifactOrigin>,
 }
 
 /// Lightweight validity stat for roadmap/prompt/design.
@@ -36,6 +41,8 @@ pub struct ValidityStat {
     pub name: String,
     pub valid: bool,
     pub error_codes: Vec<String>,
+    /// Present only when the row came from an explicit composed projection.
+    pub origin: Option<ArtifactOrigin>,
 }
 
 /// Per-file result for a document that matched no known schema.
@@ -43,6 +50,8 @@ pub struct UnrecognizedStat {
     pub path: String,
     pub name: String,
     pub confidence: f64,
+    /// Present only when the row came from an explicit composed projection.
+    pub origin: Option<ArtifactOrigin>,
 }
 
 pub struct PortfolioStats {
@@ -319,8 +328,11 @@ fn decision_metadata(
     (status, category)
 }
 
-/// `collect_stats(directory)`.
-pub fn collect_stats(directory: &str) -> PortfolioStats {
+fn collect_stats_from_projection(
+    directory: &str,
+    items: &[CorpusItem],
+    include_origin: bool,
+) -> PortfolioStats {
     let mut stats = PortfolioStats {
         directory: directory.to_string(),
         features: Vec::new(),
@@ -335,9 +347,10 @@ pub fn collect_stats(directory: &str) -> PortfolioStats {
     // re-ordered canonically at the end.
     let mut rel_counts: Vec<(String, usize)> = Vec::new();
 
-    for item in corpus_items(directory, true) {
+    for item in items {
         let artifact = &item.artifact;
         let path = &item.path;
+        let origin = include_origin.then(|| item.origin.clone());
         let name = artifact_name(artifact, path);
         let classification = classify(artifact);
         let type_name = classification.artifact_type.as_str();
@@ -361,6 +374,7 @@ pub fn collect_stats(directory: &str) -> PortfolioStats {
                     name,
                     status,
                     category,
+                    origin,
                 });
             }
             "roadmap" => {
@@ -370,6 +384,7 @@ pub fn collect_stats(directory: &str) -> PortfolioStats {
                     name,
                     valid: codes.is_empty(),
                     error_codes: codes,
+                    origin,
                 });
             }
             "prompt" => {
@@ -379,6 +394,7 @@ pub fn collect_stats(directory: &str) -> PortfolioStats {
                     name,
                     valid: codes.is_empty(),
                     error_codes: codes,
+                    origin,
                 });
             }
             "design" => {
@@ -388,6 +404,7 @@ pub fn collect_stats(directory: &str) -> PortfolioStats {
                     name,
                     valid: codes.is_empty(),
                     error_codes: codes,
+                    origin,
                 });
             }
             "unknown" => {
@@ -395,6 +412,7 @@ pub fn collect_stats(directory: &str) -> PortfolioStats {
                     path: path.clone(),
                     name,
                     confidence: classification.confidence,
+                    origin,
                 });
             }
             _ => {
@@ -407,6 +425,7 @@ pub fn collect_stats(directory: &str) -> PortfolioStats {
                     requirements: artifact.product.requirements.len(),
                     success_metrics: artifact.product.success_metrics.len(),
                     risks: artifact.product.risks.len(),
+                    origin,
                 });
             }
         }
@@ -419,6 +438,19 @@ pub fn collect_stats(directory: &str) -> PortfolioStats {
         }
     }
     stats
+}
+
+/// Aggregate a caller-selected projection without performing another corpus
+/// walk. Federation passes its effective items here so counts and provenance
+/// describe the same authoritative overlay as other read consumers.
+pub fn collect_stats_from_items(directory: &str, items: &[CorpusItem]) -> PortfolioStats {
+    collect_stats_from_projection(directory, items, true)
+}
+
+/// `collect_stats(directory)`.
+pub fn collect_stats(directory: &str) -> PortfolioStats {
+    let items = corpus_items(directory, true);
+    collect_stats_from_projection(directory, &items, false)
 }
 
 #[cfg(test)]

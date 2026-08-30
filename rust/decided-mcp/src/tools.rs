@@ -18,6 +18,56 @@ use rac_engine::resolve::{
 };
 use serde_json::{json, Map, Value};
 
+fn fixed_origin(
+    origin: Option<&rac_engine::corpus::ArtifactOrigin>,
+    enabled: bool,
+) -> Option<Map<String, Value>> {
+    let origin = origin.filter(|_| enabled)?;
+    let mut provenance = Map::new();
+    provenance.insert("source".to_string(), json!(origin.source));
+    provenance.insert("layer".to_string(), json!(origin.layer.as_str()));
+    if let Some(pin) = &origin.pin {
+        provenance.insert("pin".to_string(), json!(pin));
+    }
+    Some(provenance)
+}
+
+fn attach_origin(
+    value: &mut Value,
+    origin: Option<&rac_engine::corpus::ArtifactOrigin>,
+    enabled: bool,
+) {
+    let Some(provenance) = fixed_origin(origin, enabled) else {
+        return;
+    };
+    if let Some(record) = value.as_object_mut() {
+        record.insert("provenance".to_string(), Value::Object(provenance));
+    }
+}
+
+fn composed_provenance(
+    corpus: &rac_engine::composition::ComposedCorpus,
+    key: Option<&rac_engine::corpus::ArtifactKey>,
+) -> Option<Map<String, Value>> {
+    let provenance = key.and_then(|key| corpus.provenance_for(key))?;
+    rac_engine::output::composed_provenance_value(&provenance)
+        .as_object()
+        .cloned()
+}
+
+fn attach_composed_provenance(
+    value: &mut Value,
+    corpus: &rac_engine::composition::ComposedCorpus,
+    key: Option<&rac_engine::corpus::ArtifactKey>,
+) {
+    let Some(provenance) = composed_provenance(corpus, key) else {
+        return;
+    };
+    if let Some(record) = value.as_object_mut() {
+        record.insert("provenance".to_string(), Value::Object(provenance));
+    }
+}
+
 /// The additive empty-corpus guidance the server layers over the summary.
 const EMPTY_GUIDANCE: &str = "This repository has no AsDecided artifacts yet. The user can create the \
 first one with `decided quickstart`, or with `decided init` then \
@@ -50,8 +100,35 @@ fn artifact_value(m: &ResolvedArtifact) -> Map<String, Value> {
     }
 }
 
-fn search_result_payload(result: &SearchResult) -> Value {
-    output::search_result_value(result, true)
+fn search_result_payload(result: &SearchResult, include_origin: bool) -> Value {
+    let mut payload = output::search_result_value(result, true);
+    if let Some(matches) = payload
+        .as_object_mut()
+        .and_then(|object| object.get_mut("matches"))
+        .and_then(Value::as_array_mut)
+    {
+        for (record, artifact) in matches.iter_mut().zip(&result.matches) {
+            attach_origin(record, artifact.origin.as_ref(), include_origin);
+        }
+    }
+    payload
+}
+
+fn composed_search_result_payload(
+    result: &SearchResult,
+    corpus: &rac_engine::composition::ComposedCorpus,
+) -> Value {
+    let mut payload = output::search_result_value(result, true);
+    if let Some(matches) = payload
+        .as_object_mut()
+        .and_then(|object| object.get_mut("matches"))
+        .and_then(Value::as_array_mut)
+    {
+        for (record, artifact) in matches.iter_mut().zip(&result.matches) {
+            attach_composed_provenance(record, corpus, artifact.key.as_ref());
+        }
+    }
+    payload
 }
 
 /// The per-call budget clamp (ADR-113): a call may only *lower* the server
@@ -113,14 +190,70 @@ pub fn get_artifact(
         payload.insert(k, v);
     }
     let status = artifact_status(&rac_engine::parse::parse_text(&content, &artifact.path));
-    let mut prov = Map::new();
+    let mut prov = fixed_origin(artifact.origin.as_ref(), false).unwrap_or_default();
     prov.insert("status".to_string(), json!(status));
-    for (k, v) in provenance::artifact_provenance(root, &artifact.path) {
-        prov.insert(k, v);
+    if artifact
+        .origin
+        .as_ref()
+        .is_none_or(|origin| origin.layer != rac_engine::corpus::Layer::Inherited)
+    {
+        for (k, v) in provenance::artifact_provenance(root, &artifact.path) {
+            prov.insert(k, v);
+        }
     }
     // Pinned key order: {schema_version, **artifact, content, provenance}.
     payload.insert("content".to_string(), json!(content));
     payload.insert("provenance".to_string(), Value::Object(prov));
+    serialize(&Value::Object(payload), budget)
+}
+
+pub fn get_artifact_composed(
+    root: &str,
+    corpus: &rac_engine::composition::ComposedCorpus,
+    artifact_id: &str,
+    budget: i64,
+) -> String {
+    let result = corpus.resolve_identity(artifact_id);
+    let Some(artifact) = result
+        .artifact
+        .as_ref()
+        .filter(|_| result.outcome == OUTCOME_RESOLVED)
+    else {
+        return serialize(&output::resolution_error_value(&result), budget);
+    };
+    let Some(key) = artifact.key.as_ref() else {
+        return serialize(&unreadable_payload(&artifact.id, &artifact.path), budget);
+    };
+    let Some(content) = corpus
+        .content(key)
+        .and_then(|bytes| String::from_utf8(bytes.to_vec()).ok())
+        .map(|text| text.replace("\r\n", "\n").replace('\r', "\n"))
+    else {
+        return serialize(&unreadable_payload(&artifact.id, &artifact.path), budget);
+    };
+    let mut payload = Map::new();
+    payload.insert("schema_version".to_string(), json!("1"));
+    for (key, value) in artifact_value(artifact) {
+        payload.insert(key, value);
+    }
+    payload.insert("content".to_string(), json!(content));
+
+    let mut provenance = composed_provenance(corpus, Some(key)).unwrap_or_default();
+    let status = corpus
+        .item(key)
+        .map(|item| artifact_status(&item.artifact))
+        .unwrap_or_default();
+    provenance.insert("status".to_string(), json!(status));
+    if let Some(item) = corpus
+        .item(key)
+        .filter(|item| item.origin.layer == rac_engine::corpus::Layer::Local)
+    {
+        let physical = item.locator.path.to_string_lossy();
+        for (name, value) in provenance::artifact_provenance(root, &physical) {
+            provenance.insert(name, value);
+        }
+    }
+    payload.insert("provenance".to_string(), Value::Object(provenance));
     serialize(&Value::Object(payload), budget)
 }
 
@@ -153,7 +286,52 @@ pub fn search_artifacts(
         }
     };
     rac_engine::commands::annotate_search_recency(&mut result.matches, root);
-    serialize(&search_result_payload(&result), budget)
+    serialize(
+        &search_result_payload(&result, false),
+        budget,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn search_artifacts_composed(
+    root: &str,
+    cached: Option<&rac_engine::derived_cache::ReadModel>,
+    corpus: &rac_engine::composition::ComposedCorpus,
+    query: &str,
+    artifact_type: Option<&str>,
+    tags: &[String],
+    live_only: bool,
+    budget: i64,
+) -> String {
+    let mut result = match cached {
+        Some(rac_engine::derived_cache::ReadModel::View(reader)) => {
+            rac_engine::read_model::store_search(
+                reader,
+                query,
+                artifact_type,
+                tags,
+                live_only,
+            )
+        }
+        Some(rac_engine::derived_cache::ReadModel::Fresh(derived)) => {
+            search_index_filtered(
+                &derived.index_entries,
+                query,
+                artifact_type,
+                tags,
+                live_only,
+            )
+        }
+        None => search_index_filtered(
+            &corpus.effective_index(),
+            query,
+            artifact_type,
+            tags,
+            live_only,
+        ),
+    };
+    rac_engine::commands::annotate_composed_search_recency(&mut result.matches, root, corpus);
+    serialize(&composed_search_result_payload(&result, corpus), budget)
 }
 
 pub fn find_decisions_tool(
@@ -165,32 +343,41 @@ pub fn find_decisions_tool(
 ) -> String {
     // Python truthiness: a non-empty `path` selects path mode.
     if let Some(p) = path.filter(|p| !p.is_empty()) {
+        let include_origin = false;
         // Path mode builds through the same read-model as every other tool
         // (ADR-103), served from precomputed scope rows.
         let payload = match model {
             Some(TrackerModel::View(reader)) => {
                 let rows = reader.scope_rows().unwrap_or_default();
-                rac_engine::retrieve::scope_lookup_value(
+                rac_engine::retrieve::scope_lookup_value_with_origin(
                     &rac_engine::retrieve::decisions_for_path_with_rows(&rows, root, p),
+                    include_origin,
                 )
             }
-            Some(TrackerModel::Snapshot(derived)) => rac_engine::retrieve::scope_lookup_value(
-                &rac_engine::retrieve::decisions_for_path_with_rows(
-                    &derived.scope_rows,
-                    root,
-                    p,
-                ),
-            ),
+            Some(TrackerModel::Snapshot(derived)) => {
+                rac_engine::retrieve::scope_lookup_value_with_origin(
+                    &rac_engine::retrieve::decisions_for_path_with_rows(
+                        &derived.scope_rows,
+                        root,
+                        p,
+                    ),
+                    include_origin,
+                )
+            }
             Some(TrackerModel::Delta(generation)) => {
-                rac_engine::retrieve::scope_lookup_value(
+                rac_engine::retrieve::scope_lookup_value_with_origin(
                     &rac_engine::retrieve::decisions_for_path_with_rows(
                         &generation.scope.rows(),
                         root,
                         p,
                     ),
+                    include_origin,
                 )
             }
-            None => rac_engine::retrieve::find_decisions_path_payload(root, p),
+            None => rac_engine::retrieve::scope_lookup_value_with_origin(
+                &rac_engine::retrieve::decisions_for_path(root, p, true),
+                include_origin,
+            ),
         };
         return serialize(&payload, budget);
     }
@@ -210,7 +397,45 @@ pub fn find_decisions_tool(
         ),
         None => find_decisions(root, topic, true),
     };
-    let mut payload = search_result_payload(&result);
+    let mut payload = search_result_payload(&result, false);
+    payload
+        .as_object_mut()
+        .expect("object")
+        .insert("filter".to_string(), json!("live-decisions"));
+    serialize(&payload, budget)
+}
+
+pub fn find_decisions_tool_composed(
+    root: &str,
+    corpus: &rac_engine::composition::ComposedCorpus,
+    topic: &str,
+    path: Option<&str>,
+    budget: i64,
+) -> String {
+    if let Some(path) = path.filter(|path| !path.is_empty()) {
+        let items: Vec<_> = corpus.effective().cloned().collect();
+        let rows = rac_engine::retrieve::scope_rows_from_items(&items);
+        let result = rac_engine::retrieve::decisions_for_path_with_rows(&rows, root, path);
+        return serialize(
+            &rac_engine::retrieve::scope_lookup_value_with_composed(&result, corpus),
+            budget,
+        );
+    }
+
+    let entries = corpus.effective_index();
+    let live: std::collections::HashSet<_> = corpus
+        .effective()
+        .filter(|item| {
+            item.spec.map(|spec| spec.name.as_str()) == Some("decision")
+                && rac_engine::resolve::is_live_decision(&item.artifact)
+        })
+        .map(|item| item.key.clone())
+        .collect();
+    let mut result = search_index_filtered(&entries, topic, Some("decision"), &[], false);
+    result
+        .matches
+        .retain(|artifact| artifact.key.as_ref().is_some_and(|key| live.contains(key)));
+    let mut payload = composed_search_result_payload(&result, corpus);
     payload
         .as_object_mut()
         .expect("object")
@@ -224,8 +449,31 @@ pub fn get_related(
     depth: i64,
     budget: i64,
 ) -> String {
+    get_related_inner(graph_view, None, artifact_id, depth, budget)
+}
+
+pub fn get_related_composed(
+    graph_view: &graph::GraphView,
+    corpus: &rac_engine::composition::ComposedCorpus,
+    artifact_id: &str,
+    depth: i64,
+    budget: i64,
+) -> String {
+    get_related_inner(graph_view, Some(corpus), artifact_id, depth, budget)
+}
+
+fn get_related_inner(
+    graph_view: &graph::GraphView,
+    corpus: Option<&rac_engine::composition::ComposedCorpus>,
+    artifact_id: &str,
+    depth: i64,
+    budget: i64,
+) -> String {
     let graph_started = rac_engine::timing::start();
-    let result = graph_view.resolve(artifact_id);
+    let result = corpus.map_or_else(
+        || graph_view.resolve(artifact_id),
+        |corpus| corpus.resolve_identity(artifact_id),
+    );
     let Some(artifact) = result
         .artifact
         .as_ref()
@@ -233,8 +481,15 @@ pub fn get_related(
     else {
         return serialize(&output::resolution_error_value(&result), budget);
     };
-    let outgoing = graph_view.outgoing(&artifact.path);
-    let incoming_result = graph_view.incoming(&artifact.path);
+    let include_origin = graph_view.is_federated();
+    let historical = corpus.is_some_and(|corpus| {
+        artifact
+            .key
+            .as_ref()
+            .is_some_and(|key| corpus.is_overridden(key))
+    });
+    let outgoing = graph_view.outgoing(artifact, historical);
+    let incoming_result = graph_view.incoming(artifact, historical);
     let incoming: Vec<Value> = incoming_result
         .items
         .iter()
@@ -250,7 +505,13 @@ pub fn get_related(
             ev.insert("relationship".to_string(), json!(r.section));
             ev.insert("target".to_string(), json!(r.target));
             m.insert("evidence".to_string(), Value::Object(ev));
-            Value::Object(m)
+            let mut value = Value::Object(m);
+            if let Some(corpus) = corpus {
+                attach_composed_provenance(&mut value, corpus, r.key.as_ref());
+            } else {
+                attach_origin(&mut value, r.origin.as_ref(), include_origin);
+            }
+            value
         })
         .collect();
     let mut payload = Map::new();
@@ -258,11 +519,17 @@ pub fn get_related(
     for (k, v) in artifact_value(artifact) {
         payload.insert(k, v);
     }
+    if let Some(provenance) = corpus
+        .and_then(|corpus| composed_provenance(corpus, artifact.key.as_ref()))
+        .or_else(|| fixed_origin(artifact.origin.as_ref(), include_origin))
+    {
+        payload.insert("provenance".to_string(), Value::Object(provenance));
+    }
     payload.insert("outgoing".to_string(), outgoing.to_value());
     payload.insert("incoming".to_string(), Value::Array(incoming));
     let mut neighborhood_truncated = false;
     if depth > 1 {
-        let hood = graph_view.neighborhood(&artifact.path, depth);
+        let hood = graph_view.neighborhood(artifact, depth, historical);
         let nodes: Vec<Value> = hood
             .nodes
             .iter()
@@ -274,7 +541,13 @@ pub fn get_related(
                 m.insert("title".to_string(), opt_str(&n.title));
                 m.insert("path".to_string(), json!(n.path));
                 m.insert("hops".to_string(), json!(n.hops));
-                Value::Object(m)
+                let mut value = Value::Object(m);
+                if let Some(corpus) = corpus {
+                    attach_composed_provenance(&mut value, corpus, n.key.as_ref());
+                } else {
+                    attach_origin(&mut value, n.origin.as_ref(), include_origin);
+                }
+                value
             })
             .collect();
         payload.insert("neighborhood".to_string(), Value::Array(nodes));
@@ -395,6 +668,42 @@ pub fn get_summary(root: &str, model: Option<&TrackerModel>, budget: i64) -> Str
     serialize(&Value::Object(payload), budget)
 }
 
+pub fn get_summary_composed(
+    root: &str,
+    generation: &rac_engine::derived_cache::LogicalGeneration,
+    corpus: &rac_engine::composition::ComposedCorpus,
+    budget: i64,
+) -> String {
+    let identity = generation
+        .identity()
+        .expect("federated request has generation identity");
+    let parent = generation
+        .verified_parent()
+        .expect("federated request has verified parent");
+    let items: Vec<_> = corpus.effective().cloned().collect();
+    let overrides = rac_engine::validate::overrides_from_config_bytes(&parent.child_config_bytes);
+    let summary = rac_engine::portfolio::portfolio_from_corpus_with_analysis(
+        &identity.child_corpus_path,
+        &items,
+        identity.recursive,
+        &overrides,
+        corpus.relationship_summary(),
+        corpus.validate_relationships(root, identity.recursive).ok(),
+    );
+    let mut payload = rac_engine::output::portfolio_summary_value(&summary);
+    if payload
+        .get("empty")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        payload
+            .as_object_mut()
+            .expect("portfolio payload is an object")
+            .insert("guidance".to_string(), json!(EMPTY_GUIDANCE));
+    }
+    serialize(&payload, budget)
+}
+
 pub fn retrieve_grounding(
     root: &str,
     model: Option<&TrackerModel>,
@@ -434,6 +743,28 @@ pub fn retrieve_grounding(
     serialize(&payload, effective)
 }
 
+pub fn retrieve_grounding_composed(
+    root: &str,
+    corpus: &rac_engine::composition::ComposedCorpus,
+    task: &str,
+    scope: &str,
+    top_k: i64,
+    effective: i64,
+    live_only: bool,
+) -> String {
+    let scope = if scope.is_empty() { None } else { Some(scope) };
+    let payload = rac_engine::retrieve::retrieve_grounding_from_composed(
+        root,
+        task,
+        scope,
+        top_k,
+        effective,
+        live_only,
+        corpus,
+    );
+    serialize(&payload, effective)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -444,6 +775,31 @@ mod tests {
         format!(
             "---\nschema_version: 1\nid: {id}\ntype: decision\n---\n# {id}: Identity\n\n## Context\n\nTest.\n\n## Decision\n\nKeep.\n\n## Consequences\n\nNone.\n\n## Status\n\nAccepted\n"
         )
+    }
+
+    #[test]
+    fn fixed_origin_is_additive_only_in_a_federated_context() {
+        let local = rac_engine::corpus::CorpusLayer::local("acme/app").origin();
+        assert!(fixed_origin(Some(&local), false).is_none());
+        assert_eq!(
+            Value::Object(fixed_origin(Some(&local), true).unwrap()),
+            json!({"source": "acme/app", "layer": "local"})
+        );
+
+        let inherited = rac_engine::corpus::CorpusLayer::inherited(
+            "acme/standards",
+            "standards",
+            "sha256:0123",
+        )
+        .origin();
+        assert_eq!(
+            Value::Object(fixed_origin(Some(&inherited), true).unwrap()),
+            json!({
+                "source": "acme/standards",
+                "layer": "inherited",
+                "pin": "sha256:0123"
+            })
+        );
     }
 
     #[test]

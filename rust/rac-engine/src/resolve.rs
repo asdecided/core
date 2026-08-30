@@ -1148,7 +1148,7 @@ pub fn artifact_status(artifact: &Artifact) -> String {
 }
 
 /// `agent_rules.is_live_decision`: Accepted and not retired.
-pub(crate) fn is_live_decision(artifact: &Artifact) -> bool {
+pub fn is_live_decision(artifact: &Artifact) -> bool {
     let status = py_casefold(&artifact_status(artifact));
     if status != "accepted" {
         return false;

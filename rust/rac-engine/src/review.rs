@@ -120,6 +120,7 @@ pub fn review_from_portfolio(
             severity,
             code,
             message,
+            origin: _,
         } = item;
         let priority = attention_priority(code);
         let action = if code == ATTENTION_INVALID {
@@ -187,6 +188,39 @@ pub fn build_review(
     report
 }
 
+pub fn build_review_composed(
+    directory: &str,
+    recursive: bool,
+    stale_after_days: Option<i64>,
+    corpus: &crate::composition::ComposedCorpus,
+) -> ReviewReport {
+    let items: Vec<CorpusItem> = corpus.local_items().cloned().collect();
+    let portfolio = crate::portfolio::local_portfolio_from_composed(directory, corpus, recursive);
+    let mut report = review_from_portfolio(directory, portfolio, recursive);
+    let child_source = corpus.child_source();
+    let local_relationships: Vec<crate::relationships::Relationship> = corpus
+        .local_relationships()
+        .into_iter()
+        .filter(|relationship| {
+            relationship
+                .resolved_artifact
+                .as_ref()
+                .is_some_and(|path| Some(path.source.as_str()) == child_source)
+        })
+        .collect();
+    let mut advisories = drift_findings_from_relationships(directory, &local_relationships);
+    if let Some(window) = stale_after_days {
+        if let Some(finding) = cadence_finding(directory, &items, window) {
+            advisories.push(finding);
+        }
+    }
+    if !advisories.is_empty() {
+        report.issues.extend(advisories);
+        sort_issues(&mut report.issues);
+    }
+    report
+}
+
 // --- git-native drift --------------------------------------------------------
 
 pub(crate) struct DriftRecord {
@@ -205,13 +239,20 @@ pub(crate) fn suspect_drift(directory: &str, items: &[CorpusItem]) -> Vec<DriftR
         .into_iter()
         .filter(|r| r.resolved_path.is_some())
         .collect();
+    suspect_drift_from_relationships(directory, &resolved)
+}
+
+fn suspect_drift_from_relationships(
+    directory: &str,
+    resolved: &[crate::relationships::Relationship],
+) -> Vec<DriftRecord> {
     if resolved.is_empty() {
         return Vec::new();
     }
 
     let mut involved: Vec<PathBuf> = Vec::new();
     let mut seen_paths: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for rel in &resolved {
+    for rel in resolved {
         for p in [&rel.source_path, rel.resolved_path.as_ref().unwrap()] {
             if seen_paths.insert(p.clone()) {
                 involved.push(PathBuf::from(p));
@@ -226,7 +267,7 @@ pub(crate) fn suspect_drift(directory: &str, items: &[CorpusItem]) -> Vec<DriftR
 
     let mut records: Vec<DriftRecord> = Vec::new();
     let mut seen: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
-    for rel in &resolved {
+    for rel in resolved {
         let target_path = rel.resolved_path.clone().unwrap();
         let source_when = committed.get(&rel.source_path).and_then(|v| v.clone());
         let target_when = committed.get(&target_path).and_then(|v| v.clone());
@@ -263,6 +304,25 @@ pub(crate) fn suspect_drift(directory: &str, items: &[CorpusItem]) -> Vec<DriftR
 
 fn drift_findings(directory: &str, items: &[CorpusItem]) -> Vec<ReviewIssue> {
     suspect_drift(directory, items)
+        .into_iter()
+        .map(|record| ReviewIssue {
+            priority: PRIORITY_SUSPECT_DRIFT,
+            severity: "warning".to_string(),
+            path: record.source_path.clone(),
+            identifier: crate::identity::path_stem(&record.source_path),
+            code: REVIEW_SUSPECT_ARTIFACT.to_string(),
+            message: drift_problem(&record),
+            action: format!("Run: decided doctor {directory}"),
+            impact: impact_for(REVIEW_SUSPECT_ARTIFACT).to_string(),
+        })
+        .collect()
+}
+
+fn drift_findings_from_relationships(
+    directory: &str,
+    relationships: &[crate::relationships::Relationship],
+) -> Vec<ReviewIssue> {
+    suspect_drift_from_relationships(directory, relationships)
         .into_iter()
         .map(|record| ReviewIssue {
             priority: PRIORITY_SUSPECT_DRIFT,
