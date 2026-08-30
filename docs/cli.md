@@ -34,6 +34,44 @@ These apply across every command.
 
 ---
 
+## corpus digest
+
+Calculate the canonical pin for a parent corpus that is already materialised
+on disk. The command is read-only: it does not clone, fetch, update, write, or
+repin the parent.
+
+```bash
+decided corpus digest --root vendor/standards --corpus decisions
+```
+
+`--root` is the parent repository root and bounds configuration discovery to
+exactly `<root>/.decided/config.yaml`; the command never inherits a config from
+an ancestor. `--corpus` is a relative directory below that root. The config
+must declare an explicit valid `corpus.source`. On success stdout is exactly a
+full lowercase pin followed by a newline:
+
+```text
+sha256:899d5cdfa52b90a157b018dceb20f4f2901e0d56c91b089c12286c0b8b7b3325
+```
+
+Digest version 1 hashes the fixed domain bytes
+`asdecided-corpus-digest-v1\0`, then length-framed records. Each record is a
+one-byte tag, an unsigned 64-bit big-endian byte length, and the raw payload:
+
+1. tag `0x01`: parent `corpus.source` UTF-8 bytes;
+2. tag `0x02`: exact governing `.decided/config.yaml` bytes; then
+3. for every discovered Markdown file in corpus-relative POSIX UTF-8 path
+   order, tag `0x03` for the path bytes and tag `0x04` for its exact content
+   bytes.
+
+Checkout location, timestamps, filesystem iteration order, hidden paths, and
+non-`.md` files do not enter the digest. Absolute or `..` corpus paths, path
+escape, and traversed symlinks are rejected with stable `parent-corpus-*`
+errors. Exit `0` means the digest was calculated; exit `1` means the bounded
+materialisation could not be safely snapshotted.
+
+---
+
 ## validate
 
 Validate an artifact — or every artifact in a directory — for structural and

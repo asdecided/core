@@ -5,16 +5,16 @@
 //! (decision 9) — stdout stays byte-identical (empty on errors).
 
 use crate::commands::{
-    cmd_coverage, cmd_decisions_for, cmd_diagnose, cmd_diff, cmd_doctor, cmd_eval, cmd_export,
-    cmd_find, cmd_gate, cmd_herald, cmd_hook, cmd_improve, cmd_index, cmd_init, cmd_inspect,
-    cmd_mcp_stats, cmd_migrate, cmd_new, cmd_portfolio, cmd_quickstart, cmd_relationships,
-    cmd_rename, cmd_resolve, cmd_retrieve, cmd_review, cmd_schema, cmd_sentry, cmd_skill,
-    cmd_stats, cmd_telemetry, cmd_templates, cmd_usage, cmd_validate, CoverageArgs,
-    DecisionsForArgs, DiagnoseArgs, DiffArgs, DoctorArgs, EvalArgs, ExportArgs, FindArgs,
-    GateArgs, HeraldArgs, HookArgs, ImproveArgs, IndexArgs, InitArgs, InspectArgs, McpStatsArgs,
-    MigrateArgs, NewArgs, PortfolioArgs, QuickstartArgs, RelationshipsArgs, RenameArgs,
-    ResolveArgs, RetrieveArgs, ReviewArgs, SchemaArgs, SentryArgs, SkillArgs, StatsArgs,
-    TelemetryArgs, TemplatesArgs, UsageArgs, ValidateArgs, WatchkeeperArgs,
+    cmd_corpus_digest, cmd_coverage, cmd_decisions_for, cmd_diagnose, cmd_diff, cmd_doctor,
+    cmd_eval, cmd_export, cmd_find, cmd_gate, cmd_herald, cmd_hook, cmd_improve, cmd_index,
+    cmd_init, cmd_inspect, cmd_mcp_stats, cmd_migrate, cmd_new, cmd_portfolio, cmd_quickstart,
+    cmd_relationships, cmd_rename, cmd_resolve, cmd_retrieve, cmd_review, cmd_schema, cmd_sentry,
+    cmd_skill, cmd_stats, cmd_telemetry, cmd_templates, cmd_usage, cmd_validate,
+    CorpusDigestArgs, CoverageArgs, DecisionsForArgs, DiagnoseArgs, DiffArgs, DoctorArgs, EvalArgs,
+    ExportArgs, FindArgs, GateArgs, HeraldArgs, HookArgs, ImproveArgs, IndexArgs, InitArgs,
+    InspectArgs, McpStatsArgs, MigrateArgs, NewArgs, PortfolioArgs, QuickstartArgs,
+    RelationshipsArgs, RenameArgs, ResolveArgs, RetrieveArgs, ReviewArgs, SchemaArgs, SentryArgs,
+    SkillArgs, StatsArgs, TelemetryArgs, TemplatesArgs, UsageArgs, ValidateArgs, WatchkeeperArgs,
 };
 use crate::commands::cmd_watchkeeper;
 use crate::output::rac_version;
@@ -156,7 +156,10 @@ fn run_dispatch(args: &[String]) -> u8 {
     // Native-only additions dispatch but are deliberately NOT in SUBCOMMANDS:
     // the retired Python oracle's `invalid choice` bytes remain pinned by the
     // bounded compatibility suite.
-    if !matches!(first.as_str(), "retrieve" | "sentry" | "herald" | "diagnose")
+    if !matches!(
+        first.as_str(),
+        "retrieve" | "sentry" | "herald" | "diagnose" | "corpus"
+    )
         && !SUBCOMMANDS.contains(&first.as_str())
     {
         return argparse_error("decided", &invalid_choice_message(first));
@@ -232,6 +235,7 @@ fn run_dispatch(args: &[String]) -> u8 {
         "quickstart" => run_quickstart(&rest),
         "rename" => run_rename(&rest),
         "migrate" => run_migrate(&rest),
+        "corpus" => run_corpus(&rest),
         other => {
             eprintln!("decided-rs: subcommand '{other}' is not yet implemented");
             2
@@ -276,6 +280,78 @@ fn take_opt_value(
             &format!("argument {flag}: expected one argument"),
         )),
     }
+}
+
+fn run_corpus(rest: &[&String]) -> u8 {
+    let prog = "decided corpus";
+    let mut action: Option<String> = None;
+    let mut root: Option<String> = None;
+    let mut corpus: Option<String> = None;
+    let mut extras: Vec<String> = Vec::new();
+    let mut positional_only = false;
+
+    let mut i = 0;
+    while i < rest.len() {
+        let arg = rest[i].as_str();
+        if positional_only || arg == "-" || !arg.starts_with('-') {
+            if action.is_none() {
+                if arg != "digest" {
+                    return argparse_error(
+                        prog,
+                        &format!(
+                            "argument action: invalid choice: '{arg}' (choose from 'digest')"
+                        ),
+                    );
+                }
+                action = Some(arg.to_string());
+            } else {
+                extras.push(arg.to_string());
+            }
+            i += 1;
+            continue;
+        }
+        match arg {
+            "--" => positional_only = true,
+            other if other == "--root" || other.starts_with("--root=") => {
+                match take_opt_value(prog, "--root", other, rest, &mut i) {
+                    Ok(value) => root = Some(value),
+                    Err(code) => return code,
+                }
+            }
+            other if other == "--corpus" || other.starts_with("--corpus=") => {
+                match take_opt_value(prog, "--corpus", other, rest, &mut i) {
+                    Ok(value) => corpus = Some(value),
+                    Err(code) => return code,
+                }
+            }
+            other => extras.push(other.to_string()),
+        }
+        i += 1;
+    }
+
+    if action.is_none() {
+        return argparse_error(prog, "the following arguments are required: action");
+    }
+    if root.is_none() || corpus.is_none() {
+        let missing = match (root.is_none(), corpus.is_none()) {
+            (true, true) => "--root, --corpus",
+            (true, false) => "--root",
+            (false, true) => "--corpus",
+            (false, false) => unreachable!(),
+        };
+        return argparse_error(
+            prog,
+            &format!("the following arguments are required: {missing}"),
+        );
+    }
+    if !extras.is_empty() {
+        return unrecognized(&extras);
+    }
+
+    cmd_corpus_digest(&CorpusDigestArgs {
+        root: root.expect("checked above"),
+        corpus: corpus.expect("checked above"),
+    }) as u8
 }
 
 fn run_validate(rest: &[&String]) -> u8 {
