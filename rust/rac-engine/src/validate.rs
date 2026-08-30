@@ -904,12 +904,26 @@ fn add_okf(
 /// `find_config_file(start_dir)`: the nearest `.decided/config.yaml` at or above
 /// the resolved `start_dir`.
 pub fn find_config_file(start_dir: &str) -> Option<PathBuf> {
+    find_config_file_with_boundary(start_dir, None)
+}
+
+/// Nearest config without walking above an optional trusted filesystem root.
+pub fn find_config_file_with_boundary(
+    start_dir: &str,
+    boundary: Option<&Path>,
+) -> Option<PathBuf> {
     let resolved = resolve_path(start_dir);
     let mut current: Option<&Path> = Some(resolved.as_path());
     while let Some(dir) = current {
+        if boundary.is_some_and(|root| !dir.starts_with(root)) {
+            return None;
+        }
         let candidate = dir.join(".decided").join("config.yaml");
         if candidate.is_file() {
             return Some(candidate);
+        }
+        if boundary.is_some_and(|root| dir == root) {
+            return None;
         }
         current = dir.parent();
     }
@@ -941,8 +955,11 @@ fn yaml_map_get<'a>(pairs: &'a [(Yaml, Yaml)], name: &str) -> Option<&'a Yaml> {
     })
 }
 
-fn load_config_mapping(start_dir: &str) -> Option<Vec<(Yaml, Yaml)>> {
-    let config_path = find_config_file(start_dir)?;
+fn load_config_mapping_with_boundary(
+    start_dir: &str,
+    boundary: Option<&Path>,
+) -> Option<Vec<(Yaml, Yaml)>> {
+    let config_path = find_config_file_with_boundary(start_dir, boundary)?;
     let text = std::fs::read_to_string(&config_path).ok()?;
     // The oracle uses full `yaml.safe_load`; the bounded frontmatter loader
     // covers the well-formed configs the parity corpus contains. (A config
@@ -950,6 +967,10 @@ fn load_config_mapping(start_dir: &str) -> Option<Vec<(Yaml, Yaml)>> {
     // fix here, not silently accept.)
     let (pairs, _issues) = load_frontmatter_mapping(&text);
     pairs
+}
+
+fn load_config_mapping(start_dir: &str) -> Option<Vec<(Yaml, Yaml)>> {
+    load_config_mapping_with_boundary(start_dir, None)
 }
 
 /// Coerce a YAML 1.1 severity value: bare `off` parses as Bool(false).
@@ -1035,7 +1056,14 @@ pub fn load_freshness_threshold(start_dir: &str) -> i64 {
 
 /// `load_ticketing_provider(start_dir)` (ADR-088).
 pub fn load_ticketing_provider(start_dir: &str) -> Option<String> {
-    let pairs = load_config_mapping(start_dir)?;
+    load_ticketing_provider_with_boundary(start_dir, None)
+}
+
+pub fn load_ticketing_provider_with_boundary(
+    start_dir: &str,
+    boundary: Option<&Path>,
+) -> Option<String> {
+    let pairs = load_config_mapping_with_boundary(start_dir, boundary)?;
     let Some(Yaml::Map(section)) = yaml_map_get(&pairs, "ticketing") else {
         return None;
     };

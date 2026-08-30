@@ -3,6 +3,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::path::Path;
 
 use crate::composition::{ComposedCorpus, ComposedProvenance};
 use crate::corpus::{ArtifactKey, ArtifactOrigin, ArtifactPath, Layer};
@@ -14,7 +15,7 @@ use crate::pycompat::py_strip;
 use crate::relationships::{corpus_items, edge_spec, relationships_from_corpus, CorpusItem};
 use crate::scaffold::ScaffoldError;
 use crate::spec::ArtifactSpec;
-use crate::validate::load_ticketing_provider;
+use crate::validate::load_ticketing_provider_with_boundary;
 
 pub const EDGE_TYPE: &str = "relates-to";
 pub const STATUS_ABSENT: &str = "unknown";
@@ -58,6 +59,31 @@ pub fn export_schema(name: &str) -> Option<&'static str> {
 /// released directory-basename fallback (ADR-135).
 pub fn corpus_source(directory: &str) -> Result<String, ScaffoldError> {
     crate::corpus::compatible_corpus_source(directory)
+}
+
+fn corpus_source_with_fallback(
+    directory: &str,
+    fallback_directory: &str,
+    boundary: Option<&Path>,
+) -> Result<String, ScaffoldError> {
+    crate::corpus::compatible_corpus_source_with_fallback_and_boundary(
+        directory,
+        fallback_directory,
+        boundary,
+    )
+}
+
+fn logical_artifact_path(directory: &str, relative_path: &str) -> String {
+    let root = crate::walk::normalize_root(directory);
+    if root == "." {
+        relative_path.to_string()
+    } else if root == "/" {
+        format!("/{relative_path}")
+    } else if root.ends_with('/') {
+        format!("{root}{relative_path}")
+    } else {
+        format!("{root}/{relative_path}")
+    }
 }
 
 /// A deterministic failure while projecting an already-verified composed
@@ -448,6 +474,7 @@ impl CorpusExport {
 
 fn build_corpus_export_inner(
     directory: &str,
+    identity_directory: &str,
     rac_version: String,
     include_body_html: bool,
     corpus_source: String,
@@ -459,19 +486,21 @@ fn build_corpus_export_inner(
     for it in &items {
         let Some(spec) = it.spec else { continue };
         let canon = canonical[&it.path].clone();
+        let logical_path =
+            logical_artifact_path(identity_directory, &it.artifact_path.relative_path);
         let title = match &it.artifact.product.title {
             Some(t) if !t.is_empty() => t.clone(),
             _ => canon.clone(),
         };
         artifacts.push(ExportArtifact {
             id: canon,
-            aliases: artifact_identifiers(&it.artifact, it.spec, &it.path),
+            aliases: artifact_identifiers(&it.artifact, it.spec, &logical_path),
             artifact_type: spec.name.clone(),
             status: status(&it.artifact, spec),
             title,
-            path: it.path.clone(),
+            path: logical_path,
             body_html: if include_body_html {
-                crate::mdhtml::render(&body_markdown(&it.path))
+                crate::mdhtml::render(&body_markdown(&it.locator.path.to_string_lossy()))
             } else {
                 String::new()
             },
@@ -505,7 +534,7 @@ fn build_corpus_export_inner(
     edges.sort_by(|a, b| a.from.cmp(&b.from).then(a.to.cmp(&b.to)));
 
     CorpusExport {
-        corpus_name: corpus_name(directory),
+        corpus_name: corpus_name(identity_directory),
         corpus_source,
         rac_version,
         artifacts,
@@ -517,11 +546,21 @@ pub fn build_corpus_export(
     directory: &str,
     rac_version: String,
 ) -> Result<CorpusExport, ScaffoldError> {
+    build_corpus_export_for(directory, directory, rac_version, None)
+}
+
+pub fn build_corpus_export_for(
+    directory: &str,
+    identity_directory: &str,
+    rac_version: String,
+    boundary: Option<&Path>,
+) -> Result<CorpusExport, ScaffoldError> {
     Ok(build_corpus_export_inner(
         directory,
+        identity_directory,
         rac_version,
         true,
-        corpus_source(directory)?,
+        corpus_source_with_fallback(directory, identity_directory, boundary)?,
     ))
 }
 
@@ -534,8 +573,27 @@ pub fn build_corpus_export_from_composed(
     corpus: &ComposedCorpus,
     local_only: bool,
 ) -> Result<CorpusExport, FederatedExportError> {
+    build_corpus_export_from_composed_for(
+        directory,
+        directory,
+        rac_version,
+        corpus,
+        local_only,
+        None,
+    )
+}
+
+pub fn build_corpus_export_from_composed_for(
+    directory: &str,
+    identity_directory: &str,
+    rac_version: String,
+    corpus: &ComposedCorpus,
+    local_only: bool,
+    boundary: Option<&Path>,
+) -> Result<CorpusExport, FederatedExportError> {
     if !corpus.is_federated() {
-        return build_corpus_export(directory, rac_version).map_err(Into::into);
+        return build_corpus_export_for(directory, identity_directory, rac_version, boundary)
+            .map_err(Into::into);
     }
 
     let projected = projected_items(corpus, local_only)?;
@@ -612,7 +670,7 @@ pub fn build_corpus_export_from_composed(
                 .then(left.effective_terminal.cmp(&right.effective_terminal))
         });
         return Ok(CorpusExport {
-            corpus_name: corpus_name(directory),
+            corpus_name: corpus_name(identity_directory),
             corpus_source: composed_child_source(corpus)?,
             rac_version,
             artifacts,
@@ -651,7 +709,7 @@ pub fn build_corpus_export_from_composed(
     });
 
     Ok(CorpusExport {
-        corpus_name: corpus_name(directory),
+        corpus_name: corpus_name(identity_directory),
         corpus_source: composed_child_source(corpus)?,
         rac_version,
         artifacts,
@@ -662,7 +720,13 @@ pub fn build_corpus_export_from_composed(
 /// OKF consumes the source Markdown body directly. Avoid an irrelevant HTML
 /// render over the whole corpus on this path.
 pub fn build_okf_export(directory: &str, rac_version: String) -> CorpusExport {
-    build_corpus_export_inner(directory, rac_version, false, corpus_name(directory))
+    build_corpus_export_inner(
+        directory,
+        directory,
+        rac_version,
+        false,
+        corpus_name(directory),
+    )
 }
 
 /// Keep the first federation increment's OKF carrier local-only while using
@@ -763,12 +827,22 @@ pub struct DocumentsExport {
 }
 
 pub fn build_documents_export(directory: &str) -> Result<DocumentsExport, ScaffoldError> {
-    let source = corpus_source(directory)?;
+    build_documents_export_for(directory, directory, None)
+}
+
+pub fn build_documents_export_for(
+    directory: &str,
+    identity_directory: &str,
+    boundary: Option<&Path>,
+) -> Result<DocumentsExport, ScaffoldError> {
+    let source = corpus_source_with_fallback(directory, identity_directory, boundary)?;
     let items = corpus_items(directory, true);
     let mut documents: Vec<ExportDocument> = Vec::new();
     for it in &items {
         let Some(spec) = it.spec else { continue };
         let canon = artifact_identifier(&it.artifact, it.spec, &it.path);
+        let logical_path =
+            logical_artifact_path(identity_directory, &it.artifact_path.relative_path);
         let title = match &it.artifact.product.title {
             Some(t) if !t.is_empty() => t.clone(),
             _ => canon.clone(),
@@ -778,16 +852,16 @@ pub fn build_documents_export(directory: &str) -> Result<DocumentsExport, Scaffo
             artifact_type: spec.name.clone(),
             status: status(&it.artifact, spec),
             title,
-            text: body_markdown(&it.path),
-            aliases: artifact_identifiers(&it.artifact, it.spec, &it.path),
-            path: it.path.clone(),
+            text: body_markdown(&it.locator.path.to_string_lossy()),
+            aliases: artifact_identifiers(&it.artifact, it.spec, &logical_path),
+            path: logical_path,
             tags: tags_of(&it.artifact),
             provenance: None,
             graph_provenance: None,
         });
     }
     Ok(DocumentsExport {
-        corpus_name: corpus_name(directory),
+        corpus_name: corpus_name(identity_directory),
         corpus_source: source,
         documents,
     })
@@ -798,8 +872,19 @@ pub fn build_documents_export_from_composed(
     corpus: &ComposedCorpus,
     local_only: bool,
 ) -> Result<DocumentsExport, FederatedExportError> {
+    build_documents_export_from_composed_for(directory, directory, corpus, local_only, None)
+}
+
+pub fn build_documents_export_from_composed_for(
+    directory: &str,
+    identity_directory: &str,
+    corpus: &ComposedCorpus,
+    local_only: bool,
+    boundary: Option<&Path>,
+) -> Result<DocumentsExport, FederatedExportError> {
     if !corpus.is_federated() {
-        return build_documents_export(directory).map_err(Into::into);
+        return build_documents_export_for(directory, identity_directory, boundary)
+            .map_err(Into::into);
     }
 
     let projected = projected_items(corpus, local_only)?;
@@ -831,7 +916,7 @@ pub fn build_documents_export_from_composed(
         });
     }
     Ok(DocumentsExport {
-        corpus_name: corpus_name(directory),
+        corpus_name: corpus_name(identity_directory),
         corpus_source: composed_child_source(corpus)?,
         documents,
     })
@@ -873,9 +958,17 @@ pub struct GraphExport {
 }
 
 pub fn build_graph_export(directory: &str) -> Result<GraphExport, ScaffoldError> {
-    let source = corpus_source(directory)?;
+    build_graph_export_for(directory, directory, None)
+}
+
+pub fn build_graph_export_for(
+    directory: &str,
+    identity_directory: &str,
+    boundary: Option<&Path>,
+) -> Result<GraphExport, ScaffoldError> {
+    let source = corpus_source_with_fallback(directory, identity_directory, boundary)?;
     let items = corpus_items(directory, true);
-    let provider = load_ticketing_provider(directory);
+    let provider = load_ticketing_provider_with_boundary(directory, boundary);
     let canonical = canonical_by_path(&items);
 
     let mut nodes: Vec<GraphNode> = Vec::new();
@@ -933,7 +1026,7 @@ pub fn build_graph_export(directory: &str) -> Result<GraphExport, ScaffoldError>
     });
 
     Ok(GraphExport {
-        corpus_name: corpus_name(directory),
+        corpus_name: corpus_name(identity_directory),
         corpus_source: source,
         nodes,
         edges,
@@ -945,8 +1038,18 @@ pub fn build_graph_export_from_composed(
     corpus: &ComposedCorpus,
     local_only: bool,
 ) -> Result<GraphExport, FederatedExportError> {
+    build_graph_export_from_composed_for(directory, directory, corpus, local_only, None)
+}
+
+pub fn build_graph_export_from_composed_for(
+    directory: &str,
+    identity_directory: &str,
+    corpus: &ComposedCorpus,
+    local_only: bool,
+    boundary: Option<&Path>,
+) -> Result<GraphExport, FederatedExportError> {
     if !corpus.is_federated() {
-        return build_graph_export(directory).map_err(Into::into);
+        return build_graph_export_for(directory, identity_directory, boundary).map_err(Into::into);
     }
 
     let projected = projected_items(corpus, local_only)?;
@@ -972,7 +1075,7 @@ pub fn build_graph_export_from_composed(
 
     let included = included_keys(&projected);
     if let Some(graph) = corpus.graph() {
-        let provider = load_ticketing_provider(directory);
+        let provider = load_ticketing_provider_with_boundary(directory, boundary);
         let mut edges = Vec::new();
         for relationship in graph.catalog_relationships() {
             let source = graph.item(&relationship.source).ok_or_else(|| {
@@ -1025,7 +1128,7 @@ pub fn build_graph_export_from_composed(
                 .then(left.effective_terminal.cmp(&right.effective_terminal))
         });
         return Ok(GraphExport {
-            corpus_name: corpus_name(directory),
+            corpus_name: corpus_name(identity_directory),
             corpus_source: composed_child_source(corpus)?,
             nodes,
             edges,
@@ -1033,7 +1136,7 @@ pub fn build_graph_export_from_composed(
     }
 
     let by_path = item_by_artifact_path(corpus);
-    let provider = load_ticketing_provider(directory);
+    let provider = load_ticketing_provider_with_boundary(directory, boundary);
     let mut edges = Vec::new();
     for relationship in corpus.catalog_relationships() {
         let (source, target) = relationship_endpoints(&relationship, &by_path)?;
@@ -1073,7 +1176,7 @@ pub fn build_graph_export_from_composed(
     });
 
     Ok(GraphExport {
-        corpus_name: corpus_name(directory),
+        corpus_name: corpus_name(identity_directory),
         corpus_source: composed_child_source(corpus)?,
         nodes,
         edges,

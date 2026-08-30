@@ -23,7 +23,7 @@ use std::path::Path;
 use crate::pycompat::py_repr_str;
 use crate::relationships::CorpusItem;
 use crate::spec::available_schemas;
-use crate::validate::find_config_file;
+use crate::validate::{find_config_file, find_config_file_with_boundary};
 use crate::walk::py_join;
 
 // ---------------------------------------------------------------------------
@@ -372,7 +372,14 @@ fn read_config(config_path: &str) -> Result<RepositoryConfig, ScaffoldError> {
 pub fn load_repository_identity(
     start_dir: &str,
 ) -> Result<Option<RepositoryIdentityConfig>, ScaffoldError> {
-    match find_config_file(start_dir) {
+    load_repository_identity_with_boundary(start_dir, None)
+}
+
+pub fn load_repository_identity_with_boundary(
+    start_dir: &str,
+    boundary: Option<&Path>,
+) -> Result<Option<RepositoryIdentityConfig>, ScaffoldError> {
+    match find_config_file_with_boundary(start_dir, boundary) {
         Some(path) => read_identity_config(&path.to_string_lossy()).map(Some),
         None => Ok(None),
     }

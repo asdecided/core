@@ -922,13 +922,14 @@ artifacts — existing output is overwritten.
 
 - **Input:** `decided export [directory]` — scanned recursively for `*.md` (default: current directory).
 - **Modes:** *(default)* viewer JSON to stdout · `--html` (self-contained Portal file) · `--okf` (OKF v0.2 Markdown bundle) · `--documents` (JSONL for memory/RAG backends) · `--graph` (typed node+edge JSON for graph backends) · `--schema <viewer|documents|graph>` (the packaged JSON Schema, without reading a corpus) · `--agent-rules` (per-client agent-context files; see its own behaviour)
-- **Options:** `--out <path>` (only `--html`/`--okf`/`--agent-rules`; the stdout modes are pipeable) · `--json` (no-op for the default mode) · `--local-only` (viewer/HTML, documents, and graph projections only)
-- **Exit codes:** `0` success · `2` not a directory, or `--out` given to a stdout mode
+- **Options:** `--out <path>` (only `--html`/`--okf`/`--agent-rules`; the stdout modes are pipeable) · `--json` (no-op for the default mode) · `--local-only` (viewer/HTML, documents, and graph projections only) · `--at <revision>` (read-only point-in-time viewer, documents, or graph export)
+- **Exit codes:** `0` success · `1` historical object, materialization, or federation validation failure · `2` not a directory, an unknown revision, a non-Git directory used with `--at`, an unsupported option combination, or `--out` given to a stdout mode
 
 ```bash
 decided export decisions/                      # viewer JSON to stdout
 decided export decisions/ --documents          # JSONL, one record per artifact
 decided export decisions/ --graph              # typed node+edge graph
+decided export decisions/ --documents --at v0.29.0 # historical JSONL
 decided export decisions/ --local-only         # writable child records only
 decided export --schema documents              # Draft 2020-12 record schema
 decided export decisions/ --html --out asdecided.html
@@ -940,6 +941,26 @@ their own source, layer, and verified-pin provenance; explicit overrides retain
 both the parent history and local replacement. `--local-only` is a human
 diagnostic/export projection of the writable child records. OKF bundles and
 generated agent rules remain local-only and do not accept the flag.
+
+`--at <revision>` reproduces any of the three JSON projections from a commit,
+tag, or other Git revision without checking it out or mutating `.git`. Only the
+requested corpus and its declared configuration, manifests, and materialised
+parent closure are copied from exact committed blobs. Local submodule objects
+are read at their recorded gitlink commits without fetching. The snapshot
+cannot inherit configuration from its temporary-directory ancestors. If the
+selected revision has no governing config, a currently governing config
+outside the Git repository is rejected because it cannot be reproduced.
+Output paths and corpus display identity still come from the requested
+directory.
+When worktree bytes match the committed blobs, the same submodule object
+closure is available locally, and the corpus is within the snapshot safety
+limits documented below, `--at HEAD` is byte-identical to a plain export.
+HTML, OKF, agent-rules, and schema modes do not accept `--at`.
+
+The bounded snapshot admits at most 50,000 Markdown files, 200,000 visited
+entries, 16 MiB per file, and 512 MiB of selected physical bytes. A selected
+path is limited to 64 components and 4,096 UTF-8 bytes. Exceeding a safety
+limit fails the export with exit code `1` rather than returning partial output.
 
 The three machine-readable payload contracts, compatibility rules, and direct
 schema links are documented on the [Export contracts](export-contracts.md)
