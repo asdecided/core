@@ -109,6 +109,80 @@ impl Server {
         panic!("HTTP server did not start");
     }
 
+    fn start_federated(tag: &str) -> Self {
+        let corpus = scratch(tag);
+        let parent = corpus.join("vendor/standards");
+        let audit_path = corpus.join("audit.jsonl");
+        std::fs::create_dir_all(corpus.join(".decided")).unwrap();
+        std::fs::create_dir_all(corpus.join("decisions")).unwrap();
+        std::fs::create_dir_all(parent.join(".decided")).unwrap();
+        std::fs::create_dir_all(parent.join("decisions")).unwrap();
+        std::fs::write(
+            corpus.join(".decided/config.yaml"),
+            format!(
+                "repository_key: APP\ncorpus:\n  source: acme/app\naudit:\n  enabled: true\n  path: {}\n",
+                audit_path.display()
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            parent.join(".decided/config.yaml"),
+            "repository_key: STD\ncorpus:\n  source: acme/standards\n",
+        )
+        .unwrap();
+        std::fs::write(
+            parent.join("decisions/parent.md"),
+            "---\nschema_version: 1\nid: STD-01JY4M8X2QZ7\ntype: decision\n---\n# Parent Audit Policy\n\n## Status\n\nAccepted\n\n## Context\n\nAudit parent context.\n\n## Decision\n\nKeep federation auditable.\n\n## Consequences\n\nFailures are recorded.\n",
+        )
+        .unwrap();
+        let digest = rac_engine::federation::calculate_parent_digest(&parent, "decisions")
+            .unwrap()
+            .digest;
+        std::fs::write(
+            corpus.join(".decided/corpus.md"),
+            format!(
+                "# Corpus\n\n## inherits\n\n```yaml\nversion: 1\nalias: standards\nsource: acme/standards\nroot: vendor/standards\ncorpus: decisions\ndigest: {digest}\n```\n"
+            ),
+        )
+        .unwrap();
+
+        let port = TcpListener::bind(("127.0.0.1", 0))
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let root = corpus.join("decisions").to_string_lossy().into_owned();
+        let port_text = port.to_string();
+        let child = Command::new(env!("CARGO_BIN_EXE_decided-mcp"))
+            .args([
+                "--root",
+                &root,
+                "--no-cache",
+                "--transport",
+                "http",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                &port_text,
+            ])
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn federated HTTP server");
+        let server = Self {
+            child,
+            corpus,
+            port,
+        };
+        for _ in 0..100 {
+            if TcpStream::connect(("127.0.0.1", port)).is_ok() {
+                return server;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        panic!("federated HTTP server did not start");
+    }
+
     fn post(&self, body: &Value, method_header: &str, name: Option<&str>) -> (String, Value) {
         self.post_with_version_and_origin(body, method_header, name, CURRENT_VERSION, None)
     }
@@ -550,6 +624,53 @@ fn http_audit_records_every_result_collection() {
     assert!(returned[4].contains(&"RAC-111111111111".to_string()));
     assert!(returned[5].contains(&"RAC-111111111111".to_string()));
     assert!(returned[6].is_empty());
+}
+
+#[test]
+fn stale_parent_failure_is_audited_once_before_http_error_response() {
+    let _guard = serial_http_test();
+    let server = Server::start_federated("http-audit-stale-parent");
+    let arguments = json!({"query": "parent audit policy"});
+
+    let (first_status, first) = server.post_with_principal_headers(
+        &tool_call(1, "search_artifacts", arguments.clone()),
+        "tools/call",
+        Some("search_artifacts"),
+        &[("X-AsDecided-Principal", "alice@example.com")],
+    );
+    assert_eq!(first_status, "HTTP/1.1 200 OK");
+    assert_eq!(first["result"]["isError"], json!(false));
+
+    std::fs::write(
+        server.corpus.join("vendor/standards/decisions/parent.md"),
+        "changed after the verified generation\n",
+    )
+    .expect("mutate verified parent");
+    let before = server.audit_events().len();
+    let (second_status, second) = server.post_with_principal_headers(
+        &tool_call(2, "search_artifacts", arguments),
+        "tools/call",
+        Some("search_artifacts"),
+        &[("X-AsDecided-Principal", "alice@example.com")],
+    );
+    assert_eq!(second_status, "HTTP/1.1 200 OK");
+    assert_eq!(second["result"]["isError"], json!(true));
+    assert!(second["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap()
+        .contains("parent-corpus-digest-mismatch"));
+
+    let events = server.audit_events();
+    assert_eq!(events.len(), before + 1, "failure records exactly one event");
+    let failure = events.last().unwrap();
+    assert_eq!(failure["tool"], json!("search_artifacts"));
+    assert_eq!(failure["query"], json!({
+        "query": "parent audit policy",
+        "type": null
+    }));
+    assert_eq!(failure["outcome"], json!("error"));
+    assert_eq!(failure["returned"], json!([]));
+    assert_eq!(failure["principal"], json!("alice@example.com"));
 }
 
 #[test]

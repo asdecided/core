@@ -2,7 +2,7 @@ use serde_json::{json, Value};
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 static COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -90,6 +90,44 @@ fn tool_value(frame: &Value) -> Value {
     serde_json::from_str(tool_text(frame)).expect("tool payload JSON")
 }
 
+fn spawn_live(root: &Path, extra_args: &[&str]) -> (Child, ChildStdin, BufReader<ChildStdout>) {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_decided-mcp"))
+        .arg("--root")
+        .arg(root)
+        .args(extra_args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn long-lived decided-mcp");
+    let stdin = child.stdin.take().expect("server stdin");
+    let stdout = BufReader::new(child.stdout.take().expect("server stdout"));
+    (child, stdin, stdout)
+}
+
+fn live_call(
+    stdin: &mut ChildStdin,
+    stdout: &mut BufReader<ChildStdout>,
+    call: &str,
+) -> Value {
+    writeln!(stdin, "{call}").expect("write MCP request");
+    stdin.flush().expect("flush MCP request");
+    let mut line = String::new();
+    stdout.read_line(&mut line).expect("read MCP response");
+    serde_json::from_str(line.trim()).expect("MCP response JSON")
+}
+
+fn finish_live(child: Child, stdin: ChildStdin, stdout: BufReader<ChildStdout>) {
+    drop(stdin);
+    drop(stdout);
+    let output = child.wait_with_output().expect("wait for long-lived server");
+    assert!(
+        output.status.success(),
+        "server failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 #[test]
 fn all_six_tools_share_one_verified_composition_with_or_without_cache() {
     let repository = eval_fixture("six-tools");
@@ -166,6 +204,10 @@ fn decision(id: &str, title: &str) -> String {
     )
 }
 
+fn decision_with_relationships(id: &str, title: &str, relationships: &str) -> String {
+    format!("{}\n{relationships}\n", decision(id, title))
+}
+
 fn override_fixture() -> PathBuf {
     let child = scratch("override");
     let parent = child.join("vendor/standards");
@@ -180,9 +222,18 @@ fn override_fixture() -> PathBuf {
     .expect("parent config");
     fs::write(
         parent.join("decisions/parent.md"),
-        decision("STD-01JY4M8X2QZ7", "Parent Policy"),
+        decision_with_relationships(
+            "STD-01JY4M8X2QZ7",
+            "Parent Policy",
+            "## Related Decisions\n\n- STD-01JY4M8X2QZA",
+        ),
     )
     .expect("parent decision");
+    fs::write(
+        parent.join("decisions/target.md"),
+        decision("STD-01JY4M8X2QZA", "Retained Target"),
+    )
+    .expect("parent target decision");
     fs::write(
         child.join(".decided/config.yaml"),
         "repository_key: APP\ncorpus:\n  source: acme/app\n",
@@ -211,6 +262,85 @@ fn override_fixture() -> PathBuf {
     child
 }
 
+fn alias_collision_fixture() -> PathBuf {
+    let child = scratch("alias-collision");
+    let parent = child.join("vendor/standards");
+    fs::create_dir_all(parent.join(".decided")).expect("parent config directory");
+    fs::create_dir_all(parent.join("decisions")).expect("parent corpus directory");
+    fs::create_dir_all(child.join(".decided")).expect("child config directory");
+    fs::create_dir_all(child.join("decisions")).expect("child corpus directory");
+    fs::write(
+        parent.join(".decided/config.yaml"),
+        "repository_key: STD\ncorpus:\n  source: acme/standards\n",
+    )
+    .expect("parent config");
+    fs::write(
+        parent.join("decisions/shared.md"),
+        decision("STD-01JY4M8X2QZ7", "Parent Shared Policy"),
+    )
+    .expect("parent shared decision");
+    fs::write(
+        child.join(".decided/config.yaml"),
+        "repository_key: APP\ncorpus:\n  source: acme/app\n",
+    )
+    .expect("child config");
+    fs::write(
+        child.join("decisions/shared.md"),
+        decision("APP-01JY4M8X2QZ8", "Local Shared Policy"),
+    )
+    .expect("local shared decision");
+    let digest = rac_engine::federation::calculate_parent_digest(&parent, "decisions")
+        .expect("calculate parent digest")
+        .digest;
+    fs::write(
+        child.join(".decided/corpus.md"),
+        format!(
+            "# Corpus\n\n## inherits\n\n```yaml\nversion: 1\nalias: standards\nsource: acme/standards\nroot: vendor/standards\ncorpus: decisions\ndigest: {digest}\n```\n"
+        ),
+    )
+    .expect("child manifest");
+    child
+}
+
+#[test]
+fn composed_exact_tools_share_source_aware_ambiguity_and_qualification() {
+    let repository = alias_collision_fixture();
+    let corpus = repository.join("decisions");
+    let frames = run(
+        &corpus,
+        &["--no-cache"],
+        &[
+            request(1, "get_artifact", json!({"id": "shared"})),
+            request(2, "get_related", json!({"id": "shared"})),
+            request(3, "get_artifact", json!({"id": "standards::shared"})),
+            request(
+                4,
+                "get_artifact",
+                json!({"id": "other::STD-01JY4M8X2QZ7"}),
+            ),
+            request(
+                5,
+                "get_artifact",
+                json!({"id": "standards::STD-01JY4M8X2QZ7"}),
+            ),
+        ],
+    );
+    let artifact_duplicate = tool_value(&frames[0]);
+    let related_duplicate = tool_value(&frames[1]);
+    let expected_paths = json!([
+        "acme/app::shared.md",
+        "acme/standards::shared.md"
+    ]);
+    assert_eq!(artifact_duplicate["error"], json!("duplicate"));
+    assert_eq!(related_duplicate["error"], json!("duplicate"));
+    assert_eq!(artifact_duplicate["paths"], expected_paths);
+    assert_eq!(related_duplicate["paths"], expected_paths);
+    assert_eq!(tool_value(&frames[2])["error"], json!("not-found"));
+    assert_eq!(tool_value(&frames[3])["error"], json!("not-found"));
+    assert_eq!(tool_value(&frames[4])["id"], json!("STD-01JY4M8X2QZ7"));
+    fs::remove_dir_all(repository).expect("remove alias collision fixture");
+}
+
 #[test]
 fn qualified_history_and_canonical_redirect_keep_complete_override_provenance() {
     let repository = override_fixture();
@@ -225,6 +355,13 @@ fn qualified_history_and_canonical_redirect_keep_complete_override_provenance() 
                 json!({"id": "standards::STD-01JY4M8X2QZ7"}),
             ),
             request(2, "get_artifact", json!({"id": "STD-01JY4M8X2QZ7"})),
+            request(3, "get_related", json!({"id": "STD-01JY4M8X2QZ7", "depth": 2})),
+            request(4, "get_related", json!({"id": "STD-01JY4M8X2QZA", "depth": 2})),
+            request(
+                5,
+                "get_related",
+                json!({"id": "standards::STD-01JY4M8X2QZ7", "depth": 2}),
+            ),
         ],
     );
     let parent = tool_value(&frames[0]);
@@ -237,6 +374,26 @@ fn qualified_history_and_canonical_redirect_keep_complete_override_provenance() 
     assert_eq!(mapping["parent"]["source"], json!("acme/standards"));
     assert_eq!(mapping["replacement"]["source"], json!("acme/app"));
     assert_eq!(mapping["rationale"]["id"], json!("APP-01JY4M8X2QZ9"));
+
+    let redirected_graph = tool_value(&frames[2]);
+    assert_eq!(redirected_graph["id"], json!("APP-01JY4M8X2QZ8"));
+    assert!(redirected_graph["outgoing"]
+        .get("related_decisions")
+        .is_none());
+
+    let target_graph = tool_value(&frames[3]);
+    assert!(target_graph["incoming"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|entry| entry["id"] != json!("STD-01JY4M8X2QZ7")));
+
+    let parent_history = tool_value(&frames[4]);
+    assert_eq!(parent_history["id"], json!("STD-01JY4M8X2QZ7"));
+    assert_eq!(
+        parent_history["outgoing"]["related_decisions"],
+        json!(["STD-01JY4M8X2QZA"])
+    );
     fs::remove_dir_all(repository).expect("remove override fixture");
 }
 
@@ -338,4 +495,128 @@ fn stale_parent_blocks_the_next_request_instead_of_serving_the_old_generation() 
         String::from_utf8_lossy(&output.stderr)
     );
     fs::remove_dir_all(repository).expect("remove stale-parent fixture");
+}
+
+#[test]
+fn deleting_child_config_after_federation_is_seen_fails_closed() {
+    let repository = eval_fixture("deleted-config");
+    let corpus = repository.join("decisions");
+    let (child, mut stdin, mut stdout) = spawn_live(&corpus, &[]);
+
+    let first = live_call(
+        &mut stdin,
+        &mut stdout,
+        &request(1, "get_summary", json!({})),
+    );
+    assert_eq!(first["result"]["isError"], json!(false));
+
+    fs::remove_file(repository.join(".decided/config.yaml")).expect("remove child config");
+    let second = live_call(
+        &mut stdin,
+        &mut stdout,
+        &request(2, "get_summary", json!({})),
+    );
+    assert_eq!(second["result"]["isError"], json!(true));
+    assert!(tool_text(&second).contains("parent-corpus-child-config-missing"));
+    assert!(!tool_text(&second).contains("\"total\":41"));
+
+    finish_live(child, stdin, stdout);
+    fs::remove_dir_all(repository).expect("remove deleted-config fixture");
+}
+
+#[test]
+fn non_regular_or_dangling_manifest_never_falls_back_to_legacy() {
+    let repository = eval_fixture("non-file-manifest");
+    let corpus = repository.join("decisions");
+    let manifest = repository.join(".decided/corpus.md");
+    let (child, mut stdin, mut stdout) = spawn_live(&corpus, &["--no-cache"]);
+
+    let first = live_call(
+        &mut stdin,
+        &mut stdout,
+        &request(1, "get_summary", json!({})),
+    );
+    assert_eq!(first["result"]["isError"], json!(false));
+
+    fs::remove_file(&manifest).expect("remove manifest");
+    fs::create_dir(&manifest).expect("replace manifest with directory");
+    let directory_response = live_call(
+        &mut stdin,
+        &mut stdout,
+        &request(2, "get_summary", json!({})),
+    );
+    assert_eq!(directory_response["result"]["isError"], json!(true));
+    assert!(tool_text(&directory_response).contains("parent-corpus-symlink-traversal"));
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::symlink;
+        fs::remove_dir(&manifest).expect("remove manifest directory");
+        symlink("missing-corpus-manifest.md", &manifest).expect("create dangling manifest");
+        let dangling_response = live_call(
+            &mut stdin,
+            &mut stdout,
+            &request(3, "get_summary", json!({})),
+        );
+        assert_eq!(dangling_response["result"]["isError"], json!(true));
+        assert!(tool_text(&dangling_response).contains("parent-corpus-symlink-traversal"));
+    }
+
+    finish_live(child, stdin, stdout);
+    fs::remove_dir_all(repository).expect("remove non-file-manifest fixture");
+}
+
+#[test]
+fn a_manifest_added_to_a_live_server_activates_and_cannot_be_removed() {
+    let repository = eval_fixture("topology-add-remove");
+    let corpus = repository.join("decisions");
+    let manifest_path = repository.join(".decided/corpus.md");
+    let manifest = fs::read(&manifest_path).expect("read manifest before startup");
+    fs::remove_file(&manifest_path).expect("start without manifest");
+    let (child, mut stdin, mut stdout) = spawn_live(&corpus, &[]);
+
+    let legacy = live_call(
+        &mut stdin,
+        &mut stdout,
+        &request(
+            1,
+            "search_artifacts",
+            json!({"query": "quantum ledger compaction"}),
+        ),
+    );
+    assert_eq!(legacy["result"]["isError"], json!(false));
+    assert!(tool_value(&legacy)["matches"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|item| item["id"] != json!("FEDEVAL-000000000001")));
+
+    fs::write(&manifest_path, &manifest).expect("add manifest");
+    let federated = live_call(
+        &mut stdin,
+        &mut stdout,
+        &request(
+            2,
+            "search_artifacts",
+            json!({"query": "quantum ledger compaction"}),
+        ),
+    );
+    assert_eq!(federated["result"]["isError"], json!(false));
+    assert_eq!(
+        tool_value(&federated)["matches"][0]["id"],
+        json!("FEDEVAL-000000000001")
+    );
+
+    fs::remove_file(&manifest_path).expect("remove observed manifest");
+    let removed = live_call(
+        &mut stdin,
+        &mut stdout,
+        &request(3, "get_summary", json!({})),
+    );
+    assert_eq!(removed["result"]["isError"], json!(true));
+    assert!(tool_text(&removed).contains("federation manifest disappeared"));
+    assert!(!tool_text(&removed).contains("FEDEVAL-000000000001"));
+
+    finish_live(child, stdin, stdout);
+    fs::remove_dir_all(repository).expect("remove topology fixture");
 }

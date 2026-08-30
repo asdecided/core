@@ -16,7 +16,10 @@ use crate::relationships::{
     validation_row_from_item, CorpusItem, Relationship, RelationshipSummary,
     RelationshipValidation, ResolutionCandidate, ResolutionIndex, ValidationRow,
 };
-use crate::resolve::{entry_from_item, identity_entry_from_item, is_live_decision, IndexEntry};
+use crate::resolve::{
+    entry_from_item, identity_entry_from_item, is_live_decision, resolved_from_entry, IndexEntry,
+    ResolutionResult, OUTCOME_DUPLICATE, OUTCOME_NOT_FOUND, OUTCOME_RESOLVED,
+};
 
 pub const FINDING_CANONICAL_COLLISION: &str = "cross-corpus-canonical-id-collision";
 pub const FINDING_INVALID_OVERRIDE: &str = "cross-corpus-invalid-override";
@@ -665,6 +668,55 @@ impl ComposedCorpus {
             many => Err(LookupError::Ambiguous(
                 many.iter().map(|candidate| candidate.key.clone()).collect(),
             )),
+        }
+    }
+
+    /// Resolve one authored reference into the public exact-lookup shape.
+    ///
+    /// This adapter deliberately begins at [`Self::resolve`] rather than the
+    /// flattened identity projection. That preserves the canonical-only
+    /// contract for qualified parent references: a legacy or filename alias
+    /// containing `::` cannot bypass `validate_qualified_reference`.
+    /// Ambiguous paths include the owning source because two legal corpus
+    /// layers may carry the same corpus-relative path.
+    pub fn resolve_identity(&self, reference: &str) -> ResolutionResult {
+        match self.resolve(reference) {
+            Ok(item) => ResolutionResult {
+                artifact_id: reference.to_string(),
+                outcome: OUTCOME_RESOLVED,
+                artifact: Some(resolved_from_entry(&identity_entry_from_item(item))),
+                duplicate_paths: Vec::new(),
+            },
+            Err(LookupError::Ambiguous(keys)) => {
+                let mut paths: Vec<String> = keys
+                    .iter()
+                    .filter_map(|key| self.item(key))
+                    .map(|item| {
+                        format!(
+                            "{}::{}",
+                            item.artifact_path.source, item.artifact_path.relative_path
+                        )
+                    })
+                    .collect();
+                paths.sort();
+                paths.dedup();
+                ResolutionResult {
+                    artifact_id: reference.to_string(),
+                    outcome: OUTCOME_DUPLICATE,
+                    artifact: None,
+                    duplicate_paths: paths,
+                }
+            }
+            Err(
+                LookupError::NotFound
+                | LookupError::InvalidQualifiedReference
+                | LookupError::QualifiedCanonicalRequired,
+            ) => ResolutionResult {
+                artifact_id: reference.to_string(),
+                outcome: OUTCOME_NOT_FOUND,
+                artifact: None,
+                duplicate_paths: Vec::new(),
+            },
         }
     }
 

@@ -20,6 +20,7 @@ use args::{Arg, Kind, Param};
 use rac_engine::budget;
 use serde_json::{json, Map, Value};
 use std::io::{BufRead, Write};
+use std::path::{Path, PathBuf};
 
 /// The pinned `tools/list` result — the captured ORACLE-NEXT bytes, embedded
 /// verbatim (schemas, descriptions, pydantic-shaped titles incl. the
@@ -28,6 +29,8 @@ use std::io::{BufRead, Write};
 const TOOLS_LIST_RESULT: &str = include_str!("tools_list_result.json");
 
 pub(crate) struct ServerState {
+    repository_root: PathBuf,
+    federation_seen: bool,
     tracker: Option<rac_engine::freshness::FreshnessTracker>,
     federated_tracker: Option<
         rac_engine::derived_cache::FederatedCacheTracker<
@@ -187,7 +190,10 @@ fn main() {
     if !std::path::Path::new(&root).is_dir() {
         usage_error(&format!("not a directory: {root}"));
     }
-    check_corpus(&root);
+    let mut federation_seen = false;
+    let topology = repository_topology(&root, None, &mut federation_seen)
+        .unwrap_or_else(|error| usage_error(&error));
+    check_corpus(&root, &topology);
     // Server-lifetime freshness (ADR-105/118): one tracker per server keeps
     // the derived read-model current through Linux inotify-clean detection or
     // the authoritative stat fallback, re-deriving only where files changed.
@@ -208,6 +214,8 @@ fn main() {
         None
     };
     let mut state = ServerState {
+        repository_root: topology.repository_root,
+        federation_seen,
         tracker,
         federated_tracker,
         graph_cache: graph::GraphCache::default(),
@@ -246,11 +254,10 @@ fn main() {
 }
 
 /// Startup diagnostic (stderr only; declared-normalized in parity, §0).
-fn check_corpus(root: &str) {
-    let has_artifacts = if federation_configured(root) {
-        let repository_root = rac_engine::validate::repository_root(root);
+fn check_corpus(root: &str, topology: &RepositoryTopology) {
+    let has_artifacts = if topology.federated {
         let generation = rac_engine::derived_cache::capture_logical_generation(
-            &repository_root,
+            &topology.repository_root,
             root,
             true,
         )
@@ -275,10 +282,94 @@ a new repository. The server is running; get_summary will report the empty state
     }
 }
 
-fn federation_configured(root: &str) -> bool {
-    rac_engine::validate::repository_root(root)
-        .join(rac_engine::federation::MANIFEST_RELATIVE_PATH)
-        .is_file()
+struct RepositoryTopology {
+    repository_root: PathBuf,
+    federated: bool,
+}
+
+fn marker_present(path: &Path) -> Result<bool, String> {
+    match std::fs::symlink_metadata(path) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(format!(
+            "parent-corpus-malformed-manifest: cannot inspect repository topology {}: {error}",
+            path.display()
+        )),
+    }
+}
+
+/// Discover and then pin the repository topology used by one server.
+///
+/// Startup searches for either governing config or federation manifest. Each
+/// request supplies the pinned root, so removing config cannot make discovery
+/// jump to another ancestor and silently return to the single-corpus model.
+/// Manifest presence is inspected with `symlink_metadata`, then parsed by the
+/// strict loader; directories, symlinks (including dangling ones), and races
+/// therefore fail closed instead of masquerading as absence.
+fn repository_topology(
+    root: &str,
+    pinned_root: Option<&Path>,
+    federation_seen: &mut bool,
+) -> Result<RepositoryTopology, String> {
+    let repository_root = if let Some(pinned) = pinned_root {
+        pinned.to_path_buf()
+    } else {
+        let resolved = std::fs::canonicalize(root).map_err(|error| {
+            format!("cannot resolve MCP corpus root {}: {error}", Path::new(root).display())
+        })?;
+        let mut selected = None;
+        for ancestor in resolved.ancestors() {
+            let config = ancestor.join(rac_engine::federation::CONFIG_RELATIVE_PATH);
+            let manifest = ancestor.join(rac_engine::federation::MANIFEST_RELATIVE_PATH);
+            if marker_present(&config)? || marker_present(&manifest)? {
+                selected = Some(ancestor.to_path_buf());
+                break;
+            }
+        }
+        selected.unwrap_or(resolved)
+    };
+
+    let manifest_path = repository_root.join(rac_engine::federation::MANIFEST_RELATIVE_PATH);
+    let present = marker_present(&manifest_path)?;
+    if present {
+        // Presence itself is sticky. A malformed addition cannot be removed
+        // to make the next request fall back to a legacy corpus.
+        *federation_seen = true;
+    }
+    let manifest = rac_engine::federation::load_manifest(&repository_root)
+        .map_err(|error| error.to_string())?;
+    let federated = manifest.is_some();
+    if *federation_seen && !federated {
+        return Err(format!(
+            "parent-corpus-malformed-manifest: federation manifest disappeared after this server observed federation: {}",
+            manifest_path.display()
+        ));
+    }
+    if *federation_seen {
+        let config_path = repository_root.join(rac_engine::federation::CONFIG_RELATIVE_PATH);
+        let metadata = std::fs::symlink_metadata(&config_path).map_err(|error| {
+            format!(
+                "parent-corpus-child-config-missing: child config is unavailable after this server observed federation: {}: {error}",
+                config_path.display()
+            )
+        })?;
+        if metadata.file_type().is_symlink() {
+            return Err(format!(
+                "parent-corpus-symlink-traversal: child config must not be a symlink: {}",
+                config_path.display()
+            ));
+        }
+        if !metadata.is_file() {
+            return Err(format!(
+                "parent-corpus-child-config-missing: child config is not a regular file: {}",
+                config_path.display()
+            ));
+        }
+    }
+    Ok(RepositoryTopology {
+        repository_root,
+        federated,
+    })
 }
 
 fn serve(
@@ -523,6 +614,64 @@ fn a_bool(args: &[Arg], i: usize, default: bool) -> bool {
     }
 }
 
+fn read_request<'a>(
+    root: &str,
+    repository_root: &Path,
+    federation_seen: &mut bool,
+    tracker: &'a mut Option<rac_engine::freshness::FreshnessTracker>,
+    federated_tracker: &'a mut Option<
+        rac_engine::derived_cache::FederatedCacheTracker<
+            rac_engine::composition::ComposedCorpus,
+        >,
+    >,
+) -> Result<RequestRead<'a>, String> {
+    // Every recognized tool enters the same strict topology boundary after
+    // its allowlisted arguments have been normalized for audit. Cache-off
+    // skips persistence only; it never skips topology, parent verification,
+    // or exact-byte composition.
+    let topology = repository_topology(root, Some(repository_root), federation_seen)?;
+    if topology.federated {
+        match federated_tracker.as_mut() {
+            Some(tracker) => Ok(RequestRead::FederatedCached(
+                tracker
+                    .read_composed(&topology.repository_root, root, true)
+                    .map_err(|error| error.to_string())?,
+            )),
+            None => {
+                let generation = rac_engine::derived_cache::capture_logical_generation(
+                    &topology.repository_root,
+                    root,
+                    true,
+                )
+                .map_err(|error| error.to_string())?;
+                let composed = rac_engine::derived_cache::compose_logical_generation(
+                    root,
+                    &generation,
+                )
+                .map_err(|error| error.to_string())?;
+                Ok(RequestRead::FederatedFresh {
+                    generation,
+                    composed: Box::new(composed),
+                })
+            }
+        }
+    } else {
+        Ok(match tracker.as_mut() {
+            Some(tracker) => {
+                let (generation, model) = tracker.read_model_with_generation(false);
+                RequestRead::Legacy {
+                    generation: Some(generation),
+                    model: Some(model),
+                }
+            }
+            None => RequestRead::Legacy {
+                generation: None,
+                model: None,
+            },
+        })
+    }
+}
+
 fn dispatch(
     root: &str,
     state: &mut ServerState,
@@ -544,56 +693,12 @@ fn dispatch(
         return Err(format!("Unknown tool: {name}"));
     }
     let ServerState {
+        repository_root,
+        federation_seen,
         tracker,
         federated_tracker,
         graph_cache,
     } = state;
-    // A configured repository enters the verified generation boundary on
-    // every call. Cache-off skips persistence, never parent verification or
-    // composition. A failed re-verification returns an error before the
-    // previously valid model can be observed.
-    let request = if federation_configured(root) {
-        let repository_root = rac_engine::validate::repository_root(root);
-        match federated_tracker.as_mut() {
-            Some(tracker) => RequestRead::FederatedCached(
-                tracker
-                    .read_composed(&repository_root, root, true)
-                    .map_err(|error| error.to_string())?,
-            ),
-            None => {
-                let generation = rac_engine::derived_cache::capture_logical_generation(
-                    &repository_root,
-                    root,
-                    true,
-                )
-                .map_err(|error| error.to_string())?;
-                let composed = rac_engine::derived_cache::compose_logical_generation(
-                    root,
-                    &generation,
-                )
-                .map_err(|error| error.to_string())?;
-                RequestRead::FederatedFresh {
-                    generation,
-                    composed: Box::new(composed),
-                }
-            }
-        }
-    } else {
-        match tracker.as_mut() {
-            Some(tracker) => {
-                let (generation, model) = tracker.read_model_with_generation(false);
-                RequestRead::Legacy {
-                    generation: Some(generation),
-                    model: Some(model),
-                }
-            }
-            None => RequestRead::Legacy {
-                generation: None,
-                model: None,
-            },
-        }
-    };
-    let (generation, model) = request.legacy();
     // Audit args mirror server.py's per-tool `observed(...)` shapes exactly
     // (insertion order = recorded key order): non-default arguments ride the
     // record only when supplied. `sidecar::observe` keeps the telemetry seam
@@ -609,9 +714,17 @@ fn dispatch(
             let effective = tools::effective_budget(server_budget, a_int(&a, 1, 0));
             budget::validate_call_budget(effective)?;
             let audit_args = json!({ "id": a_str(&a, 0, "") });
-            Ok(sidecar::observe(name, || {
-                audit::observe(recorder, principal, name, audit_args, || {
-                    if let Some(corpus) = request.composed() {
+            sidecar::observe(name, || {
+                audit::observe_result(recorder, principal, name, audit_args, || {
+                    let request = read_request(
+                        root,
+                        repository_root,
+                        federation_seen,
+                        tracker,
+                        federated_tracker,
+                    )?;
+                    let (_, model) = request.legacy();
+                    Ok(if let Some(corpus) = request.composed() {
                         tools::get_artifact_composed(
                             root,
                             corpus,
@@ -620,9 +733,9 @@ fn dispatch(
                         )
                     } else {
                         tools::get_artifact(root, model, &a_str(&a, 0, ""), effective)
-                    }
+                    })
                 })
-            }))
+            })
         }
         "search_artifacts" => {
             let params = [
@@ -646,9 +759,17 @@ fn dispatch(
                 m.insert("live_only".into(), Value::Bool(true));
             }
             let audit_args = Value::Object(m);
-            Ok(sidecar::observe(name, || {
-                audit::observe(recorder, principal, name, audit_args, || {
-                    if let Some(corpus) = request.composed() {
+            sidecar::observe(name, || {
+                audit::observe_result(recorder, principal, name, audit_args, || {
+                    let request = read_request(
+                        root,
+                        repository_root,
+                        federation_seen,
+                        tracker,
+                        federated_tracker,
+                    )?;
+                    let (_, model) = request.legacy();
+                    Ok(if let Some(corpus) = request.composed() {
                         tools::search_artifacts_composed(
                             root,
                             request.cached_model(),
@@ -669,9 +790,9 @@ fn dispatch(
                             live_only,
                             server_budget,
                         )
-                    }
+                    })
                 })
-            }))
+            })
         }
         "retrieve_grounding" => {
             let params = [
@@ -704,9 +825,17 @@ fn dispatch(
                 m.insert("live_only".into(), Value::Bool(false));
             }
             let audit_args = Value::Object(m);
-            Ok(sidecar::observe(name, || {
-                audit::observe(recorder, principal, name, audit_args, || {
-                    if let Some(corpus) = request.composed() {
+            sidecar::observe(name, || {
+                audit::observe_result(recorder, principal, name, audit_args, || {
+                    let request = read_request(
+                        root,
+                        repository_root,
+                        federation_seen,
+                        tracker,
+                        federated_tracker,
+                    )?;
+                    let (_, model) = request.legacy();
+                    Ok(if let Some(corpus) = request.composed() {
                         tools::retrieve_grounding_composed(
                             root, corpus, &task, &scope, top_k, effective, live_only,
                         )
@@ -714,9 +843,9 @@ fn dispatch(
                         tools::retrieve_grounding(
                             root, model, &task, &scope, top_k, effective, live_only,
                         )
-                    }
+                    })
                 })
-            }))
+            })
         }
         "find_decisions" => {
             let params = [
@@ -732,9 +861,17 @@ fn dispatch(
                 m.insert("path".into(), Value::String(p.clone()));
             }
             let audit_args = Value::Object(m);
-            Ok(sidecar::observe(name, || {
-                audit::observe(recorder, principal, name, audit_args, || {
-                    if let Some(corpus) = request.composed() {
+            sidecar::observe(name, || {
+                audit::observe_result(recorder, principal, name, audit_args, || {
+                    let request = read_request(
+                        root,
+                        repository_root,
+                        federation_seen,
+                        tracker,
+                        federated_tracker,
+                    )?;
+                    let (_, model) = request.legacy();
+                    Ok(if let Some(corpus) = request.composed() {
                         tools::find_decisions_tool_composed(
                             root,
                             corpus,
@@ -750,9 +887,9 @@ fn dispatch(
                             path.as_deref(),
                             server_budget,
                         )
-                    }
+                    })
                 })
-            }))
+            })
         }
         "get_related" => {
             let params = [
@@ -763,23 +900,33 @@ fn dispatch(
             let id = a_str(&a, 0, "");
             let depth = a_int(&a, 1, 1);
             let audit_args = json!({ "id": id.clone(), "depth": depth });
-            let fresh_graph;
-            let graph_view = if let (Some(corpus), Some(logical)) =
-                (request.composed(), request.logical_generation())
-            {
-                graph_cache.view_for_composed(logical.cache_key(), corpus)
-            } else {
-                match (generation, model) {
-                    (Some(generation), Some(model)) => graph_cache.view_for(generation, model),
-                    _ => {
-                        fresh_graph = graph::GraphView::fresh(root);
-                        &fresh_graph
-                    }
-                }
-            };
-            Ok(sidecar::observe(name, || {
-                audit::observe(recorder, principal, name, audit_args, || {
-                    if let Some(corpus) = request.composed() {
+            sidecar::observe(name, || {
+                audit::observe_result(recorder, principal, name, audit_args, || {
+                    let request = read_request(
+                        root,
+                        repository_root,
+                        federation_seen,
+                        tracker,
+                        federated_tracker,
+                    )?;
+                    let (generation, model) = request.legacy();
+                    let fresh_graph;
+                    let graph_view = if let (Some(corpus), Some(logical)) =
+                        (request.composed(), request.logical_generation())
+                    {
+                        graph_cache.view_for_composed(logical.cache_key(), corpus)
+                    } else {
+                        match (generation, model) {
+                            (Some(generation), Some(model)) => {
+                                graph_cache.view_for(generation, model)
+                            }
+                            _ => {
+                                fresh_graph = graph::GraphView::fresh(root);
+                                &fresh_graph
+                            }
+                        }
+                    };
+                    Ok(if let Some(corpus) = request.composed() {
                         tools::get_related_composed(
                             graph_view,
                             corpus,
@@ -789,17 +936,25 @@ fn dispatch(
                         )
                     } else {
                         tools::get_related(graph_view, &id, depth, server_budget)
-                    }
+                    })
                 })
-            }))
+            })
         }
         "get_summary" => {
             let params: [Param; 0] = [];
             args::validate(name, "get_summaryArguments", &params, arguments)?;
             let audit_args = json!({});
-            Ok(sidecar::observe(name, || {
-                audit::observe(recorder, principal, name, audit_args, || {
-                    if let (Some(corpus), Some(generation)) =
+            sidecar::observe(name, || {
+                audit::observe_result(recorder, principal, name, audit_args, || {
+                    let request = read_request(
+                        root,
+                        repository_root,
+                        federation_seen,
+                        tracker,
+                        federated_tracker,
+                    )?;
+                    let (_, model) = request.legacy();
+                    Ok(if let (Some(corpus), Some(generation)) =
                         (request.composed(), request.logical_generation())
                     {
                         tools::get_summary_composed(
@@ -810,9 +965,9 @@ fn dispatch(
                         )
                     } else {
                         tools::get_summary(root, model, server_budget)
-                    }
+                    })
                 })
-            }))
+            })
         }
         _ => unreachable!("known tool guard and dispatch arms must stay aligned"),
     }
@@ -863,6 +1018,8 @@ mod tests {
     #[test]
     fn unknown_tool_does_not_freshen_tracker() {
         let mut state = ServerState {
+            repository_root: PathBuf::from("/definitely-not-a-decided-corpus"),
+            federation_seen: false,
             tracker: Some(rac_engine::freshness::FreshnessTracker::new(
                 std::path::PathBuf::from("/definitely-not-a-decided-cache"),
                 "/definitely-not-a-decided-corpus",
@@ -892,6 +1049,8 @@ mod tests {
         std::fs::write(corpus.join("requirement-1.md"), requirement("FIX-0REQ1GRAPH00")).unwrap();
         let root = corpus.to_string_lossy().into_owned();
         let mut state = ServerState {
+            repository_root: corpus.clone(),
+            federation_seen: false,
             tracker: Some(rac_engine::freshness::FreshnessTracker::new(
                 cache.clone(),
                 &root,

@@ -18,12 +18,6 @@ use rac_engine::resolve::{
 };
 use serde_json::{json, Map, Value};
 
-fn federation_enabled(root: &str) -> bool {
-    rac_engine::validate::repository_root(root)
-        .join(rac_engine::federation::MANIFEST_RELATIVE_PATH)
-        .is_file()
-}
-
 fn fixed_origin(
     origin: Option<&rac_engine::corpus::ArtifactOrigin>,
     enabled: bool,
@@ -196,8 +190,7 @@ pub fn get_artifact(
         payload.insert(k, v);
     }
     let status = artifact_status(&rac_engine::parse::parse_text(&content, &artifact.path));
-    let include_origin = federation_enabled(root);
-    let mut prov = fixed_origin(artifact.origin.as_ref(), include_origin).unwrap_or_default();
+    let mut prov = fixed_origin(artifact.origin.as_ref(), false).unwrap_or_default();
     prov.insert("status".to_string(), json!(status));
     if artifact
         .origin
@@ -220,7 +213,7 @@ pub fn get_artifact_composed(
     artifact_id: &str,
     budget: i64,
 ) -> String {
-    let result = resolve_in_index(&corpus.identity_index(), artifact_id);
+    let result = corpus.resolve_identity(artifact_id);
     let Some(artifact) = result
         .artifact
         .as_ref()
@@ -294,7 +287,7 @@ pub fn search_artifacts(
     };
     rac_engine::commands::annotate_search_recency(&mut result.matches, root);
     serialize(
-        &search_result_payload(&result, federation_enabled(root)),
+        &search_result_payload(&result, false),
         budget,
     )
 }
@@ -350,7 +343,7 @@ pub fn find_decisions_tool(
 ) -> String {
     // Python truthiness: a non-empty `path` selects path mode.
     if let Some(p) = path.filter(|p| !p.is_empty()) {
-        let include_origin = federation_enabled(root);
+        let include_origin = false;
         // Path mode builds through the same read-model as every other tool
         // (ADR-103), served from precomputed scope rows.
         let payload = match model {
@@ -404,7 +397,7 @@ pub fn find_decisions_tool(
         ),
         None => find_decisions(root, topic, true),
     };
-    let mut payload = search_result_payload(&result, federation_enabled(root));
+    let mut payload = search_result_payload(&result, false);
     payload
         .as_object_mut()
         .expect("object")
@@ -477,7 +470,10 @@ fn get_related_inner(
     budget: i64,
 ) -> String {
     let graph_started = rac_engine::timing::start();
-    let result = graph_view.resolve(artifact_id);
+    let result = corpus.map_or_else(
+        || graph_view.resolve(artifact_id),
+        |corpus| corpus.resolve_identity(artifact_id),
+    );
     let Some(artifact) = result
         .artifact
         .as_ref()
@@ -486,8 +482,14 @@ fn get_related_inner(
         return serialize(&output::resolution_error_value(&result), budget);
     };
     let include_origin = graph_view.is_federated();
-    let outgoing = graph_view.outgoing(artifact);
-    let incoming_result = graph_view.incoming(artifact);
+    let historical = corpus.is_some_and(|corpus| {
+        artifact
+            .key
+            .as_ref()
+            .is_some_and(|key| corpus.is_overridden(key))
+    });
+    let outgoing = graph_view.outgoing(artifact, historical);
+    let incoming_result = graph_view.incoming(artifact, historical);
     let incoming: Vec<Value> = incoming_result
         .items
         .iter()
@@ -527,7 +529,7 @@ fn get_related_inner(
     payload.insert("incoming".to_string(), Value::Array(incoming));
     let mut neighborhood_truncated = false;
     if depth > 1 {
-        let hood = graph_view.neighborhood(artifact, depth);
+        let hood = graph_view.neighborhood(artifact, depth, historical);
         let nodes: Vec<Value> = hood
             .nodes
             .iter()
