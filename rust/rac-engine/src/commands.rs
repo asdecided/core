@@ -2589,17 +2589,22 @@ mod share_prompt_tests {
 pub struct InitArgs {
     pub directory: String,
     pub key: String,
+    /// Whether `--key` was present, distinct from its released default value.
+    pub key_explicit: bool,
     /// argparse-choice-validated ticketing provider.
     pub ticketing: Option<String>,
     /// argparse-choice-validated profile name.
     pub profile: Option<String>,
     /// Org endpoint URL (ADR-117); http(s)-validated in the service layer.
     pub org_endpoint: Option<String>,
+    /// Emit deterministic setup guidance for one materialised parent corpus.
+    pub parent_corpus: bool,
     pub json: bool,
 }
 
 /// `decided init [directory] [--key KEY] [--ticketing PROVIDER] [--profile
-/// NAME]` — establish (or confirm) the repository identity namespace.
+/// NAME] [--parent-corpus]` — establish (or confirm) the repository identity
+/// namespace.
 /// Invalid key exits 2; conflict/malformed config exit 1. A successful
 /// non-JSON init may ask the one-time sharing question (TTY-gated).
 pub fn cmd_init(args: &InitArgs) -> i32 {
@@ -2610,9 +2615,26 @@ pub fn cmd_init(args: &InitArgs) -> i32 {
     if let Some(code) = refuse_read_only_target(&args.directory) {
         return code;
     }
+    let repository_key = if args.parent_corpus
+        && !args.key_explicit
+        && Path::new(&args.directory)
+            .join(".decided/config.yaml")
+            .is_file()
+    {
+        match crate::scaffold::load_repository_config(&args.directory) {
+            Ok(Some(config)) => config.repository_key,
+            Ok(None) => args.key.clone(),
+            Err(error) => {
+                eprintln!("decided: {}", error.message());
+                return EXIT_VALIDATION_FAILED;
+            }
+        }
+    } else {
+        args.key.clone()
+    };
     let result = match crate::scaffold::init_repository(
         &args.directory,
-        &args.key,
+        &repository_key,
         args.ticketing.as_deref(),
         args.profile.as_deref(),
         args.org_endpoint.as_deref(),
@@ -2627,9 +2649,15 @@ pub fn cmd_init(args: &InitArgs) -> i32 {
         }
     };
     if args.json {
-        emit(output::render_init_json(&result));
+        emit(output::render_init_json_with_parent_corpus(
+            &result,
+            args.parent_corpus,
+        ));
     } else {
-        emit(output::render_init_human(&result));
+        emit(output::render_init_human_with_parent_corpus(
+            &result,
+            args.parent_corpus,
+        ));
         maybe_ask_usage_sharing();
     }
     EXIT_OK
@@ -2818,7 +2846,10 @@ pub fn cmd_rename(args: &RenameArgs) -> i32 {
         Err(code) => return code,
     };
     let plan = if let Some(corpus) = &composed {
-        let local: Vec<_> = corpus.local_items().cloned().collect();
+        let local = crate::federated_corpus::local_writable_projection(
+            &args.directory,
+            corpus,
+        );
         crate::rename::compute_rename_from_items(
             &args.directory,
             &args.old,

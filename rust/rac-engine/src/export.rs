@@ -551,7 +551,7 @@ pub fn build_okf_export_from_composed(
         return build_okf_export(directory, rac_version);
     }
 
-    let items: Vec<CorpusItem> = corpus.local_items().cloned().collect();
+    let items = crate::federated_corpus::local_writable_projection(directory, corpus);
     let canonical = canonical_by_path(&items);
     let mut artifacts = Vec::new();
     for item in &items {

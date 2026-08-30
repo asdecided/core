@@ -1102,7 +1102,6 @@ decided templates --json
 }
 ```
 
-
 ---
 
 ## init
@@ -1128,7 +1127,7 @@ for fallback and aggregation behaviour.
 - **Input:** `decided init [directory]` — defaults to the current directory.
 - **Options:** `--key KEY` (default `RAC`; 2–10 uppercase alphanumeric
   characters starting with a letter) · `--ticketing PROVIDER` · `--profile NAME`
-  · `--org-endpoint URL` · `--json`
+  · `--org-endpoint URL` · `--parent-corpus` · `--json`
 - **`--ticketing PROVIDER`** records the external ticketing system for
   `## Related Tickets` references (ADR-087) as `ticketing.provider` in
   `.decided/config.yaml` — one of `jira`, `github`, `linear`, `azure-devops`,
@@ -1147,8 +1146,8 @@ for fallback and aggregation behaviour.
 
   Profiles are creation-time configuration, composable with `--key`/`--ticketing`
   and the [`quickstart`](#quickstart) scaffold. Plain `decided init` (no `--profile`)
-  is unchanged. A parent-corpus line is added once corpus federation ships
-  (ADR-089); until then the enterprise profile is hollow on it.
+  is unchanged. Parent-corpus setup is available separately through the explicit
+  `--parent-corpus` request; no profile creates a live inheritance declaration.
 - **`--org-endpoint URL`** wires the shared **org AsDecided endpoint** (ADR-117): it
   ensures an `asdecided-org` entry — `{"type": "http", "url": URL}` — under
   `mcpServers` in `.mcp.json` and `.cursor/mcp.json`. Unlike a profile, org
@@ -1158,6 +1157,14 @@ for fallback and aggregation behaviour.
   same URL writes nothing. The URL must start with `http://` or `https://`.
   Composes with `--profile` (local `asdecided` and `asdecided-org` side by side). See
   [Org Grounding](org-grounding.md).
+- **`--parent-corpus`** prints deterministic setup guidance for the operational
+  `.decided/corpus.md` manifest, including the exact `## inherits` and
+  `## overrides` headings. It tells you to materialise the parent inside the
+  repository first, then calculate its pin with `decided corpus digest --root
+  <parent-root> --corpus <parent-corpus>`. The flag works on fresh and
+  already-initialized repositories, with or without a profile. It is guidance
+  only: it never creates the manifest, fetches a parent, or writes parent bytes.
+  Without the flag, init files and human/JSON output are unchanged.
 - **Exit codes:** `0` initialized, or already initialized with the same key
   (idempotent) · `1` a different key is already established (never silently
   rewritten), or a client config exists but cannot be merged into (malformed
@@ -1175,6 +1182,7 @@ decided init --key PROJ
 decided init --key ACME --ticketing jira
 decided init --key ACME --profile enterprise
 decided init --org-endpoint https://asdecided.example.com/mcp
+decided init --parent-corpus
 decided init docs/ --json
 ```
 
@@ -1187,6 +1195,20 @@ decided init docs/ --json
   "profile": "enterprise",
   "files_written": [".mcp.json", ".cursor/mcp.json"],
   "org_endpoint": null
+}
+```
+
+With `--parent-corpus --json`, the response additionally includes:
+
+```json
+{
+  "parent_corpus_guidance": {
+    "materialise_first": true,
+    "manifest": ".decided/corpus.md",
+    "inherits_heading": "## inherits",
+    "overrides_heading": "## overrides",
+    "digest_command": "decided corpus digest --root <parent-root> --corpus <parent-corpus>"
+  }
 }
 ```
 

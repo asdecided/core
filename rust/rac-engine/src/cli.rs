@@ -2458,7 +2458,8 @@ fn run_new(rest: &[&String]) -> u8 {
 }
 
 /// `decided init [directory] [--key KEY] [--ticketing PROVIDER] [--profile
-/// NAME] [--json]` — order-aware: `--ticketing`/`--profile` are
+/// NAME] [--parent-corpus] [--json]` — order-aware:
+/// `--ticketing`/`--profile` are
 /// argparse-choice-validated when their VALUE is consumed (an invalid
 /// choice beats a later `--version`; an earlier `--version` wins), and a
 /// missing option value errors at its own position too.
@@ -2466,9 +2467,11 @@ fn run_init(rest: &[&String]) -> u8 {
     let prog = "decided init";
     let mut directory: Option<String> = None;
     let mut key: String = "RAC".to_string(); // init.DEFAULT_KEY
+    let mut key_explicit = false;
     let mut ticketing: Option<String> = None;
     let mut profile: Option<String> = None;
     let mut org_endpoint: Option<String> = None;
+    let mut parent_corpus = false;
     let mut json = false;
     let mut extras: Vec<String> = Vec::new();
     let mut positional_only = false;
@@ -2523,9 +2526,13 @@ fn run_init(rest: &[&String]) -> u8 {
                 return 0;
             }
             "--json" => json = true,
+            "--parent-corpus" => parent_corpus = true,
             other if other == "--key" || other.starts_with("--key=") => {
                 match take_opt_value(prog, "--key", other, rest, &mut i) {
-                    Ok(v) => key = v,
+                    Ok(v) => {
+                        key = v;
+                        key_explicit = true;
+                    }
                     Err(code) => return code,
                 }
             }
@@ -2571,9 +2578,11 @@ fn run_init(rest: &[&String]) -> u8 {
     cmd_init(&InitArgs {
         directory: directory.unwrap_or_else(|| ".".to_string()),
         key,
+        key_explicit,
         ticketing,
         profile,
         org_endpoint,
+        parent_corpus,
         json,
     }) as u8
 }
