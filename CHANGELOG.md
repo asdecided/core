@@ -6,6 +6,13 @@ details, release history over commit history.
 
 ## Unreleased
 
+### Added
+
+- Added deterministic point-in-time JSON exports with `decided export --at
+  <revision>` for the viewer, documents, and graph projections. Historical
+  exports materialise the bounded configured corpus and federation closure so
+  identity and inherited records match that revision without changing `.git`.
+
 ## v0.29.0 — 2026-08-30
 
 ### Graph-complete corpus federation

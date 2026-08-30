@@ -445,6 +445,13 @@ fn local_items_from_snapshot(
 /// disappeared. A present manifest is authoritative topology and must not be
 /// bypassed by falling back to a local-only corpus walk.
 fn composition_repository_root(directory: &str) -> PathBuf {
+    composition_repository_root_with_boundary(directory, None)
+}
+
+fn composition_repository_root_with_boundary(
+    directory: &str,
+    boundary: Option<&Path>,
+) -> PathBuf {
     let input = Path::new(directory);
     let absolute = if input.is_absolute() {
         input.to_path_buf()
@@ -455,6 +462,9 @@ fn composition_repository_root(directory: &str) -> PathBuf {
     };
     let search = std::fs::canonicalize(&absolute).unwrap_or(absolute);
     for ancestor in search.ancestors() {
+        if boundary.is_some_and(|root| !ancestor.starts_with(root)) {
+            break;
+        }
         let manifest = ancestor.join(crate::federation::MANIFEST_RELATIVE_PATH);
         let config = ancestor.join(crate::federation::CONFIG_RELATIVE_PATH);
         if std::fs::symlink_metadata(&manifest).is_ok()
@@ -462,6 +472,12 @@ fn composition_repository_root(directory: &str) -> PathBuf {
         {
             return ancestor.to_path_buf();
         }
+        if boundary.is_some_and(|root| ancestor == root) {
+            break;
+        }
+    }
+    if boundary.is_some() {
+        return search;
     }
     crate::validate::repository_root(directory)
 }
@@ -524,10 +540,26 @@ pub fn load_composed_corpus(
     directory: &str,
     recursive: bool,
 ) -> Result<Option<ComposedCorpus>, FederatedCorpusError> {
-    if let Some(corpus) = load_graph_composed_corpus(directory, recursive)? {
+    load_composed_corpus_with_optional_boundary(directory, recursive, None)
+}
+
+pub fn load_composed_corpus_with_boundary(
+    directory: &str,
+    recursive: bool,
+    boundary: &Path,
+) -> Result<Option<ComposedCorpus>, FederatedCorpusError> {
+    load_composed_corpus_with_optional_boundary(directory, recursive, Some(boundary))
+}
+
+fn load_composed_corpus_with_optional_boundary(
+    directory: &str,
+    recursive: bool,
+    boundary: Option<&Path>,
+) -> Result<Option<ComposedCorpus>, FederatedCorpusError> {
+    if let Some(corpus) = load_graph_composed_corpus_with_boundary(directory, boundary)? {
         return Ok(Some(corpus));
     }
-    let child_root = composition_repository_root(directory);
+    let child_root = composition_repository_root_with_boundary(directory, boundary);
     let Some(verified) = verify_parent(&child_root)? else {
         return Ok(None);
     };
@@ -543,7 +575,14 @@ pub fn load_graph_composed_corpus(
     directory: &str,
     _recursive: bool,
 ) -> Result<Option<ComposedCorpus>, FederatedCorpusError> {
-    load_verified_graph_corpus(directory)
+    load_graph_composed_corpus_with_boundary(directory, None)
+}
+
+fn load_graph_composed_corpus_with_boundary(
+    directory: &str,
+    boundary: Option<&Path>,
+) -> Result<Option<ComposedCorpus>, FederatedCorpusError> {
+    load_verified_graph_corpus_with_boundary(directory, boundary)
         .map(|corpus| corpus.map(VerifiedGraphCorpus::into_composed_corpus))
 }
 
@@ -556,7 +595,14 @@ pub fn load_graph_composed_corpus(
 pub fn load_verified_graph_corpus(
     directory: &str,
 ) -> Result<Option<VerifiedGraphCorpus>, FederatedCorpusError> {
-    let child_root = composition_repository_root(directory);
+    load_verified_graph_corpus_with_boundary(directory, None)
+}
+
+fn load_verified_graph_corpus_with_boundary(
+    directory: &str,
+    boundary: Option<&Path>,
+) -> Result<Option<VerifiedGraphCorpus>, FederatedCorpusError> {
+    let child_root = composition_repository_root_with_boundary(directory, boundary);
     if load_graph_manifest(&child_root)?.is_none() {
         return Ok(None);
     }

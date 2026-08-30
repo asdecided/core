@@ -7,7 +7,7 @@
 use crate::commands::{
     cmd_corpus_digest, cmd_corpus_explain, cmd_corpus_status, cmd_coverage, cmd_decisions_for,
     cmd_diagnose, cmd_diff, cmd_doctor,
-    cmd_eval, cmd_export, cmd_find, cmd_gate, cmd_herald, cmd_hook, cmd_improve, cmd_index,
+    cmd_eval, cmd_export_at, cmd_find, cmd_gate, cmd_herald, cmd_hook, cmd_improve, cmd_index,
     cmd_init, cmd_inspect, cmd_mcp_stats, cmd_migrate, cmd_new, cmd_portfolio, cmd_quickstart,
     cmd_relationships, cmd_rename, cmd_resolve, cmd_retrieve, cmd_review, cmd_schema, cmd_sentry,
     cmd_skill, cmd_stats, cmd_telemetry, cmd_templates, cmd_usage, cmd_validate,
@@ -2306,6 +2306,7 @@ fn run_export(rest: &[&String]) -> u8 {
     let mut check = false;
     let mut client: Vec<String> = Vec::new();
     let mut out: Option<String> = None;
+    let mut at: Option<String> = None;
     let mut local_only = false;
     let mut extras: Vec<String> = Vec::new();
     let mut positional_only = false;
@@ -2445,6 +2446,13 @@ fn run_export(rest: &[&String]) -> u8 {
                     Err(code) => return code,
                 }
             }
+            other if other == "--at" || other.starts_with("--at=") => {
+                match take_opt_value(prog, "--at", other, rest, &mut i) {
+                    Ok(v) if !v.is_empty() => at = Some(v),
+                    Ok(_) => return argparse_error(prog, "argument --at: expected one argument"),
+                    Err(code) => return code,
+                }
+            }
             other => extras.push(other.to_string()),
         }
         i += 1;
@@ -2454,20 +2462,23 @@ fn run_export(rest: &[&String]) -> u8 {
         return unrecognized(&extras);
     }
 
-    cmd_export(&ExportArgs {
-        directory: directory.unwrap_or_else(|| ".".to_string()),
-        json,
-        schema,
-        graph,
-        documents,
-        html,
-        okf,
-        agent_rules,
-        check,
-        client,
-        out,
-        local_only,
-    }) as u8
+    cmd_export_at(
+        &ExportArgs {
+            directory: directory.unwrap_or_else(|| ".".to_string()),
+            json,
+            schema,
+            graph,
+            documents,
+            html,
+            okf,
+            agent_rules,
+            check,
+            client,
+            out,
+            local_only,
+        },
+        at.as_deref(),
+    ) as u8
 }
 
 fn is_client_choice(v: &str) -> bool {

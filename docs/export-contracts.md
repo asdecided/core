@@ -17,6 +17,24 @@ The emitted bytes are exactly the packaged resources:
 - [documents record v1](https://github.com/asdecided/core/blob/main/rust/rac-engine/assets/schemas/export-documents-v1.schema.json)
 - [graph export v1](https://github.com/asdecided/core/blob/main/rust/rac-engine/assets/schemas/export-graph-v1.schema.json)
 
+Each payload can also be reproduced at a Git revision:
+
+```sh
+decided export decisions/ --at <revision>
+decided export decisions/ --documents --at <revision>
+decided export decisions/ --graph --at <revision>
+```
+
+Point-in-time export is read-only and offline. It evaluates the corpus from a
+temporary, bounded snapshot of exact committed blobs for the corpus and
+declared federation paths at that revision, so historical governing
+configuration and inherited bytes travel together. An already-local submodule
+object database is read at its recorded gitlink commit; no fetch occurs. The
+temporary location, its ancestor configuration, and the revision name never
+enter the payload; paths and display identity retain the requested-directory
+spelling, and `rac_version` remains the version of the CLI producing the
+export.
+
 Those files are the machine-readable source of truth. CI validates exports of
 both a fixed fixture corpus and AsDecided's own decision corpus against them. A
 separate field-set guard also requires the producer and schema to name exactly

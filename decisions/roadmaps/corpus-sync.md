@@ -56,7 +56,7 @@ the engine.
   asserted.
 - Any historical corpus state is reproducible from a commit SHA: the
   projections become a pure function of (repository content at revision,
-  corpus path, mode).
+  corpus path, mode, producing CLI version).
 - A backend re-embeds only what changed between two SHAs, with a cursor the
   consumer owns; RAC persists nothing (ADR-080).
 - Consumers chunk at recorded, deterministic section boundaries while the
@@ -83,11 +83,13 @@ highest-leverage enterprise consumability win in the programme.
 ### Point-in-time export (`rac-point-in-time-export`)
 
 `decided export --at <rev>` for the three JSON payload modes, composing the
-ADR-043 revision-materialisation seam exactly as watchkeeper does. Output is
-a pure function of the repository content at the revision — byte-identical
-across runs, working directories, and clones — with paths and corpus
-identity derived from the requested directory, never the materialisation
-location.
+ADR-043 revision-materialisation seam over the bounded corpus, governing
+metadata, and declared parent paths so historical configuration and the
+verified federation closure remain coherent. At a fixed producing CLI version,
+output is a pure function of the repository content at the revision —
+byte-identical across runs, working directories, and clones that have the same
+required object closure available locally — with paths and corpus identity
+derived from the requested directory, never the materialisation location.
 
 ### Incremental change feed (`rac-export-change-feed`)
 
@@ -171,8 +173,10 @@ rather than duplicating them.
 - Every export mode is schema-validated in CI, and a drift test fails when
   the emitted shape and the packaged schema diverge in either direction.
 - `--at` and `--since` outputs are byte-stable across runs and clones of the
-  same commit, asserted by test; an `--at HEAD` export over a clean tree is
-  byte-identical to the plain export.
+  same commit when their required object closures are locally available and
+  within the documented safety limits, asserted by test; an `--at HEAD`
+  export is byte-identical to the plain export when worktree bytes match the
+  committed blobs.
 - The replay law holds in CI: base export plus feed reproduces the head
   export byte-for-byte.
 - A two-corpus merge fixture shows zero `(source, id)` collisions; repeated
@@ -189,7 +193,9 @@ rather than duplicating them.
 ## Assumptions
 
 - The ADR-043 seam is sufficient for read-only revision materialisation at
-  export scale; no new git machinery is needed.
+  export scale. Configured and federated exports extend its bounded path set to
+  governing metadata and the declared parent closure, including locally
+  available submodule commits; no worktree or network machinery is needed.
 - The documents and graph shapes fixed in `corpus-export-shape-contract`
   remain the wire baseline these features extend additively.
 - rac-connectors consumes the feed and anchors without contract changes

@@ -1,7 +1,8 @@
 //! Command orchestration: walk -> parse -> classify -> validate -> render.
 //! Output is order-deterministic.
 
-use std::path::{Path, PathBuf};
+use std::collections::{BTreeSet, VecDeque};
+use std::path::{Component, Path, PathBuf};
 
 use crate::corpus::{ArtifactOrigin, CorpusLayer};
 use crate::output;
@@ -258,7 +259,23 @@ fn load_composed_or_exit(
     directory: &str,
     recursive: bool,
 ) -> Result<Option<crate::composition::ComposedCorpus>, i32> {
-    match crate::federated_corpus::load_composed_corpus(directory, recursive) {
+    load_composed_or_exit_with_boundary(directory, recursive, None)
+}
+
+fn load_composed_or_exit_with_boundary(
+    directory: &str,
+    recursive: bool,
+    boundary: Option<&Path>,
+) -> Result<Option<crate::composition::ComposedCorpus>, i32> {
+    let loaded = match boundary {
+        Some(root) => crate::federated_corpus::load_composed_corpus_with_boundary(
+            directory,
+            recursive,
+            root,
+        ),
+        None => crate::federated_corpus::load_composed_corpus(directory, recursive),
+    };
+    match loaded {
         Ok(corpus) => Ok(corpus),
         Err(error) => {
             eprintln!("decided: {error}");
@@ -1597,14 +1614,393 @@ pub struct ExportArgs {
     pub local_only: bool,
 }
 
+struct HistoricalExportRevision {
+    /// Owns the temporary snapshot through rendering and emission.
+    _snapshot: crate::revisions::RevisionSnapshot,
+    boundary: PathBuf,
+    directory: String,
+    corpus_existed: bool,
+}
+
+enum HistoricalExportError {
+    Usage(String),
+    Materialization(String),
+}
+
+impl From<crate::revisions::RevisionError> for HistoricalExportError {
+    fn from(error: crate::revisions::RevisionError) -> Self {
+        match error {
+            crate::revisions::RevisionError::NotAGitRepository(message)
+            | crate::revisions::RevisionError::RevisionNotFound(message) => Self::Usage(message),
+        }
+    }
+}
+
+impl From<crate::revisions::RevisionSnapshotError> for HistoricalExportError {
+    fn from(error: crate::revisions::RevisionSnapshotError) -> Self {
+        match error {
+            crate::revisions::RevisionSnapshotError::NotAGitRepository(message)
+            | crate::revisions::RevisionSnapshotError::RevisionNotFound(message) => {
+                Self::Usage(message)
+            }
+            crate::revisions::RevisionSnapshotError::MaterializationFailed(message) => {
+                Self::Materialization(message)
+            }
+        }
+    }
+}
+
+fn lexical_absolute_path(directory: &str) -> Result<PathBuf, HistoricalExportError> {
+    let input = Path::new(directory);
+    let joined = if input.is_absolute() {
+        input.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map_err(|error| {
+                HistoricalExportError::Usage(format!(
+                    "cannot resolve requested directory {directory}: {error}"
+                ))
+            })?
+            .join(input)
+    };
+    let mut normalized = PathBuf::new();
+    for component in joined.components() {
+        match component {
+            Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+            Component::RootDir => normalized.push(std::path::MAIN_SEPARATOR_STR),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                let _ = normalized.pop();
+            }
+            Component::Normal(value) => normalized.push(value),
+        }
+    }
+    Ok(normalized)
+}
+
+fn lexical_git_discovery_directory(requested: &Path) -> Option<PathBuf> {
+    let mut candidate = PathBuf::new();
+    let mut nearest_directory = None;
+    for component in requested.components() {
+        candidate.push(component.as_os_str());
+        match std::fs::symlink_metadata(&candidate) {
+            Ok(metadata) if metadata.file_type().is_symlink() => break,
+            Ok(metadata) if metadata.is_dir() => nearest_directory = Some(candidate.clone()),
+            Ok(_) | Err(_) => break,
+        }
+    }
+    nearest_directory
+}
+
+fn revision_repository_and_path(
+    directory: &str,
+) -> Result<(String, PathBuf, PathBuf), HistoricalExportError> {
+    let requested = lexical_absolute_path(directory)?;
+    let lexical_cwd = lexical_git_discovery_directory(&requested).ok_or_else(|| {
+        HistoricalExportError::Usage(format!("not a git repository: {directory}"))
+    })?;
+    let (repository_root, git_cwd) =
+        match crate::revisions::repository_root(&lexical_cwd.to_string_lossy()) {
+            Ok(repository_root) => (repository_root, lexical_cwd),
+            Err(_) => {
+                // A checkout itself may be addressed through a symlink. No
+                // lexical Git ancestor owns that path, so physical discovery
+                // is safe; an in-repository corpus symlink never reaches this
+                // fallback because its lexical repository wins above.
+                let mut physical_cwd = requested.clone();
+                while !physical_cwd.is_dir() {
+                    if !physical_cwd.pop() {
+                        return Err(HistoricalExportError::Usage(format!(
+                            "not a git repository: {directory}"
+                        )));
+                    }
+                }
+                let repository_root =
+                    crate::revisions::repository_root(&physical_cwd.to_string_lossy())?;
+                (repository_root, physical_cwd)
+            }
+        };
+    let repository_path = std::fs::canonicalize(&repository_root).map_err(|error| {
+        HistoricalExportError::Usage(format!(
+            "cannot resolve repository root {repository_root}: {error}"
+        ))
+    })?;
+    let relative = if let Ok(relative) = requested.strip_prefix(&repository_path) {
+        relative.to_path_buf()
+    } else {
+        let physical_cwd = std::fs::canonicalize(&git_cwd).map_err(|error| {
+            HistoricalExportError::Usage(format!(
+                "cannot resolve Git discovery directory {}: {error}",
+                git_cwd.display()
+            ))
+        })?;
+        let physical_prefix = physical_cwd.strip_prefix(&repository_path).map_err(|_| {
+            HistoricalExportError::Usage(format!(
+                "requested directory is outside Git repository: {directory}"
+            ))
+        })?;
+        let unresolved = requested.strip_prefix(&git_cwd).map_err(|_| {
+            HistoricalExportError::Usage(format!(
+                "cannot derive repository-relative path for {directory}"
+            ))
+        })?;
+        physical_prefix.join(unresolved)
+    };
+    Ok((repository_root, repository_path, relative))
+}
+
+fn node_path(node: &Path, relative: &str) -> PathBuf {
+    if node.as_os_str().is_empty() {
+        PathBuf::from(relative)
+    } else {
+        node.join(relative)
+    }
+}
+
+fn materialize_node_metadata(
+    snapshot: &mut crate::revisions::RevisionSnapshot,
+    node: &Path,
+) -> Result<(), HistoricalExportError> {
+    for relative in [
+        crate::federation::CONFIG_RELATIVE_PATH,
+        crate::federation::MANIFEST_RELATIVE_PATH,
+    ] {
+        snapshot
+            .materialize_path(
+                node_path(node, relative),
+                crate::revisions::MissingPathPolicy::Ignore,
+            )
+            .map_err(HistoricalExportError::from)?;
+    }
+    Ok(())
+}
+
+fn materialize_ancestor_metadata(
+    snapshot: &mut crate::revisions::RevisionSnapshot,
+    corpus: &Path,
+) -> Result<(), HistoricalExportError> {
+    let mut ancestor = corpus.to_path_buf();
+    loop {
+        materialize_node_metadata(snapshot, &ancestor)?;
+        if !ancestor.pop() {
+            return Ok(());
+        }
+    }
+}
+
+fn historical_composition_root(snapshot_root: &Path, corpus: &Path) -> PathBuf {
+    for ancestor in corpus.ancestors() {
+        if !ancestor.starts_with(snapshot_root) {
+            break;
+        }
+        let configured = ancestor
+            .join(crate::federation::CONFIG_RELATIVE_PATH)
+            .is_file();
+        let manifested = ancestor
+            .join(crate::federation::MANIFEST_RELATIVE_PATH)
+            .is_file();
+        if configured || manifested {
+            return ancestor
+                .strip_prefix(snapshot_root)
+                .unwrap_or_else(|_| Path::new(""))
+                .to_path_buf();
+        }
+    }
+    corpus
+        .strip_prefix(snapshot_root)
+        .unwrap_or_else(|_| Path::new(""))
+        .to_path_buf()
+}
+
+fn has_historical_governing_config(snapshot_root: &Path, corpus: &Path) -> bool {
+    corpus.ancestors().any(|ancestor| {
+        ancestor.starts_with(snapshot_root)
+            && ancestor
+                .join(crate::federation::CONFIG_RELATIVE_PATH)
+                .is_file()
+    })
+}
+
+fn historical_parent_declarations(
+    node: &Path,
+) -> Option<(Vec<crate::federation::ParentDeclaration>, bool)> {
+    match crate::federation::load_graph_manifest(node) {
+        Ok(Some(manifest)) => Some((manifest.parents, true)),
+        Ok(None) => match crate::federation::load_manifest(node) {
+            Ok(Some(manifest)) => Some((vec![manifest.inherits], false)),
+            Ok(None) | Err(_) => None,
+        },
+        Err(_) => None,
+    }
+}
+
+fn historical_parent_root_exclusions(
+    snapshot_root: &Path,
+    node: &Path,
+    corpus: &Path,
+) -> Vec<PathBuf> {
+    let absolute = snapshot_root.join(node);
+    let Some((parents, _)) = historical_parent_declarations(&absolute) else {
+        return Vec::new();
+    };
+    let mut exclusions: Vec<PathBuf> = parents
+        .into_iter()
+        .map(|parent| node_path(node, &parent.root))
+        .filter(|parent_root| parent_root.starts_with(corpus))
+        .collect();
+    exclusions.sort();
+    exclusions.dedup();
+    exclusions
+}
+
+fn historical_corpus_symlink_policy(
+    snapshot_root: &Path,
+    node: &Path,
+) -> crate::revisions::CorpusSymlinkPolicy {
+    match historical_parent_declarations(&snapshot_root.join(node)) {
+        Some((_, true)) => crate::revisions::CorpusSymlinkPolicy::RejectAll,
+        Some((_, false)) | None => crate::revisions::CorpusSymlinkPolicy::CorpusFilesOnly,
+    }
+}
+
+fn materialize_federation_closure(
+    snapshot: &mut crate::revisions::RevisionSnapshot,
+    root: PathBuf,
+) -> Result<(), HistoricalExportError> {
+    let mut queue = VecDeque::from([(root.clone(), 0usize)]);
+    let mut visited = BTreeSet::new();
+    let mut materialized_nodes = BTreeSet::from([root]);
+    let mut materialized_corpora = BTreeSet::new();
+    let mut edges = 0usize;
+
+    while let Some((node, depth)) = queue.pop_front() {
+        if !visited.insert(node.clone()) {
+            continue;
+        }
+        if depth > crate::federation::V2_MAX_INHERITANCE_DEPTH {
+            return Err(HistoricalExportError::Materialization(format!(
+                "historical federation exceeds maximum inheritance depth {}",
+                crate::federation::V2_MAX_INHERITANCE_DEPTH
+            )));
+        }
+        let absolute = snapshot.root().join(&node);
+        let Some((parents, recursive)) = historical_parent_declarations(&absolute) else {
+            // A malformed manifest is deliberately left for the established
+            // federation loader, which owns its stable validation diagnostic.
+            continue;
+        };
+        edges = edges.saturating_add(parents.len());
+        if edges > crate::federation::V2_MAX_EDGES {
+            return Err(HistoricalExportError::Materialization(format!(
+                "historical federation exceeds maximum edge count {}",
+                crate::federation::V2_MAX_EDGES
+            )));
+        }
+        for parent in parents {
+            let parent_root = node_path(&node, &parent.root);
+            if materialized_nodes.insert(parent_root.clone()) {
+                materialize_node_metadata(snapshot, &parent_root)?;
+            }
+            let parent_corpus = node_path(&parent_root, &parent.corpus);
+            if materialized_corpora.insert(parent_corpus.clone()) {
+                let exclusions = historical_parent_root_exclusions(
+                    snapshot.root(),
+                    &parent_root,
+                    &parent_corpus,
+                );
+                snapshot
+                    .materialize_corpus_with_options(
+                        parent_corpus,
+                        crate::revisions::MissingPathPolicy::Error,
+                        &exclusions,
+                        if recursive {
+                            crate::revisions::CorpusSymlinkPolicy::RejectAll
+                        } else {
+                            crate::revisions::CorpusSymlinkPolicy::CorpusFilesOnly
+                        },
+                    )
+                    .map_err(HistoricalExportError::from)?;
+            }
+            if recursive {
+                queue.push_back((parent_root, depth + 1));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn materialize_export_revision(
+    directory: &str,
+    revision: &str,
+) -> Result<HistoricalExportRevision, HistoricalExportError> {
+    let (repository_root, repository_path, relative) =
+        revision_repository_and_path(directory)?;
+    let mut snapshot = crate::revisions::RevisionSnapshot::open(&repository_root, revision)?;
+    materialize_ancestor_metadata(&mut snapshot, &relative)?;
+    let projected_corpus = snapshot.root().join(&relative);
+    let composition_root = historical_composition_root(snapshot.root(), &projected_corpus);
+    let exclusions = historical_parent_root_exclusions(
+        snapshot.root(),
+        &composition_root,
+        &relative,
+    );
+    let symlink_policy =
+        historical_corpus_symlink_policy(snapshot.root(), &composition_root);
+    let corpus = snapshot
+        .materialize_corpus_with_options(
+            &relative,
+            crate::revisions::MissingPathPolicy::EmptyDirectory,
+            &exclusions,
+            symlink_policy,
+        )
+        .map_err(HistoricalExportError::from)?;
+    if !has_historical_governing_config(snapshot.root(), &corpus.path) {
+        if let Some(config) = crate::validate::find_config_file(directory) {
+            let config = std::fs::canonicalize(&config).map_err(|error| {
+                HistoricalExportError::Usage(format!(
+                    "cannot resolve governing config {}: {error}",
+                    config.display()
+                ))
+            })?;
+            if !config.starts_with(&repository_path) {
+                return Err(HistoricalExportError::Usage(format!(
+                    "governing config {} is outside Git repository {} and cannot be reproduced by --at",
+                    config.display(),
+                    repository_path.display()
+                )));
+            }
+        }
+    }
+    if corpus.existed {
+        materialize_federation_closure(&mut snapshot, composition_root)?;
+    }
+    let boundary = snapshot.root().to_path_buf();
+    let directory = corpus.path.to_string_lossy().into_owned();
+    Ok(HistoricalExportRevision {
+        _snapshot: snapshot,
+        boundary,
+        directory,
+        corpus_existed: corpus.existed,
+    })
+}
+
 pub fn cmd_export(args: &ExportArgs) -> i32 {
-    if args.schema.is_none() && !Path::new(&args.directory).is_dir() {
+    cmd_export_at(args, None)
+}
+
+/// CLI-only revision projection, kept separate so adding `--at` does not
+/// change the released public [`ExportArgs`] construction contract.
+pub(crate) fn cmd_export_at(args: &ExportArgs, at: Option<&str>) -> i32 {
+    if args.schema.is_none() && at.is_none() && !Path::new(&args.directory).is_dir() {
         return usage_error(&format!("not a directory: {}", args.directory));
     }
     if args.local_only && (args.okf || args.agent_rules || args.schema.is_some()) {
         return usage_error(
             "--local-only is available only for viewer, documents, and graph exports",
         );
+    }
+    if at.is_some() && (args.html || args.okf || args.agent_rules || args.schema.is_some()) {
+        return usage_error("--at is available only for viewer, documents, and graph exports");
     }
     // Agent-rules is a distinct mode (ADR-067) owning --out/--client/--check
     // and --json; it dispatches before the export-payload guards.
@@ -1646,20 +2042,51 @@ pub fn cmd_export(args: &ExportArgs) -> i32 {
         emit_exact(schema);
         return EXIT_OK;
     }
-    let composed = match load_composed_or_exit(&args.directory, true) {
-        Ok(corpus) => corpus,
-        Err(code) => return code,
+    let historical = match at {
+        Some(revision) => match materialize_export_revision(&args.directory, revision) {
+            Ok(snapshot) => Some(snapshot),
+            Err(HistoricalExportError::Usage(message)) => return usage_error(&message),
+            Err(HistoricalExportError::Materialization(message)) => {
+                eprintln!("decided: {message}");
+                return EXIT_VALIDATION_FAILED;
+            }
+        },
+        None => None,
+    };
+    let export_directory = historical
+        .as_ref()
+        .map_or(args.directory.as_str(), |snapshot| snapshot.directory.as_str());
+    let identity_directory = args.directory.as_str();
+    let snapshot_boundary = historical
+        .as_ref()
+        .map(|snapshot| snapshot.boundary.as_path());
+    let historical_corpus_absent = historical
+        .as_ref()
+        .is_some_and(|snapshot| !snapshot.corpus_existed);
+    let composed = if historical_corpus_absent {
+        None
+    } else {
+        match load_composed_or_exit_with_boundary(export_directory, true, snapshot_boundary) {
+            Ok(corpus) => corpus,
+            Err(code) => return code,
+        }
     };
     if args.documents {
         let export = match composed.as_ref() {
-            Some(corpus) => crate::export::build_documents_export_from_composed(
-                &args.directory,
+            Some(corpus) => crate::export::build_documents_export_from_composed_for(
+                export_directory,
+                identity_directory,
                 corpus,
                 args.local_only,
+                snapshot_boundary,
             )
             .map_err(|error| error.message().to_string()),
-            None => crate::export::build_documents_export(&args.directory)
-                .map_err(|error| error.message().to_string()),
+            None => crate::export::build_documents_export_for(
+                export_directory,
+                identity_directory,
+                snapshot_boundary,
+            )
+            .map_err(|error| error.message().to_string()),
         };
         let export = match export {
             Ok(export) => export,
@@ -1668,19 +2095,30 @@ pub fn cmd_export(args: &ExportArgs) -> i32 {
                 return EXIT_VALIDATION_FAILED;
             }
         };
-        emit(output::render_documents_jsonl(&export));
+        let rendered = output::render_documents_jsonl(&export);
+        if historical_corpus_absent && rendered.is_empty() {
+            emit_exact("");
+        } else {
+            emit(rendered);
+        }
         return EXIT_OK;
     }
     if args.graph {
         let export = match composed.as_ref() {
-            Some(corpus) => crate::export::build_graph_export_from_composed(
-                &args.directory,
+            Some(corpus) => crate::export::build_graph_export_from_composed_for(
+                export_directory,
+                identity_directory,
                 corpus,
                 args.local_only,
+                snapshot_boundary,
             )
             .map_err(|error| error.message().to_string()),
-            None => crate::export::build_graph_export(&args.directory)
-                .map_err(|error| error.message().to_string()),
+            None => crate::export::build_graph_export_for(
+                export_directory,
+                identity_directory,
+                snapshot_boundary,
+            )
+            .map_err(|error| error.message().to_string()),
         };
         let export = match export {
             Ok(export) => export,
@@ -1748,14 +2186,21 @@ pub fn cmd_export(args: &ExportArgs) -> i32 {
         return EXIT_OK;
     }
     let export = match composed.as_ref() {
-        Some(corpus) => crate::export::build_corpus_export_from_composed(
-            &args.directory,
+        Some(corpus) => crate::export::build_corpus_export_from_composed_for(
+            export_directory,
+            identity_directory,
             output::rac_version(),
             corpus,
             args.local_only,
+            snapshot_boundary,
         )
         .map_err(|error| error.message().to_string()),
-        None => crate::export::build_corpus_export(&args.directory, output::rac_version())
+        None => crate::export::build_corpus_export_for(
+            export_directory,
+            identity_directory,
+            output::rac_version(),
+            snapshot_boundary,
+        )
             .map_err(|error| error.message().to_string()),
     };
     let export = match export {
