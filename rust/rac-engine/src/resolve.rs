@@ -646,15 +646,34 @@ fn bm25f(fields: &FieldTokens, terms: &[String], stats: &CorpusStats) -> f64 {
     score
 }
 
+fn stable_entry_order(
+    left: &IndexEntry,
+    right: &IndexEntry,
+    federated: bool,
+) -> std::cmp::Ordering {
+    if federated {
+        left.artifact_path
+            .cmp(&right.artifact_path)
+            .then_with(|| left.path.cmp(&right.path))
+    } else {
+        left.path.cmp(&right.path)
+    }
+}
+
 /// `_competition_ranks`: 1-based ranks aligned with `scores`; ties (EXACT
-/// f64 equality) share a rank, ordered by `(-score, path)`.
-fn competition_ranks(scores: &[f64], paths: &[&str]) -> Vec<i64> {
+/// f64 equality) share a rank. Federated indexes use `(source, relative_path)`
+/// while single-source indexes retain the released display-path ordering.
+fn competition_ranks(
+    scores: &[f64],
+    entries: &[&IndexEntry],
+    federated: bool,
+) -> Vec<i64> {
     let mut ordered: Vec<usize> = (0..scores.len()).collect();
     ordered.sort_by(|&a, &b| {
         scores[b]
             .partial_cmp(&scores[a])
             .expect("finite score")
-            .then_with(|| paths[a].cmp(paths[b]))
+            .then_with(|| stable_entry_order(entries[a], entries[b], federated))
     });
     let mut ranks = vec![0; scores.len()];
     let mut previous: Option<f64> = None;
@@ -999,9 +1018,16 @@ pub(crate) fn rank_and_build(
         .iter()
         .map(|(entry, _, _)| entry.inbound_count as f64)
         .collect();
-    let paths: Vec<&str> = matched.iter().map(|(entry, _, _)| entry.path.as_str()).collect();
-    let lexical_rank = competition_ranks(&bm25_scores, &paths);
-    let graph_rank = competition_ranks(&inbound_scores, &paths);
+    let entries: Vec<&IndexEntry> = matched.iter().map(|(entry, _, _)| *entry).collect();
+    let mut sources: Vec<&str> = entries
+        .iter()
+        .filter_map(|entry| entry.origin.as_ref().map(|origin| origin.source.as_str()))
+        .collect();
+    sources.sort_unstable();
+    sources.dedup();
+    let federated = sources.len() > 1;
+    let lexical_rank = competition_ranks(&bm25_scores, &entries, federated);
+    let graph_rank = competition_ranks(&inbound_scores, &entries, federated);
     let strongest_bm25 = bm25_scores.iter().copied().fold(0.0_f64, f64::max);
     let graph_gate_applied: Vec<bool> = bm25_scores
         .iter()
@@ -1034,7 +1060,7 @@ pub(crate) fn rank_and_build(
         fused_sort_keys[b]
             .partial_cmp(&fused_sort_keys[a])
             .expect("finite fused")
-            .then_with(|| paths[a].cmp(paths[b]))
+            .then_with(|| stable_entry_order(entries[a], entries[b], federated))
     });
     crate::timing::emit_since(
         "search.final_sort",
@@ -1211,9 +1237,31 @@ mod tests {
     #[test]
     fn competition_ranks_share_on_exact_equality() {
         let scores = vec![2.0, 2.0, 1.0];
-        let paths = vec!["b", "a", "c"];
-        let ranks = competition_ranks(&scores, &paths);
+        let entries = [
+            test_entry("ADR-001", "One", "b", "body", 0),
+            test_entry("ADR-002", "Two", "a", "body", 0),
+            test_entry("ADR-003", "Three", "c", "body", 0),
+        ];
+        let entries: Vec<&IndexEntry> = entries.iter().collect();
+        let ranks = competition_ranks(&scores, &entries, false);
         assert_eq!(ranks, vec![1, 1, 3]);
+    }
+
+    #[test]
+    fn federated_ties_order_by_source_then_relative_path() {
+        let mut parent = test_entry("STD-001", "Policy", "same.md", "body", 0);
+        parent.artifact_path = Some(ArtifactPath::new("z-parent", "same.md"));
+        let mut local = test_entry("APP-001", "Policy", "same.md", "body", 0);
+        local.artifact_path = Some(ArtifactPath::new("a-child", "same.md"));
+
+        assert_eq!(
+            stable_entry_order(&local, &parent, true),
+            std::cmp::Ordering::Less
+        );
+        assert_eq!(
+            stable_entry_order(&local, &parent, false),
+            std::cmp::Ordering::Equal
+        );
     }
 
     #[test]

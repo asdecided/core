@@ -72,10 +72,23 @@ enum RuleKind {
 pub struct SentryFinding {
     pub code: &'static str,
     pub decision_path: String,
+    pub decision_id: Option<String>,
+    pub origin: Option<crate::corpus::ArtifactOrigin>,
     pub rule_id: Option<String>,
     pub path: String,
     pub line: Option<i64>,
     pub message: String,
+}
+
+fn finding_identity(
+    item: &CorpusItem,
+    include_origin: bool,
+) -> (Option<String>, Option<crate::corpus::ArtifactOrigin>) {
+    if include_origin {
+        (Some(item.key.canonical_id.clone()), Some(item.origin.clone()))
+    } else {
+        (None, None)
+    }
 }
 
 #[derive(Debug)]
@@ -165,9 +178,12 @@ fn safe_glob(value: &str) -> bool {
 }
 
 fn raw_constraint_section(artifact: &Artifact) -> Result<Option<String>, &'static str> {
-    let text = match std::fs::read_to_string(&artifact.product.source_path) {
-        Ok(text) => text,
-        Err(_) => return Ok(artifact.section("code constraints").map(str::to_string)),
+    let text = match &artifact.source_text {
+        Some(text) => text.clone(),
+        None => match std::fs::read_to_string(&artifact.product.source_path) {
+            Ok(text) => text,
+            Err(_) => return Ok(artifact.section("code constraints").map(str::to_string)),
+        },
     };
     let heading = Regex::new(r"(?i)^##[ \t]+code[ \t]+constraints[ \t]*#*[ \t]*$").unwrap();
     let any_h2 = Regex::new(r"^##(?:[ \t]|$)").unwrap();
@@ -190,11 +206,17 @@ fn raw_constraint_section(artifact: &Artifact) -> Result<Option<String>, &'stati
     }
 }
 
-fn parse_document(item: &CorpusItem) -> Result<Option<ConstraintDocument>, Box<SentryFinding>> {
+fn parse_document(
+    item: &CorpusItem,
+    include_origin: bool,
+) -> Result<Option<ConstraintDocument>, Box<SentryFinding>> {
+    let (decision_id, origin) = finding_identity(item, include_origin);
     let section = raw_constraint_section(&item.artifact).map_err(|problem| {
         Box::new(SentryFinding {
             code: MALFORMED_CONSTRAINTS,
             decision_path: item.path.clone(),
+            decision_id: decision_id.clone(),
+            origin: origin.clone(),
             rule_id: None,
             path: item.path.clone(),
             line: None,
@@ -208,6 +230,8 @@ fn parse_document(item: &CorpusItem) -> Result<Option<ConstraintDocument>, Box<S
         Box::new(SentryFinding {
             code: MALFORMED_CONSTRAINTS,
             decision_path: item.path.clone(),
+            decision_id: decision_id.clone(),
+            origin: origin.clone(),
             rule_id: None,
             path: item.path.clone(),
             line: None,
@@ -218,6 +242,8 @@ fn parse_document(item: &CorpusItem) -> Result<Option<ConstraintDocument>, Box<S
         Box::new(SentryFinding {
             code: MALFORMED_CONSTRAINTS,
             decision_path: item.path.clone(),
+            decision_id: decision_id.clone(),
+            origin: origin.clone(),
             rule_id: None,
             path: item.path.clone(),
             line: None,
@@ -228,6 +254,8 @@ fn parse_document(item: &CorpusItem) -> Result<Option<ConstraintDocument>, Box<S
         return Err(Box::new(SentryFinding {
             code: UNSUPPORTED_VERSION,
             decision_path: item.path.clone(),
+            decision_id: decision_id.clone(),
+            origin: origin.clone(),
             rule_id: None,
             path: item.path.clone(),
             line: None,
@@ -241,6 +269,7 @@ fn parse_document(item: &CorpusItem) -> Result<Option<ConstraintDocument>, Box<S
         if !document.rules.is_empty() {
             return Err(invalid(
                 item,
+                include_origin,
                 None,
                 "ineligible decisions must not declare rules",
             ));
@@ -252,6 +281,7 @@ fn parse_document(item: &CorpusItem) -> Result<Option<ConstraintDocument>, Box<S
         {
             return Err(invalid(
                 item,
+                include_origin,
                 None,
                 "ineligible decisions must state a non-empty reason",
             ));
@@ -262,17 +292,29 @@ fn parse_document(item: &CorpusItem) -> Result<Option<ConstraintDocument>, Box<S
         .as_deref()
         .is_some_and(|reason| reason.trim().is_empty())
     {
-        return Err(invalid(item, None, "reason must not be empty"));
+        return Err(invalid(
+            item,
+            include_origin,
+            None,
+            "reason must not be empty",
+        ));
     }
     let mut ids = BTreeSet::new();
     for rule in &document.rules {
         if !valid_rule_id(&rule.id) {
-            return Err(invalid(item, Some(&rule.id), "invalid rule id"));
+            return Err(invalid(
+                item,
+                include_origin,
+                Some(&rule.id),
+                "invalid rule id",
+            ));
         }
         if !ids.insert(rule.id.clone()) {
             return Err(Box::new(SentryFinding {
                 code: DUPLICATE_RULE_ID,
                 decision_path: item.path.clone(),
+                decision_id: decision_id.clone(),
+                origin: origin.clone(),
                 rule_id: Some(rule.id.clone()),
                 path: item.path.clone(),
                 line: None,
@@ -282,22 +324,38 @@ fn parse_document(item: &CorpusItem) -> Result<Option<ConstraintDocument>, Box<S
         if !safe_glob(&rule.path_glob) {
             return Err(invalid(
                 item,
+                include_origin,
                 Some(&rule.id),
                 "path_glob must be repository-relative and contain no '..' component",
             ));
         }
         if Glob::new(&rule.path_glob).is_err() {
-            return Err(invalid(item, Some(&rule.id), "invalid path_glob"));
+            return Err(invalid(
+                item,
+                include_origin,
+                Some(&rule.id),
+                "invalid path_glob",
+            ));
         }
         if rule.pattern.is_empty() || Regex::new(&rule.pattern).is_err() {
-            return Err(invalid(item, Some(&rule.id), "invalid regular expression"));
+            return Err(invalid(
+                item,
+                include_origin,
+                Some(&rule.id),
+                "invalid regular expression",
+            ));
         }
         if rule
             .message
             .as_ref()
             .is_some_and(|message| message.is_empty())
         {
-            return Err(invalid(item, Some(&rule.id), "message must not be empty"));
+            return Err(invalid(
+                item,
+                include_origin,
+                Some(&rule.id),
+                "message must not be empty",
+            ));
         }
     }
     Ok(Some(document))
@@ -312,16 +370,24 @@ pub fn validate_artifact(artifact: &Artifact) -> Vec<Issue> {
         artifact.clone(),
         spec_for("decision"),
     );
-    match parse_document(&item) {
+    match parse_document(&item, false) {
         Err(finding) => vec![Issue::new("error", finding.code, finding.message, None)],
         _ => Vec::new(),
     }
 }
 
-fn invalid(item: &CorpusItem, rule_id: Option<&str>, message: &str) -> Box<SentryFinding> {
+fn invalid(
+    item: &CorpusItem,
+    include_origin: bool,
+    rule_id: Option<&str>,
+    message: &str,
+) -> Box<SentryFinding> {
+    let (decision_id, origin) = finding_identity(item, include_origin);
     Box::new(SentryFinding {
         code: INVALID_CONSTRAINT,
         decision_path: item.path.clone(),
+        decision_id,
+        origin,
         rule_id: rule_id.map(str::to_string),
         path: item.path.clone(),
         line: None,
@@ -329,7 +395,12 @@ fn invalid(item: &CorpusItem, rule_id: Option<&str>, message: &str) -> Box<Sentr
     })
 }
 
-fn collect_files(root: &Path, dir: &Path, output: &mut Vec<(String, PathBuf)>) {
+fn collect_files(
+    root: &Path,
+    dir: &Path,
+    excluded: Option<&Path>,
+    output: &mut Vec<(String, PathBuf)>,
+) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
@@ -337,6 +408,13 @@ fn collect_files(root: &Path, dir: &Path, output: &mut Vec<(String, PathBuf)>) {
     entries.sort_by_key(|entry| entry.file_name());
     for entry in entries {
         let path = entry.path();
+        if excluded.is_some_and(|excluded| {
+            std::fs::canonicalize(&path)
+                .ok()
+                .is_some_and(|path| path == excluded || path.starts_with(excluded))
+        }) {
+            continue;
+        }
         let name = entry.file_name();
         if name == ".git" {
             continue;
@@ -345,7 +423,7 @@ fn collect_files(root: &Path, dir: &Path, output: &mut Vec<(String, PathBuf)>) {
             continue;
         };
         if file_type.is_dir() && !file_type.is_symlink() {
-            collect_files(root, &path, output);
+            collect_files(root, &path, excluded, output);
         } else if file_type.is_file() {
             if let Ok(relative) = path.strip_prefix(root) {
                 output.push((relative.to_string_lossy().replace('\\', "/"), path));
@@ -448,6 +526,22 @@ pub fn analyze(
     base: Option<&str>,
     full_tree: bool,
 ) -> Result<SentryReport, String> {
+    let items = corpus_items(corpus, recursive);
+    analyze_with_items(corpus, repository, base, full_tree, &items, false, None)
+}
+
+/// Sentry over the effective items from one composed snapshot. `excluded`
+/// prevents code enumeration from entering the verified read-only parent
+/// materialisation.
+pub fn analyze_with_items(
+    corpus: &str,
+    repository: &str,
+    base: Option<&str>,
+    full_tree: bool,
+    items: &[CorpusItem],
+    include_origin: bool,
+    excluded: Option<&Path>,
+) -> Result<SentryReport, String> {
     let repository_path = Path::new(repository);
     if !repository_path.is_dir() {
         return Err(format!("not a directory: {repository}"));
@@ -460,12 +554,11 @@ pub fn analyze(
     } else {
         Some(changed_lines(repository_path, base.unwrap())?)
     };
-    let items = corpus_items(corpus, recursive);
     let live: Vec<&CorpusItem> = items.iter().filter(|item| is_live_decision(item)).collect();
     let mut documents = Vec::new();
     let mut findings = Vec::new();
     for item in &live {
-        match parse_document(item) {
+        match parse_document(item, include_origin) {
             Ok(Some(document)) => documents.push((*item, document)),
             Ok(None) => {}
             Err(finding) => findings.push(*finding),
@@ -473,7 +566,7 @@ pub fn analyze(
     }
 
     let mut files = Vec::new();
-    collect_files(repository_path, repository_path, &mut files);
+    collect_files(repository_path, repository_path, excluded, &mut files);
     for (item, document) in &documents {
         for rule in &document.rules {
             let matcher = Glob::new(&rule.path_glob).unwrap().compile_matcher();
@@ -614,6 +707,12 @@ pub fn analyze(
             }
         }
     }
+    if !include_origin {
+        for finding in &mut findings {
+            finding.decision_id = None;
+            finding.origin = None;
+        }
+    }
     findings.sort_by(|a, b| {
         a.path
             .cmp(&b.path)
@@ -655,9 +754,12 @@ fn rule_finding(
     line: Option<i64>,
     message: String,
 ) -> SentryFinding {
+    let (decision_id, origin) = finding_identity(item, true);
     SentryFinding {
         code,
         decision_path: item.path.clone(),
+        decision_id,
+        origin,
         rule_id: Some(rule.id.clone()),
         path: path.to_string(),
         line,
@@ -675,6 +777,18 @@ mod tests {
         assert!(valid_rule_id("no-hard-delete"));
         assert!(!valid_rule_id("NoHardDelete"));
         assert!(!valid_rule_id("no--delete"));
+    }
+
+    #[test]
+    fn captured_markdown_keeps_code_constraint_fences() {
+        let text = "---\nschema_version: 1\nid: ADR-001\ntype: decision\n---\n# Guardrail\n\n## Status\n\nAccepted\n\n## Code Constraints\n\n```yaml\nversion: 1\neligibility: eligible\nrules:\n  - id: no-marker\n    kind: forbid_pattern\n    path_glob: \"src/**/*.rs\"\n    pattern: \"forbidden\"\n```\n";
+        let artifact = crate::parse::parse_bytes(text.as_bytes(), "decisions/guardrail.md");
+
+        assert_eq!(
+            raw_constraint_section(&artifact).unwrap().unwrap(),
+            "\n```yaml\nversion: 1\neligibility: eligible\nrules:\n  - id: no-marker\n    kind: forbid_pattern\n    path_glob: \"src/**/*.rs\"\n    pattern: \"forbidden\"\n```"
+        );
+        assert!(validate_artifact(&artifact).is_empty());
     }
 
     #[test]

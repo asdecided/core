@@ -21,7 +21,7 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use crate::pycompat::py_repr_str;
-use crate::relationships::corpus_items;
+use crate::relationships::CorpusItem;
 use crate::spec::available_schemas;
 use crate::validate::find_config_file;
 use crate::walk::py_join;
@@ -103,6 +103,12 @@ fn id_generation_exhausted() -> ScaffoldError {
     ScaffoldError::IdGenerationExhausted(format!(
         "could not generate a unique artifact ID in {MAX_ID_ATTEMPTS} attempts"
     ))
+}
+
+fn local_items(directory: &str, recursive: bool) -> Result<Vec<CorpusItem>, ScaffoldError> {
+    crate::federated_corpus::local_writable_items(directory, recursive).map_err(|error| {
+        ScaffoldError::MalformedRepositoryConfig(error.to_string())
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -635,14 +641,14 @@ fn py_parent(p: &str) -> String {
 /// oracle-crash class); the native walk is total, so hostile files simply
 /// contribute whatever identifier they still yield (RAC-KXBPS7SRM6ZB
 /// REQ-002: creation must succeed).
-fn issued_ids(repository_root: &str) -> HashSet<String> {
-    corpus_items(repository_root, true)
+fn issued_ids(repository_root: &str) -> Result<HashSet<String>, ScaffoldError> {
+    Ok(local_items(repository_root, true)?
         .iter()
         .map(|item| {
             crate::identity::artifact_identifier(&item.artifact, item.spec, &item.path)
                 .to_uppercase()
         })
-        .collect()
+        .collect())
 }
 
 /// `_assign_id` / migrate's `_next_id` — generate, check, retry bounded.
@@ -687,7 +693,7 @@ pub fn create_artifact(
         .and_then(Path::parent)
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_else(|| ".".to_string());
-    let mut issued = issued_ids(&repository_root);
+    let mut issued = issued_ids(&repository_root)?;
     let artifact_id = assign_id(&config.repository_key, &mut issued)?;
     let content = format!("{}{body}", render_frontmatter(&artifact_id, artifact_type));
     std::fs::write(output_path, content.as_bytes()).map_err(|e| {
@@ -732,7 +738,7 @@ pub fn quickstart(
     // Refuse a non-empty corpus: any entry classified as a known type. The
     // oracle crashes when this walk hits hostile markdown; the native walk
     // is total (RAC-KXBPS7SRM6ZB REQ-002 class, documented divergence).
-    let items = corpus_items(directory, true);
+    let items = local_items(directory, true)?;
     if let Some(existing) = items.iter().find(|item| item.spec.is_some()) {
         return Err(ScaffoldError::CorpusNotEmpty(format!(
             "corpus already has artifacts (e.g. {}); decided quickstart only \
@@ -820,10 +826,10 @@ pub fn migrate_metadata(
         .and_then(Path::parent)
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_else(|| ".".to_string());
-    let mut issued = issued_ids(&repository_root);
+    let mut issued = issued_ids(&repository_root)?;
 
     let mut files = Vec::new();
-    for item in corpus_items(directory, recursive) {
+    for item in local_items(directory, recursive)? {
         if item.artifact.metadata.is_some() || !item.artifact.metadata_issues.is_empty() {
             files.push(FileMigration {
                 path: item.path.clone(),
