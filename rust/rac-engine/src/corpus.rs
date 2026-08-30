@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::scaffold::{load_repository_identity, ScaffoldError};
+use crate::scaffold::{load_repository_identity_with_boundary, ScaffoldError};
 
 /// Whether an artifact belongs to the writable child or a read-only parent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -187,9 +187,20 @@ impl PhysicalArtifactLocator {
 /// The exact non-federated source derivation shared by exports and the local
 /// source-aware layer: explicit `corpus.source`, then lower-case
 /// `repository_key`, then the released directory-basename fallback.
-pub fn compatible_corpus_source(directory: &str) -> Result<String, ScaffoldError> {
-    let Some(identity) = load_repository_identity(directory)? else {
-        return Ok(compatible_corpus_name(directory));
+pub fn compatible_corpus_source_with_fallback(
+    directory: &str,
+    fallback_directory: &str,
+) -> Result<String, ScaffoldError> {
+    compatible_corpus_source_with_fallback_and_boundary(directory, fallback_directory, None)
+}
+
+pub fn compatible_corpus_source_with_fallback_and_boundary(
+    directory: &str,
+    fallback_directory: &str,
+    boundary: Option<&Path>,
+) -> Result<String, ScaffoldError> {
+    let Some(identity) = load_repository_identity_with_boundary(directory, boundary)? else {
+        return Ok(compatible_corpus_name(fallback_directory));
     };
     if let Some(source) = identity.corpus_source {
         return Ok(source);
@@ -200,7 +211,11 @@ pub fn compatible_corpus_source(directory: &str) -> Result<String, ScaffoldError
             .unwrap_or(&repository_key)
             .to_ascii_lowercase());
     }
-    Ok(compatible_corpus_name(directory))
+    Ok(compatible_corpus_name(fallback_directory))
+}
+
+pub fn compatible_corpus_source(directory: &str) -> Result<String, ScaffoldError> {
+    compatible_corpus_source_with_fallback(directory, directory)
 }
 
 /// Build the dormant single local layer without making configuration errors
