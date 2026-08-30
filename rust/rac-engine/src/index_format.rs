@@ -197,6 +197,15 @@ impl<'a> Reader<'a> {
         }
         Ok(out)
     }
+
+    /// Require that a closed-format payload has no unparsed suffix.
+    pub fn finish(self) -> Result<(), IndexFormatError> {
+        if self.pos == self.view.len() {
+            Ok(())
+        } else {
+            err("segment contains trailing payload bytes")
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

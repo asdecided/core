@@ -4,6 +4,12 @@ Short, realistic artifacts you can adapt. These show the *shape* of each type â€
 blank starter with section guidance, use `decided schema <type> --template`
 ([cli.md](cli.md#schema)).
 
+For a complete repository-shaped example, see
+[`examples/federation/`](https://github.com/asdecided/core/tree/main/examples/federation):
+two direct parents, a shared diamond ancestor, exact pins, and a reviewed
+override that can be inspected with `decided corpus status` and
+`decided corpus explain`.
+
 ## A requirement
 
 ```markdown

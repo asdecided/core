@@ -8,7 +8,12 @@
  */
 
 import type { Artifact, AsDecidedExport } from './types';
-import { displayName } from './data';
+import {
+  artifactKey,
+  displayName,
+  relationshipSourceKey,
+  relationshipTargetKey,
+} from './data';
 
 export interface GraphNode {
   id: string;
@@ -89,19 +94,21 @@ export function buildGraph(data: AsDecidedExport): Graph {
     return node;
   };
 
-  for (const artifact of data.artifacts) ensure(artifact.id, artifact);
+  for (const artifact of data.artifacts) ensure(artifactKey(artifact), artifact);
 
   const edges: GraphEdge[] = [];
   for (const rel of data.relationships) {
-    const from = byId.get(rel.from);
+    const fromId = relationshipSourceKey(rel);
+    const toId = relationshipTargetKey(rel);
+    const from = byId.get(fromId);
     if (!from) continue; // a from-id outside the corpus cannot be placed
-    const target = ensure(rel.to); // creates a dangling node when unresolved
-    const edge: GraphEdge = { from: rel.from, to: rel.to, unresolved: target.unresolved };
+    const target = ensure(toId); // creates a dangling node when unresolved
+    const edge: GraphEdge = { from: fromId, to: toId, unresolved: target.unresolved };
     edges.push(edge);
     from.degree += 1;
     target.degree += 1;
-    adjacency.get(rel.from)!.add(rel.to);
-    adjacency.get(rel.to)!.add(rel.from);
+    adjacency.get(fromId)!.add(toId);
+    adjacency.get(toId)!.add(fromId);
   }
 
   return { nodes: [...byId.values()], edges, byId, adjacency };

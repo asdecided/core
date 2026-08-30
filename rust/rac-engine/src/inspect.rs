@@ -10,7 +10,7 @@
 use crate::classify::classify;
 use crate::parse::{parse_file, Artifact};
 use crate::pycompat::py_strip;
-use crate::relationships::extract_relationships;
+use crate::relationships::{extract_relationships, CorpusItem};
 use crate::spec::{canonical_value, spec_for, specs};
 use crate::walk::find_markdown_files;
 
@@ -149,6 +149,34 @@ pub fn inspect_directory(directory: &str, recursive: bool) -> DirectoryInspectio
                 path: entry.display,
                 artifact_type: c.artifact_type,
                 confidence: c.confidence,
+            }
+        })
+        .collect();
+    DirectoryInspection {
+        directory: directory.to_string(),
+        recursive,
+        files,
+    }
+}
+
+/// Inspect an already-verified writable projection without reopening its
+/// files. Graph federation uses this entry point so inherited materialisation
+/// paths never leak into a root-local directory inspection.
+pub fn inspect_directory_from_items(
+    directory: &str,
+    recursive: bool,
+    items: &[CorpusItem],
+) -> DirectoryInspection {
+    use rayon::prelude::*;
+    let files = items
+        .par_iter()
+        .filter(|item| recursive || !item.artifact_path.relative_path.contains('/'))
+        .map(|item| {
+            let classification = classify(&item.artifact);
+            FileInspection {
+                path: item.path.clone(),
+                artifact_type: classification.artifact_type,
+                confidence: classification.confidence,
             }
         })
         .collect();

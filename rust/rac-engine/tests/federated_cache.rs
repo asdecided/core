@@ -37,7 +37,7 @@ The cache fixture is deterministic.
 
 ## Applies To
 
-- `src/**`
+- src/**
 "#;
 
 const PARENT_DECISION: &str = r#"---
@@ -65,7 +65,7 @@ The pin changes with these bytes.
 
 ## Applies To
 
-- `src/**`
+- src/**
 "#;
 
 fn scratch(tag: &str) -> PathBuf {
@@ -134,7 +134,7 @@ fn child_corpus(child: &Path) -> String {
 
 fn shared_decision(id: &str) -> String {
     format!(
-        "---\nschema_version: 1\nid: {id}\ntype: decision\n---\n# ADR-900: Shared Policy\n\n## Status\n\nAccepted\n\n## Context\n\nEqualmarker context.\n\n## Decision\n\nEqualmarker decision.\n\n## Consequences\n\nEqualmarker consequence.\n\n## Applies To\n\n- `src/**`\n"
+        "---\nschema_version: 1\nid: {id}\ntype: decision\n---\n# ADR-900: Shared Policy\n\n## Status\n\nAccepted\n\n## Context\n\nEqualmarker context.\n\n## Decision\n\nEqualmarker decision.\n\n## Consequences\n\nEqualmarker consequence.\n\n## Applies To\n\n- src/**\n"
     )
 }
 
@@ -596,4 +596,110 @@ fn no_manifest_keeps_the_single_corpus_content_key() {
     assert!(generation.identity().is_none());
     assert!(generation.verified_parent().is_none());
     fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn ancillary_readers_share_effective_and_local_composed_projections() {
+    let (child, _parent, _pin) = fixture("ancillary-readers");
+    let directory = child_corpus(&child);
+    let corpus = rac_engine::federated_corpus::load_composed_corpus(&directory, true)
+        .unwrap()
+        .unwrap();
+    let effective: Vec<_> = corpus.effective().cloned().collect();
+
+    let index = rac_engine::index::build_repository_index_from_items(&directory, &effective, true);
+    assert_eq!(index.artifacts.len(), 2);
+    assert!(index.artifacts.iter().all(|row| row.origin.is_some()));
+    let stats = rac_engine::stats::collect_stats_from_items(&directory, &effective);
+    assert_eq!(stats.decisions.len(), 2);
+    assert!(stats.decisions.iter().all(|row| row.origin.is_some()));
+
+    let portfolio = rac_engine::portfolio::portfolio_from_composed(&directory, &corpus, true);
+    assert_eq!(portfolio.total_artifacts(), 2);
+    let coverage = rac_engine::coverage::analyze_coverage_from_composed(&directory, &corpus);
+    assert_eq!(coverage.gaps.len(), 2);
+    assert!(coverage.gaps.iter().all(|gap| gap.origin.is_some()));
+    let relationships = rac_engine::relationships::build_relationship_report_from_composed(
+        &directory,
+        true,
+        &corpus,
+    );
+    assert_eq!(relationships.total_files, 2);
+    assert!(relationships
+        .artifacts
+        .iter()
+        .all(|artifact| artifact.origin.is_some()));
+
+    let doctor = rac_engine::doctor::diagnose_composed(&directory, true, 20, &corpus);
+    assert!(doctor
+        .findings
+        .iter()
+        .all(|finding| finding.path != "parent.md"));
+    let review = rac_engine::review::build_review_composed(&directory, true, None, &corpus);
+    assert_eq!(review.portfolio.total_artifacts(), 1);
+    assert!(review.issues.iter().all(|issue| issue.path != "parent.md"));
+
+    let herald = rac_engine::herald::collect_from_composed(
+        &directory,
+        &["src/main.rs".to_string()],
+        &corpus,
+    );
+    let scope_rows = rac_engine::retrieve::scope_rows_from_items(&effective);
+    assert_eq!(scope_rows.len(), 2);
+    assert_eq!(scope_rows[0].scope_entries, vec!["src/**".to_string()]);
+    assert_eq!(herald.decisions.len(), 2);
+    let body = rac_engine::herald::render(&herald, "https://example.test/child", 10);
+    assert!(body.contains("https://example.test/child/child.md"));
+    assert!(!body.contains("https://example.test/child/parent.md"));
+
+    let proposal = rac_engine::parse::parse_text(
+        &CHILD_DECISION.replace(
+            "## Consequences",
+            "## Related Decisions\n\n- standards::STD-KWJ4VMKVSS66\n\n## Consequences",
+        ),
+        "-",
+    );
+    let validation = corpus.validate_proposed_document(&proposal, "-", &directory, true);
+    assert!(validation.issues.is_empty());
+
+    fs::remove_dir_all(child).unwrap();
+}
+
+#[test]
+fn composed_portfolio_disambiguates_equal_relative_paths_by_source() {
+    let (child, parent, _pin) = fixture("portfolio-equal-paths");
+    fs::remove_file(child.join("decisions/child.md")).unwrap();
+    fs::remove_file(parent.join("decisions/parent.md")).unwrap();
+    fs::write(
+        child.join("decisions/shared.md"),
+        CHILD_DECISION.replace(
+            "## Consequences",
+            "## Related Decisions\n\n- APP-DOES-NOT-EXIST\n\n## Consequences",
+        ),
+    )
+    .unwrap();
+    fs::write(parent.join("decisions/shared.md"), PARENT_DECISION).unwrap();
+    let pin = calculate_parent_digest(&parent, "decisions")
+        .unwrap()
+        .digest;
+    write_manifest(&child, &pin, "equal-relative-paths");
+
+    let directory = child_corpus(&child);
+    let corpus = rac_engine::federated_corpus::load_composed_corpus(&directory, true)
+        .unwrap()
+        .unwrap();
+    let portfolio = rac_engine::portfolio::portfolio_from_composed(&directory, &corpus, true);
+    let relationship = portfolio
+        .attention
+        .iter()
+        .find(|item| item.code == rac_engine::portfolio::ATTENTION_BROKEN_RELATIONSHIP)
+        .expect("local broken relationship attention");
+    assert_eq!(relationship.path, "shared.md");
+    assert_eq!(relationship.identifier, "APP-KWJ4VMKVSS65");
+    assert_eq!(
+        relationship.origin.as_ref().map(|origin| origin.source.as_str()),
+        Some("acme/app")
+    );
+
+    fs::remove_dir_all(child).unwrap();
 }

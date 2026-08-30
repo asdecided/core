@@ -1,8 +1,8 @@
 # Grounding retrieval benchmark fixture (v0.23.0, WS1)
 
 This directory is the versioned fixture the `decided eval` grounding benchmark
-scores. It is a dev/CI surface, not a RAC artifact corpus — nothing here is part
-of the product knowledge under `rac/`.
+scores. It is a dev/CI surface, not an AsDecided artifact corpus — nothing here
+is part of the repository's product-knowledge corpus.
 
 ## Layout
 
@@ -27,14 +27,39 @@ of the product knowledge under `rac/`.
   category's `p_at_1` / `r_at_5`. Per-tool figures are diagnostic.
 - `baseline.json` — the committed `metrics` baseline, written by
   `decided eval --update-baseline` (human-only; CI never rebaselines).
+- `federation/child/` — the version-1 ADR-139 DecisionGrounding track. Its
+  child inherits a 40-artifact standards parent containing a precise inherited
+  match, six lexical near-matches, and a 32-inbound-edge hard negative. The hard
+  negative has graph rank 1 but remains outside the top-five window because the
+  v0.28 lexical floor clamps its graph contribution.
+- `federation/graph-decisions/` plus `federation/graph-track/` — the version-2
+  extension of that same benchmark family. The root has three direct parents,
+  reaches the 40-artifact standards corpus through a nested version-1 node, and
+  reaches another Decision through a nested version-2 node. It measures the
+  combined source-neutral BM25 index, the same lexical graph-floor hard
+  negative, and transitive inherited search and relationship retrieval.
 
 ## Running
 
 ```sh
-rac eval                  # human-readable scorecard
-rac eval --json           # full scorecard JSON
-rac eval --check          # CI gate: exit 0 pass / 1 regression / 2 usage error
-rac eval --update-baseline  # human-only re-baseline
+decided eval                  # human-readable scorecard
+decided eval --json           # full scorecard JSON
+decided eval --check          # CI gate: exit 0 pass / 1 regression / 2 usage error
+decided eval --update-baseline  # human-only re-baseline
+
+# ADR-139 large-parent/hard-negative track
+decided eval --check \
+  --root rust/fixtures/eval/federation/child/decisions \
+  --queries rust/fixtures/eval/federation/queries.json \
+  --baseline rust/fixtures/eval/federation/baseline.json \
+  --config rust/fixtures/eval/federation/eval-config.json
+
+# ADR-139 version-2 graph track (same scorer and metric family)
+decided eval --check \
+  --root rust/fixtures/eval/federation/graph-decisions \
+  --queries rust/fixtures/eval/federation/graph-track/queries.json \
+  --baseline rust/fixtures/eval/federation/graph-track/baseline.json \
+  --config rust/fixtures/eval/federation/graph-track/eval-config.json
 ```
 
 ## Calibration

@@ -7,6 +7,11 @@ type: decision
 
 ## Context
 
+> **Amended by ADR-147.** Version 1 retains this ADR's direct mapping and chain
+> rejection. Version 2 permits explicit ancestry-level override chains and
+> diamond convergence while retaining every same-type, local-replacement, live
+> local-Decision, no-precedence, and historical-provenance safeguard here.
+
 ADR-136 rejects implicit child-first and parent-first precedence. A child still
 needs a controlled way to depart from an inherited standard without editing or
 silently hiding the parent corpus. A bare replacement mapping would identify
@@ -87,11 +92,13 @@ its override state for auditability.
 - adr-080
 - adr-089
 - adr-134
-- adr-136
+- adr-146
+- adr-147
 
 ## Related Designs
 
 - corpus-federation-mechanism
+- corpus-federation-graph-composition
 
 ## Related Requirements
 

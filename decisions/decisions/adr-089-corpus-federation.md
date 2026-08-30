@@ -21,7 +21,8 @@ rules that should apply across an organisation.
 
 Federation is the single genuine semantic change among the enterprise asks, and
 the deepest. Today the corpus is single-tree: one canonical root per repository
-(ADR-018) with git `main` as the only source of truth (ADR-080); cross-repository
+(ADR-018) with its reviewed Git state as the only source of truth (ADR-080 as
+amended by ADR-149); cross-repository
 references do not resolve; relationships are local and Git-native (ADR-016,
 ADR-055). A parent-corpus mechanism touches resolution, validation, and export at
 once.
@@ -46,8 +47,8 @@ Non-negotiable constraints on any future federation design:
 - **Deterministic and offline** (ADR-002): parent resolution reads materialised
   bytes — a pinned submodule, a vendored bundle, or a path — never a live network
   fetch inside the validate path.
-- **Single canonical state preserved per repo** (ADR-018, ADR-080): a parent is
-  an inherited, read-only layer; the child's `main` remains its own truth;
+- **Single canonical state preserved per repo** (ADR-018, ADR-080, ADR-149): a parent is
+  an inherited, read-only layer; the child's reviewed Git state remains its own truth;
   overrides are explicit, not implicit precedence.
 - **Git-native and human-readable** (ADR-016, ADR-055): inheritance is declared
   in Markdown (a `## inherits` section) plus a pinned source reference; no
@@ -115,7 +116,7 @@ last — built with the design partner once the additive items have landed.
 
 ## Relationship to Other Decisions
 
-- ADR-018, ADR-080: federation must preserve the single canonical state per repo;
+- ADR-018, ADR-080, ADR-149: federation must preserve the single canonical state per repo;
   a parent is read-only and inherited.
 - ADR-016, ADR-055: inheritance stays Git-native and human-readable; no database.
 - ADR-002: parent resolution is offline over materialised bytes.

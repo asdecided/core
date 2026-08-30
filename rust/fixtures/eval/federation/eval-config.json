@@ -1,0 +1,14 @@
+{
+  "description": "Federated DecisionGrounding gate: preserve the precise inherited match and admit no hard negative in the top-five window.",
+  "tolerance": 0.02,
+  "floors": {
+    "negative_violations": 0,
+    "overall": {
+      "p_at_1": 0.9,
+      "r_at_5": 0.95
+    },
+    "by_category": {
+      "federated_large_parent": {"p_at_1": 0.9, "r_at_5": 0.95}
+    }
+  }
+}

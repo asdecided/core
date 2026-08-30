@@ -23,7 +23,7 @@ to the corpus artifact and they load through the imports below.
 - Historical roadmaps: `decisions/roadmaps/archive/`
 - Decisions (ADRs): `decisions/decisions/`
 
-<!-- BEGIN RAC MANAGED BLOCK (digest: c07a39007806f42609962111a70acbc6ddc3d591c058053a0ba5e01836c031df) -->
+<!-- BEGIN RAC MANAGED BLOCK (digest: 9bd32aa128aca801628967581df3ff7e0b36a1137d517b708bab47b138fe8b6f) -->
 <!-- Managed by `decided export --agent-rules`. Edit decisions in decisions/, not here; content outside this block is preserved. -->
 ## Settled decisions (AsDecided)
 
@@ -90,6 +90,7 @@ These decisions are already accepted. Do not re-open or contradict them; ask the
 - **RAC-KVK19NPWFYC9** — ADR-074: The Graph Export Surfaces Typed Relationship Edges _(Technical)_
 - **RAC-KVNM01QPBPXB** — ADR-075: The Pre-Merge Check Tier Is a Required Merge Gate on `main` _(Process)_
 - **RAC-KVSQ2A0BB9XF** — ADR-079: Note-Tool Exports Are Ingested by Normalisation, Not markitdown _(Architecture)_
+- **RAC-KVSTYDARXKYW** — ADR-080: The Single Source of Truth Is Git, Not a Database _(Architecture)_
 - **RAC-KVTS86ZGVJV7** — ADR-077: The Two-Gate Capture Write Model _(Architecture)_
 - **RAC-KW2YW6XK593X** — ADR-084: Read-Access Audit Recorder _(Product)_
 - **RAC-KW47GFBHK31W** — ADR-086: Air-Gap Posture and Enterprise Telemetry Hard-Lock _(Product)_
@@ -123,17 +124,20 @@ These decisions are already accepted. Do not re-open or contradict them; ask the
 - **RAC-KXGVR299XY5E** — ADR-116: The Native Rust Engine Is a Sanctioned Second Implementation Under Lockstep Guards _(Architecture)_
 - **RAC-KYVTHFQD44BP** — ADR-124: Publish the Native MCP Server Through OCI and the Official Registry _(Architecture)_
 - **RAC-KYYC7HBFMRBA** — ADR-126: Package the Native MCP Server for Docker's MCP Catalog _(Architecture)_
-- **RAC-KZKMJ8Q49GHV** — ADR-133: Start Corpus Federation With One Direct Parent _(Architecture)_
+- **RAC-KZ0F0RG3N5XT** — ADR-149: Git Repository Truth Is Forge-Agnostic _(Architecture)_
 - **RAC-KZKMJ8WSMFA1** — ADR-134: Declare and Verify an Offline Materialised Parent _(Architecture)_
 - **RAC-KZKMJ92ABVJG** — ADR-135: Use `corpus.source` as the Global Corpus Identity _(Architecture)_
-- **RAC-KZKMJ97Z2PBE** — ADR-136: Resolve Cross-Corpus References Without Implicit Precedence _(Architecture)_
 - **RAC-KZKMJ9DGR69Z** — ADR-137: Require Decision-Backed Explicit Federation Overrides _(Architecture)_
 - **RAC-KZKMJ9K3AFB2** — ADR-138: Build Federation Through One Source-Aware Read Model _(Architecture)_
 - **RAC-KZKMJ9RP0KNV** — ADR-139: Rank Federated Retrieval Without Source Preference _(Technical)_
 - **RAC-KZKMJ9YA8BRG** — ADR-140: Apply Inherited Decisions to Child Code _(Product)_
 - **RAC-KZKMJA3YK5Y1** — ADR-141: Add Bounded Federation Provenance to the Existing MCP Surface _(Product)_
 - **RAC-KZKMJA9JVF6J** — ADR-142: Export the Inherited Layer by Default _(Product)_
-- **RAC-KZKMJAF599TB** — ADR-143: Version Federated Generations, Cache State, and Freshness _(Technical)_
+- **RAC-KZN54DB1VNPB** — ADR-144: Compose Federation as a Bounded Acyclic Source Graph _(Architecture)_
+- **RAC-KZN54DB2M7FZ** — ADR-145: Declare Multiple Offline Parents Through a Versioned Federation Manifest _(Architecture)_
+- **RAC-KZN54DB3V0ZC** — ADR-146: Resolve Federated Artifacts by Global Source Identity Without Precedence _(Architecture)_
+- **RAC-KZN54DB4QY0R** — ADR-147: Permit Decision-Backed Override Chains Across the Federation Graph _(Architecture)_
+- **RAC-KZN54DB55X9R** — ADR-148: Key Serving State to the Entire Federated Closure _(Technical)_
 - **RAC-MCP20260728A** — ADR-121: Dual-Era MCP Protocol Compatibility _(Architecture)_
 - **RAC-P55FRE5HNE55** — ADR-118: Native Event Freshness Acceleration
 - **RAC-P61BA5EDE7A0** — ADR-119: Base-Plus-Delta Serving Generations

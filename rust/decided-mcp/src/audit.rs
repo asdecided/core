@@ -254,31 +254,37 @@ fn activation_message(recorder: &Recorder) -> String {
     )
 }
 
-/// Run `call`, record one audit event, and return the payload unchanged
-/// (ADR-084: audit is observability outside the response contract). With no
-/// recorder this is exactly `call()`. Under `on_write_error: block` a failed
-/// write refuses the call with a structured `audit-unavailable` error.
-pub fn observe(
+/// Result-preserving audit boundary for failures which happen before a tool
+/// can produce its structured payload (for example strict parent verification
+/// or composition). These failures still emit exactly one event with an empty
+/// returned set before the MCP layer serializes the error response.
+pub fn observe_result(
     recorder: Option<&mut Recorder>,
     request_principal: Option<&str>,
     tool: &str,
     args: Value,
-    call: impl FnOnce() -> String,
-) -> String {
+    call: impl FnOnce() -> Result<String, String>,
+) -> Result<String, String> {
     let Some(recorder) = recorder else {
         return call();
     };
     let stripped = request_principal.map(str::trim).filter(|s| !s.is_empty());
     let asserted = stripped.is_some();
-    let principal = stripped.map(str::to_string).unwrap_or_else(|| recorder.principal.clone());
+    let principal = stripped
+        .map(str::to_string)
+        .unwrap_or_else(|| recorder.principal.clone());
     let started = Instant::now();
-    let payload = call();
+    let result = call();
+    let (returned, result_outcome) = match &result {
+        Ok(payload) => (returned_records(payload), outcome(payload)),
+        Err(_) => (Vec::new(), "error"),
+    };
     let event = build_event(
         recorder,
         tool,
         args,
-        returned_records(&payload),
-        outcome(&payload),
+        returned,
+        result_outcome,
         started,
         &principal,
         asserted,
@@ -288,9 +294,11 @@ pub fn observe(
         err.insert("schema_version".into(), Value::String(SCHEMA_VERSION.into()));
         err.insert("error".into(), Value::String("audit-unavailable".into()));
         err.insert("tool".into(), Value::String(tool.into()));
-        return dumps_compact(&Value::Object(err));
+        // Preserve the established block-on-write wire behavior: the audit
+        // refusal is a structured tool payload, not the unrecorded result.
+        return Ok(dumps_compact(&Value::Object(err)));
     }
-    payload
+    result
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -338,6 +346,8 @@ fn outcome(payload: &str) -> &'static str {
 /// The audit schema deliberately keeps a small reference rather than copying
 /// result records: `id` is the stable identity, `resolved` records the
 /// resolution state, and `provenance.path` points back into the served corpus.
+/// Federated records add only the fixed source, layer, and pin identity fields
+/// authorised by ADR-141; response bodies and optional provenance stay out.
 /// The extractor covers every result collection emitted by the MCP tools. Raw
 /// outgoing relationship text is intentionally excluded because it can be an
 /// unresolved declaration rather than a returned artifact.
@@ -365,10 +375,16 @@ fn returned_records(payload: &str) -> Vec<Value> {
     }
     let mut seen = std::collections::HashSet::new();
     records.retain(|record| {
-        record
-            .get("id")
+        let Some(id) = record.get("id").and_then(Value::as_str) else {
+            return false;
+        };
+        let source = record
+            .get("provenance")
+            .and_then(Value::as_object)
+            .and_then(|provenance| provenance.get("source"))
             .and_then(Value::as_str)
-            .is_some_and(|id| seen.insert(id.to_string()))
+            .unwrap_or("");
+        seen.insert((source.to_string(), id.to_string()))
     });
     records
 }
@@ -379,11 +395,22 @@ fn returned_record(object: &Map<String, Value>) -> Option<Value> {
         .get("resolved")
         .and_then(Value::as_bool)
         .unwrap_or(true);
-    let provenance = object
-        .get("path")
-        .and_then(Value::as_str)
-        .map(|path| json!({ "path": path }))
-        .unwrap_or(Value::Null);
+    let mut provenance = Map::new();
+    if let Some(path) = object.get("path").and_then(Value::as_str) {
+        provenance.insert("path".to_string(), json!(path));
+    }
+    if let Some(response_provenance) = object.get("provenance").and_then(Value::as_object) {
+        for key in ["source", "layer", "pin"] {
+            if let Some(value) = response_provenance.get(key) {
+                provenance.insert(key.to_string(), value.clone());
+            }
+        }
+    }
+    let provenance = if provenance.is_empty() {
+        Value::Null
+    } else {
+        Value::Object(provenance)
+    };
     Some(json!({
         "id": id,
         "resolved": resolved,
@@ -501,6 +528,59 @@ mod tests {
         );
         assert!(!returned_records(&payload).iter().any(|item| item.to_string().contains("secret")));
         assert!(returned_records(r#"{"error":{"code":-1},"id":"A"}"#).is_empty());
+    }
+
+    #[test]
+    fn returned_records_keep_bounded_federation_identity_and_dedupe_by_source() {
+        let payload = json!({
+            "matches": [
+                {
+                    "id": "ADR-001",
+                    "path": "decisions/adr-001.md",
+                    "provenance": {
+                        "source": "acme/app",
+                        "layer": "local",
+                        "status": "Accepted",
+                        "status_history": ["must not enter audit"]
+                    }
+                },
+                {
+                    "id": "ADR-001",
+                    "path": "decisions/adr-001.md",
+                    "provenance": {
+                        "source": "acme/standards",
+                        "layer": "inherited",
+                        "pin": "sha256:0123",
+                        "evidence": "must not enter audit"
+                    }
+                }
+            ]
+        })
+        .to_string();
+        assert_eq!(
+            returned_records(&payload),
+            vec![
+                json!({
+                    "id": "ADR-001",
+                    "resolved": true,
+                    "provenance": {
+                        "path": "decisions/adr-001.md",
+                        "source": "acme/app",
+                        "layer": "local"
+                    }
+                }),
+                json!({
+                    "id": "ADR-001",
+                    "resolved": true,
+                    "provenance": {
+                        "path": "decisions/adr-001.md",
+                        "source": "acme/standards",
+                        "layer": "inherited",
+                        "pin": "sha256:0123"
+                    }
+                })
+            ]
+        );
     }
 
     #[test]

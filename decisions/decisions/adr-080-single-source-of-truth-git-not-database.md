@@ -3,7 +3,7 @@ schema_version: 1
 id: RAC-KVSTYDARXKYW
 type: decision
 ---
-# ADR-080: The Single Source of Truth Is Git `main`, Not a Database
+# ADR-080: The Single Source of Truth Is Git, Not a Database
 
 ## Context
 
@@ -67,7 +67,11 @@ truth, and it is the one the team already reviews and versions.
 
 ## Status
 
-Proposed
+Accepted
+
+ADR-149 preserves this decision's no-database, Git-backed source-of-truth
+contract while amending its hard-coded Git-host `main` branch language with a
+forge-, remote-, and branch-name-neutral repository contract.
 
 ## Category
 
@@ -96,6 +100,7 @@ Architecture
 - adr-065
 - adr-066
 - adr-073
+- adr-149
 
 ## Related Roadmaps
 

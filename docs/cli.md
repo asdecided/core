@@ -42,6 +42,7 @@ repin the parent.
 
 ```bash
 decided corpus digest --root vendor/standards --corpus decisions
+decided corpus digest --version 2 --root vendor/standards --corpus decisions
 ```
 
 `--root` is the parent repository root and bounds configuration discovery to
@@ -69,6 +70,82 @@ non-`.md` files do not enter the digest. Absolute or `..` corpus paths, path
 escape, and traversed symlinks are rejected with stable `parent-corpus-*`
 errors. Exit `0` means the digest was calculated; exit `1` means the bounded
 materialisation could not be safely snapshotted.
+
+Manifest version 2 uses the explicit `--version 2` command. Its
+`sha256-v2:<64 lowercase hex>` digest also commits to whether
+`.decided/corpus.md` is present and, when present, its exact bytes. Those bytes
+bind the parent's own outgoing edges and pins, so graph updates are repinned
+bottom-up. The owned Markdown snapshot excludes every direct materialisation
+subtree declared by that manifest. The default command, version-1 digest,
+`sha256:` prefix, and single-parent workflow remain unchanged.
+
+---
+
+## corpus status
+
+Verify and inspect a manifest-version-2 federation closure from its current
+local bytes:
+
+```bash
+decided corpus status [DIRECTORY]
+decided corpus status [DIRECTORY] --json
+```
+
+`DIRECTORY` defaults to `decisions/` when that conventional directory exists,
+otherwise to the current directory. The command uses the same immutable graph
+loader as validation, retrieval, enforcement, export, cache, and MCP. It does not
+fetch, refresh, repin, or write anything. Output is produced only after every
+physical route, configured source, canonical pin, inherited artifact, and
+override has passed verification.
+
+The human report shows logical sources, canonical source routes, physical-route
+counts, exact pins, edges, materialisation paths, artifact projections,
+overrides, graph depth, and read-only boundaries. The stable JSON response has
+`schema_version: "1"`, `status: "verified"`, and these top-level objects:
+
+- `verification` — no network access, exact pins verified, immutable snapshots;
+- `summary` — source/edge/route/depth and catalog/effective/local counts;
+- `sources[]` — identity, layer, pin, route, paths, counts, and writability;
+- `edges[]` — owner-local alias, target, declared/canonical pin, and physical path;
+- `read_only_roots[]` — every protected physical materialisation.
+
+Exit `0` means the complete closure verified. Exit `1` means the manifest is
+not version 2 or verification failed; a closure failure emits no partial JSON.
+Exit `2` means the requested directory is unavailable.
+
+---
+
+## corpus explain
+
+Explain a source-contextual artifact resolution without changing the corpus:
+
+```bash
+decided corpus explain <REFERENCE> [DIRECTORY]
+decided corpus explain <REFERENCE> [DIRECTORY] --json
+decided corpus explain <REFERENCE> [DIRECTORY] --from <CORPUS_SOURCE>
+```
+
+`DIRECTORY` uses the same `decisions/`-then-current-directory default and the
+context defaults to the root source.
+`--from` evaluates the same reference from another immutable source in the
+verified closure, which is useful when aliases or visible parents differ by
+authoring context.
+
+The report distinguishes historical candidates, the selected source-owned
+record, and the root-effective terminal. It lists context-visible sources and
+direct aliases, then shows every applicable override's owner, target,
+replacement, Decision rationale, and `overridden` / `replacement` / `lineage`
+state. Qualified references select history while still showing its effective
+terminal; unqualified references select the one converged terminal.
+
+The JSON response has `schema_version: "1"` and a stable `outcome`:
+`resolved`, `ambiguous`, `not-found`, `unknown-context`, `invalid-reference`, or
+`canonical-id-required`. A resolved result exits `0`. Every diagnostic outcome
+still emits the complete human or JSON explanation and exits `1`. Loader and
+pin failures fail closed before an explanation is rendered.
+
+See [Corpus Federation](federation.md) and the
+[runnable diamond example](https://github.com/asdecided/core/tree/main/examples/federation).
 
 ---
 
@@ -845,16 +922,24 @@ artifacts — existing output is overwritten.
 
 - **Input:** `decided export [directory]` — scanned recursively for `*.md` (default: current directory).
 - **Modes:** *(default)* viewer JSON to stdout · `--html` (self-contained Portal file) · `--okf` (OKF v0.2 Markdown bundle) · `--documents` (JSONL for memory/RAG backends) · `--graph` (typed node+edge JSON for graph backends) · `--schema <viewer|documents|graph>` (the packaged JSON Schema, without reading a corpus) · `--agent-rules` (per-client agent-context files; see its own behaviour)
-- **Options:** `--out <path>` (only `--html`/`--okf`/`--agent-rules`; the stdout modes are pipeable) · `--json` (no-op for the default mode)
+- **Options:** `--out <path>` (only `--html`/`--okf`/`--agent-rules`; the stdout modes are pipeable) · `--json` (no-op for the default mode) · `--local-only` (viewer/HTML, documents, and graph projections only)
 - **Exit codes:** `0` success · `2` not a directory, or `--out` given to a stdout mode
 
 ```bash
 decided export decisions/                      # viewer JSON to stdout
 decided export decisions/ --documents          # JSONL, one record per artifact
 decided export decisions/ --graph              # typed node+edge graph
+decided export decisions/ --local-only         # writable child records only
 decided export --schema documents              # Draft 2020-12 record schema
 decided export decisions/ --html --out asdecided.html
 ```
+
+When `.decided/corpus.md` declares a verified parent, viewer, documents, and
+graph exports include inherited records by default. Records and edges carry
+their own source, layer, and verified-pin provenance; explicit overrides retain
+both the parent history and local replacement. `--local-only` is a human
+diagnostic/export projection of the writable child records. OKF bundles and
+generated agent rules remain local-only and do not accept the flag.
 
 The three machine-readable payload contracts, compatibility rules, and direct
 schema links are documented on the [Export contracts](export-contracts.md)
@@ -1094,7 +1179,6 @@ decided templates --json
 }
 ```
 
-
 ---
 
 ## init
@@ -1120,7 +1204,7 @@ for fallback and aggregation behaviour.
 - **Input:** `decided init [directory]` — defaults to the current directory.
 - **Options:** `--key KEY` (default `RAC`; 2–10 uppercase alphanumeric
   characters starting with a letter) · `--ticketing PROVIDER` · `--profile NAME`
-  · `--org-endpoint URL` · `--json`
+  · `--org-endpoint URL` · `--parent-corpus` · `--json`
 - **`--ticketing PROVIDER`** records the external ticketing system for
   `## Related Tickets` references (ADR-087) as `ticketing.provider` in
   `.decided/config.yaml` — one of `jira`, `github`, `linear`, `azure-devops`,
@@ -1139,8 +1223,8 @@ for fallback and aggregation behaviour.
 
   Profiles are creation-time configuration, composable with `--key`/`--ticketing`
   and the [`quickstart`](#quickstart) scaffold. Plain `decided init` (no `--profile`)
-  is unchanged. A parent-corpus line is added once corpus federation ships
-  (ADR-089); until then the enterprise profile is hollow on it.
+  is unchanged. Parent-corpus setup is available separately through the explicit
+  `--parent-corpus` request; no profile creates a live inheritance declaration.
 - **`--org-endpoint URL`** wires the shared **org AsDecided endpoint** (ADR-117): it
   ensures an `asdecided-org` entry — `{"type": "http", "url": URL}` — under
   `mcpServers` in `.mcp.json` and `.cursor/mcp.json`. Unlike a profile, org
@@ -1150,6 +1234,34 @@ for fallback and aggregation behaviour.
   same URL writes nothing. The URL must start with `http://` or `https://`.
   Composes with `--profile` (local `asdecided` and `asdecided-org` side by side). See
   [Org Grounding](org-grounding.md).
+- **`--parent-corpus`** prints deterministic setup guidance for the operational
+  `.decided/corpus.md` manifest, including the exact `## inherits` and
+  `## overrides` headings. Its recommended version-2 flow tells you to
+  materialise every parent inside the repository first, calculate each pin with
+  `decided corpus digest --version 2 --root <parent-root> --corpus
+  <parent-corpus>`, and declare one to 32 records in the `parents` sequence.
+  It also retains the original version-1 digest command for existing
+  single-parent manifests. The flag works on fresh and already-initialized
+  repositories, with or without a profile. It is guidance only: it never
+  creates the manifest, fetches a parent, or writes parent bytes. Without the
+  flag, init files and human/JSON output are unchanged.
+
+  The version-2 manifest it describes has this shape (repeat the parent record
+  as needed; list order grants no precedence):
+
+  ````markdown
+  ## inherits
+
+  ```yaml
+  version: 2
+  parents:
+    - alias: standards
+      source: acme/standards
+      root: vendor/standards
+      corpus: decisions
+      digest: sha256-v2:<64-lowercase-hex>
+  ```
+  ````
 - **Exit codes:** `0` initialized, or already initialized with the same key
   (idempotent) · `1` a different key is already established (never silently
   rewritten), or a client config exists but cannot be merged into (malformed
@@ -1167,6 +1279,7 @@ decided init --key PROJ
 decided init --key ACME --ticketing jira
 decided init --key ACME --profile enterprise
 decided init --org-endpoint https://asdecided.example.com/mcp
+decided init --parent-corpus
 decided init docs/ --json
 ```
 
@@ -1179,6 +1292,24 @@ decided init docs/ --json
   "profile": "enterprise",
   "files_written": [".mcp.json", ".cursor/mcp.json"],
   "org_endpoint": null
+}
+```
+
+With `--parent-corpus --json`, the response additionally includes:
+
+```json
+{
+  "parent_corpus_guidance": {
+    "materialise_first": true,
+    "manifest": ".decided/corpus.md",
+    "inherits_heading": "## inherits",
+    "overrides_heading": "## overrides",
+    "digest_command": "decided corpus digest --root <parent-root> --corpus <parent-corpus>",
+    "recommended_manifest_version": 2,
+    "parents_field": "parents",
+    "multiple_parents": true,
+    "digest_command_v2": "decided corpus digest --version 2 --root <parent-root> --corpus <parent-corpus>"
+  }
 }
 ```
 

@@ -2,6 +2,131 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "AsDecided viewer export v1",
   "description": "The default JSON object emitted by decided export.",
+  "$defs": {
+    "identity": {
+      "type": "object",
+      "required": [
+        "source",
+        "id"
+      ],
+      "properties": {
+        "source": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "override": {
+      "type": "object",
+      "required": [
+        "state",
+        "replacement",
+        "rationale"
+      ],
+      "properties": {
+        "state": {
+          "enum": [
+            "overridden",
+            "replacement",
+            "lineage"
+          ]
+        },
+        "owner_source": {
+          "type": "string"
+        },
+        "target": {
+          "$ref": "#/$defs/identity"
+        },
+        "parent": {
+          "$ref": "#/$defs/identity"
+        },
+        "replacement": {
+          "$ref": "#/$defs/identity"
+        },
+        "rationale": {
+          "$ref": "#/$defs/identity"
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "parent"
+          ]
+        },
+        {
+          "required": [
+            "owner_source",
+            "target"
+          ]
+        }
+      ],
+      "additionalProperties": true
+    },
+    "provenance": {
+      "type": "object",
+      "required": [
+        "source",
+        "layer"
+      ],
+      "properties": {
+        "source": {
+          "type": "string"
+        },
+        "layer": {
+          "enum": [
+            "local",
+            "inherited"
+          ]
+        },
+        "pin": {
+          "type": "string",
+          "pattern": "^sha256(?:-v2)?:[0-9a-f]{64}$"
+        },
+        "overrides": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/override"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "layer": {
+                "const": "inherited"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "pin"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "layer": {
+                "const": "local"
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "required": [
+                "pin"
+              ]
+            }
+          }
+        }
+      ],
+      "additionalProperties": true
+    }
+  },
   "type": "object",
   "required": [
     "schema_version",
@@ -76,6 +201,9 @@
           },
           "body_html": {
             "type": "string"
+          },
+          "provenance": {
+            "$ref": "#/$defs/provenance"
           }
         },
         "additionalProperties": true
@@ -100,6 +228,41 @@
           "type": {
             "type": "string",
             "const": "relates-to"
+          },
+          "from_identity": {
+            "$ref": "#/$defs/identity"
+          },
+          "to_identity": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/identity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "authored_token": {
+            "type": "string"
+          },
+          "historical_candidates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/identity"
+            }
+          },
+          "effective_terminal": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/identity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "provenance": {
+            "$ref": "#/$defs/provenance"
           }
         },
         "additionalProperties": true

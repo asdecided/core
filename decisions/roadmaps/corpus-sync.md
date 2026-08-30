@@ -114,9 +114,10 @@ explicit `corpus.source` first, repository key next, directory basename as
 the compatibility fallback — plus a documented consumer-side aggregation
 recipe keyed on `(source, id)`. Federation requires the explicit value and
 reuses it, but source identity alone adds no inheritance or cross-corpus
-resolution or validation (ADR-089 untouched). Identical parent records may
-deduplicate only when their verified pins agree; different pins are an
-aggregation conflict.
+resolution or validation (ADR-089 untouched). Identical inherited records may
+deduplicate across exports or a verified graph closure only when source,
+canonical id, verified node pin, path, and body agree. A differing pin or body
+is an aggregation conflict rather than last-writer-wins.
 
 ### Scale and retrieval evidence
 

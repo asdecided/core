@@ -2,6 +2,7 @@
 //! and adjacency indexes are built once per freshness generation, then reused
 //! by every graph call until the corpus changes.
 
+use rac_engine::corpus::{ArtifactKey, ArtifactOrigin, ArtifactPath, Layer};
 use rac_engine::freshness::TrackerModel;
 use rac_engine::relationships::{corpus_items, relationships_from_corpus, Relationship};
 use rac_engine::resolve::{index_from_items, IndexEntry, ResolutionResult, ResolvedArtifact};
@@ -26,6 +27,22 @@ fn relationship_order(section: &str) -> usize {
     RELATIONSHIP_SECTIONS.len()
 }
 
+fn stable_entry_order(left: &IndexEntry, right: &IndexEntry) -> std::cmp::Ordering {
+    left.artifact_path
+        .cmp(&right.artifact_path)
+        .then_with(|| left.path.cmp(&right.path))
+        .then_with(|| left.id.cmp(&right.id))
+}
+
+fn public_path(entry: &IndexEntry, federated: bool) -> String {
+    if federated {
+        if let Some(path) = &entry.artifact_path {
+            return path.relative_path.clone();
+        }
+    }
+    entry.path.clone()
+}
+
 pub struct OutgoingReferences {
     /// Section (snake_case) → raw stored targets, first-seen section order.
     pub by_section: Vec<(String, Vec<String>)>,
@@ -47,6 +64,8 @@ impl OutgoingReferences {
 }
 
 pub struct IncomingReference {
+    pub key: Option<ArtifactKey>,
+    pub origin: Option<ArtifactOrigin>,
     pub id: String,
     pub artifact_type: String,
     pub title: Option<String>,
@@ -61,6 +80,8 @@ pub struct IncomingReferences {
 }
 
 pub struct NeighborhoodNode {
+    pub key: Option<ArtifactKey>,
+    pub origin: Option<ArtifactOrigin>,
     pub id: String,
     pub artifact_type: String,
     pub title: Option<String>,
@@ -73,15 +94,21 @@ pub struct Neighborhood {
     pub truncated: bool,
 }
 
-/// Immutable graph projection for one logical corpus generation.
-pub struct GraphView {
-    entries: Vec<IndexEntry>,
+struct RelationshipProjection {
     relationships: Vec<Relationship>,
-    aliases: HashMap<String, Vec<usize>>,
-    entry_by_path: HashMap<String, usize>,
     outgoing_by_source: Vec<Vec<usize>>,
     incoming_by_target: Vec<Vec<usize>>,
     adjacency: Vec<Vec<(usize, usize)>>,
+}
+
+/// Immutable graph projection for one logical corpus generation.
+pub struct GraphView {
+    entries: Vec<IndexEntry>,
+    entry_by_path: HashMap<String, usize>,
+    entry_by_artifact_path: HashMap<ArtifactPath, usize>,
+    effective_graph: RelationshipProjection,
+    historical_graph: Option<RelationshipProjection>,
+    federated: bool,
 }
 
 impl GraphView {
@@ -111,37 +138,107 @@ impl GraphView {
         Self::new(index_from_items(&corpus), relationships_from_corpus(&corpus))
     }
 
+    pub fn from_composed(corpus: &rac_engine::composition::ComposedCorpus) -> Self {
+        Self::new_with_history(
+            corpus.identity_index(),
+            corpus.relationships(),
+            Some(corpus.catalog_relationships()),
+        )
+    }
+
+    pub fn from_graph(corpus: &rac_engine::graph_composition::GraphComposition) -> Self {
+        Self::new_with_history(
+            corpus.identity_index(),
+            corpus.relationships(),
+            Some(corpus.catalog_relationships_compatible()),
+        )
+    }
+
     pub fn new(entries: Vec<IndexEntry>, relationships: Vec<Relationship>) -> Self {
-        let mut aliases: HashMap<String, Vec<usize>> = HashMap::new();
+        Self::new_with_history(entries, relationships, None)
+    }
+
+    fn new_with_history(
+        entries: Vec<IndexEntry>,
+        relationships: Vec<Relationship>,
+        historical_relationships: Option<Vec<Relationship>>,
+    ) -> Self {
         let mut entry_by_path = HashMap::with_capacity(entries.len());
+        let mut entry_by_artifact_path = HashMap::with_capacity(entries.len());
+        let federated = entries.iter().any(|entry| {
+            entry
+                .origin
+                .as_ref()
+                .is_some_and(|origin| origin.layer == Layer::Inherited)
+        });
         for (index, entry) in entries.iter().enumerate() {
             entry_by_path.insert(entry.path.clone(), index);
-            for alias in &entry.aliases {
-                let targets = aliases
-                    .entry(rac_engine::pycompat::py_casefold(alias))
-                    .or_default();
-                if !targets.contains(&index) {
-                    targets.push(index);
-                }
+            if let Some(path) = &entry.artifact_path {
+                entry_by_artifact_path.insert(path.clone(), index);
             }
         }
 
-        let mut outgoing_by_source = vec![Vec::new(); entries.len()];
-        let mut incoming_by_target = vec![Vec::new(); entries.len()];
-        let mut adjacency = vec![Vec::new(); entries.len()];
+        let effective_graph = Self::relationship_projection(
+            entries.len(),
+            &entry_by_path,
+            &entry_by_artifact_path,
+            relationships,
+        );
+        let historical_graph = historical_relationships.map(|relationships| {
+            Self::relationship_projection(
+                entries.len(),
+                &entry_by_path,
+                &entry_by_artifact_path,
+                relationships,
+            )
+        });
+
+        Self {
+            entries,
+            entry_by_path,
+            entry_by_artifact_path,
+            effective_graph,
+            historical_graph,
+            federated,
+        }
+    }
+
+    fn relationship_projection(
+        entry_count: usize,
+        entry_by_path: &HashMap<String, usize>,
+        entry_by_artifact_path: &HashMap<ArtifactPath, usize>,
+        relationships: Vec<Relationship>,
+    ) -> RelationshipProjection {
+        let mut outgoing_by_source = vec![Vec::new(); entry_count];
+        let mut incoming_by_target = vec![Vec::new(); entry_count];
+        let mut adjacency = vec![Vec::new(); entry_count];
         for (index, relationship) in relationships.iter().enumerate() {
-            let Some(&source_index) = entry_by_path.get(&relationship.source_path) else {
+            let source_index = relationship
+                .source_artifact
+                .as_ref()
+                .and_then(|path| entry_by_artifact_path.get(path))
+                .or_else(|| entry_by_path.get(&relationship.source_path))
+                .copied();
+            let Some(source_index) = source_index else {
                 continue;
             };
             outgoing_by_source[source_index].push(index);
-            let Some(target) = relationship.resolved_path.as_deref() else {
-                continue;
-            };
-            let Some(&target_index) = entry_by_path.get(target) else {
+            let target_index = relationship
+                .resolved_artifact
+                .as_ref()
+                .and_then(|path| entry_by_artifact_path.get(path))
+                .copied()
+                .or_else(|| {
+                    relationship
+                        .resolved_path
+                        .as_deref()
+                        .and_then(|path| entry_by_path.get(path).copied())
+                });
+            let Some(target_index) = target_index else {
                 continue;
             };
             incoming_by_target[target_index].push(index);
-            if relationship.source_path == target {
+            if source_index == target_index {
                 continue;
             }
             let rank = relationship_order(&relationship.relationship);
@@ -149,74 +246,50 @@ impl GraphView {
             adjacency[target_index].push((source_index, rank));
         }
 
-        Self {
-            entries,
+        RelationshipProjection {
             relationships,
-            aliases,
-            entry_by_path,
             outgoing_by_source,
             incoming_by_target,
             adjacency,
         }
     }
 
-    pub fn resolve(&self, artifact_id: &str) -> ResolutionResult {
-        use rac_engine::resolve::{OUTCOME_DUPLICATE, OUTCOME_NOT_FOUND, OUTCOME_RESOLVED};
-
-        let wanted = rac_engine::pycompat::py_casefold(rac_engine::pycompat::py_strip(artifact_id));
-        let matches = self.aliases.get(&wanted).map(Vec::as_slice).unwrap_or(&[]);
-        if matches.is_empty() {
-            return ResolutionResult {
-                artifact_id: artifact_id.to_string(),
-                outcome: OUTCOME_NOT_FOUND,
-                artifact: None,
-                duplicate_paths: Vec::new(),
-            };
-        }
-        if matches.len() > 1 {
-            let mut paths: Vec<String> = matches
-                .iter()
-                .map(|index| self.entries[*index].path.clone())
-                .collect();
-            paths.sort();
-            return ResolutionResult {
-                artifact_id: artifact_id.to_string(),
-                outcome: OUTCOME_DUPLICATE,
-                artifact: None,
-                duplicate_paths: paths,
-            };
-        }
-        let entry = &self.entries[matches[0]];
-        ResolutionResult {
-            artifact_id: artifact_id.to_string(),
-            outcome: OUTCOME_RESOLVED,
-            artifact: Some(ResolvedArtifact {
-                key: entry.key.clone(),
-                artifact_path: entry.artifact_path.clone(),
-                origin: entry.origin.clone(),
-                id: entry.id.clone(),
-                artifact_type: entry.artifact_type.clone(),
-                title: entry.title.clone(),
-                path: entry.path.clone(),
-                section: None,
-                snippet: None,
-                evidence: None,
-                recency: None,
-                tags: entry.tags.clone(),
-            }),
-            duplicate_paths: Vec::new(),
+    fn graph(&self, historical: bool) -> &RelationshipProjection {
+        if historical {
+            self.historical_graph
+                .as_ref()
+                .unwrap_or(&self.effective_graph)
+        } else {
+            &self.effective_graph
         }
     }
 
-    pub fn outgoing(&self, source_path: &str) -> OutgoingReferences {
+    fn entry_index(&self, artifact: &ResolvedArtifact) -> Option<usize> {
+        artifact
+            .artifact_path
+            .as_ref()
+            .and_then(|path| self.entry_by_artifact_path.get(path))
+            .copied()
+            .or_else(|| self.entry_by_path.get(&artifact.path).copied())
+    }
+
+    pub fn resolve(&self, artifact_id: &str) -> ResolutionResult {
+        rac_engine::resolve::resolve_in_index(&self.entries, artifact_id)
+    }
+
+    pub fn outgoing(
+        &self,
+        artifact: &ResolvedArtifact,
+        historical: bool,
+    ) -> OutgoingReferences {
+        let graph = self.graph(historical);
         let indexes = self
-            .entry_by_path
-            .get(source_path)
-            .map(|index| self.outgoing_by_source[*index].as_slice())
+            .entry_index(artifact)
+            .map(|index| graph.outgoing_by_source[index].as_slice())
             .unwrap_or(&[]);
         let mut by_section: Vec<(String, Vec<String>)> = Vec::new();
         for index in indexes.iter().take(MAX_RELATED_EDGES) {
-            let relationship = &self.relationships[*index];
+            let relationship = &graph.relationships[*index];
             match by_section
                 .iter_mut()
                 .find(|(section, _)| *section == relationship.relationship)
@@ -234,30 +307,42 @@ impl GraphView {
         }
     }
 
-    pub fn incoming(&self, target_path: &str) -> IncomingReferences {
-        let indexes = self
-            .entry_by_path
-            .get(target_path)
-            .map(|index| self.incoming_by_target[*index].as_slice())
+    pub fn incoming(
+        &self,
+        artifact: &ResolvedArtifact,
+        historical: bool,
+    ) -> IncomingReferences {
+        let graph = self.graph(historical);
+        let target_index = self.entry_index(artifact);
+        let indexes = target_index
+            .map(|index| graph.incoming_by_target[index].as_slice())
             .unwrap_or(&[]);
         let mut incoming = Vec::new();
         let mut total = 0usize;
         for index in indexes {
-            let relationship = &self.relationships[*index];
-            if relationship.source_path == target_path {
-                continue;
-            }
-            let Some(entry_index) = self.entry_by_path.get(&relationship.source_path) else {
+            let relationship = &graph.relationships[*index];
+            let entry_index = relationship
+                .source_artifact
+                .as_ref()
+                .and_then(|path| self.entry_by_artifact_path.get(path))
+                .or_else(|| self.entry_by_path.get(&relationship.source_path))
+                .copied();
+            let Some(entry_index) = entry_index else {
                 continue;
             };
+            if Some(entry_index) == target_index {
+                continue;
+            }
             total += 1;
             if incoming.len() < MAX_RELATED_EDGES {
-                let entry = &self.entries[*entry_index];
+                let entry = &self.entries[entry_index];
                 incoming.push(IncomingReference {
+                    key: entry.key.clone(),
+                    origin: entry.origin.clone(),
                     id: entry.id.clone(),
                     artifact_type: entry.artifact_type.clone(),
                     title: entry.title.clone(),
-                    path: relationship.source_path.clone(),
+                    path: public_path(entry, self.federated),
                     section: relationship.relationship.clone(),
                     target: relationship.target.clone(),
                 });
@@ -276,9 +361,15 @@ impl GraphView {
         }
     }
 
-    pub fn neighborhood(&self, origin_path: &str, depth: i64) -> Neighborhood {
+    pub fn neighborhood(
+        &self,
+        artifact: &ResolvedArtifact,
+        depth: i64,
+        historical: bool,
+    ) -> Neighborhood {
+        let graph = self.graph(historical);
         let depth = depth.clamp(0, MAX_TRAVERSAL_DEPTH);
-        let Some(&origin_index) = self.entry_by_path.get(origin_path) else {
+        let Some(origin_index) = self.entry_index(artifact) else {
             return Neighborhood {
                 nodes: Vec::new(),
                 truncated: false,
@@ -295,11 +386,14 @@ impl GraphView {
         for current_depth in 1..=depth {
             let mut next_frontier = Vec::new();
             let mut sorted_frontier = frontier.clone();
-            sorted_frontier.sort_by(|a, b| self.entries[*a].path.cmp(&self.entries[*b].path));
+            sorted_frontier.sort_by(|a, b| {
+                stable_entry_order(&self.entries[*a], &self.entries[*b])
+            });
             for entry_index in &sorted_frontier {
-                let mut neighbors = self.adjacency[*entry_index].clone();
+                let mut neighbors = graph.adjacency[*entry_index].clone();
                 neighbors.sort_by(|a, b| {
-                    (&self.entries[a.0].path, a.1).cmp(&(&self.entries[b.0].path, b.1))
+                    stable_entry_order(&self.entries[a.0], &self.entries[b.0])
+                        .then_with(|| a.1.cmp(&b.1))
                 });
                 neighbors.dedup();
                 for (neighbor_index, rank) in neighbors {
@@ -331,18 +425,21 @@ impl GraphView {
         }
 
         discovered.sort_by(|a, b| {
-            (a.0, a.1, &a.2, &self.entries[a.3].path)
-                .cmp(&(b.0, b.1, &b.2, &self.entries[b.3].path))
+            (a.0, a.1, &a.2)
+                .cmp(&(b.0, b.1, &b.2))
+                .then_with(|| stable_entry_order(&self.entries[a.3], &self.entries[b.3]))
         });
         let mut nodes: Vec<NeighborhoodNode> = discovered
             .into_iter()
             .map(|(hops, _rank, _id, entry_index)| {
                 let entry = &self.entries[entry_index];
                 NeighborhoodNode {
+                    key: entry.key.clone(),
+                    origin: entry.origin.clone(),
                     id: entry.id.clone(),
                     artifact_type: entry.artifact_type.clone(),
                     title: entry.title.clone(),
-                    path: entry.path.clone(),
+                    path: public_path(entry, self.federated),
                     hops,
                 }
             })
@@ -358,7 +455,11 @@ impl GraphView {
     }
 
     pub fn relationship_count(&self) -> usize {
-        self.relationships.len()
+        self.effective_graph.relationships.len()
+    }
+
+    pub fn is_federated(&self) -> bool {
+        self.federated
     }
 
     /// Approximate owned heap payload, excluding hash-table control bytes.
@@ -373,10 +474,19 @@ impl GraphView {
                     + entry.path.len()
                     + entry.aliases.iter().map(String::len).sum::<usize>()
                     + entry.tags.iter().map(String::len).sum::<usize>()
+                    + entry
+                        .artifact_path
+                        .as_ref()
+                        .map_or(0, |path| path.source.len() + path.relative_path.len())
+                    + entry.origin.as_ref().map_or(0, |origin| {
+                        origin.source.len()
+                            + origin.pin.as_ref().map_or(0, String::len)
+                            + origin.alias.as_ref().map_or(0, String::len)
+                    })
             })
             .sum();
-        let relationship_bytes: usize = self
-            .relationships
+        let relationship_bytes = |relationships: &[Relationship]| -> usize {
+            relationships
             .iter()
             .map(|relationship| {
                 relationship.source_path.len()
@@ -384,27 +494,141 @@ impl GraphView {
                     + relationship.target.len()
                     + relationship.resolved_path.as_ref().map_or(0, String::len)
                     + relationship.issue.as_ref().map_or(0, String::len)
+                    + relationship
+                        .source_artifact
+                        .as_ref()
+                        .map_or(0, |path| path.source.len() + path.relative_path.len())
+                    + relationship
+                        .resolved_artifact
+                        .as_ref()
+                        .map_or(0, |path| path.source.len() + path.relative_path.len())
             })
-            .sum();
-        let map_key_bytes = self.aliases.keys().map(String::len).sum::<usize>()
-            + self.entry_by_path.keys().map(String::len).sum::<usize>();
-        let vector_payload_bytes = self
+            .sum()
+        };
+        let relationship_bytes = relationship_bytes(&self.effective_graph.relationships)
+            + self.historical_graph.as_ref().map_or(0, |graph| {
+                relationship_bytes(&graph.relationships)
+            });
+        let map_key_bytes = self.entry_by_path.keys().map(String::len).sum::<usize>()
+            + self
+                .entry_by_artifact_path
+                .keys()
+                .map(|path| path.source.len() + path.relative_path.len())
+                .sum::<usize>();
+        let projection_payload = |graph: &RelationshipProjection| {
+            graph
             .outgoing_by_source
             .iter()
             .map(|indexes| indexes.len() * std::mem::size_of::<usize>())
             .sum::<usize>()
-            + self
+            + graph
                 .incoming_by_target
                 .iter()
                 .map(|indexes| indexes.len() * std::mem::size_of::<usize>())
                 .sum::<usize>()
-            + self
+            + graph
                 .adjacency
                 .iter()
                 .map(|neighbors| neighbors.len() * std::mem::size_of::<(usize, usize)>())
-                .sum::<usize>();
+                .sum::<usize>()
+        };
+        let vector_payload_bytes = projection_payload(&self.effective_graph)
+            + self
+                .historical_graph
+                .as_ref()
+                .map_or(0, projection_payload);
         entry_bytes + relationship_bytes + map_key_bytes + vector_payload_bytes
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rac_engine::corpus::{ArtifactKey, CorpusLayer};
+
+    fn entry(
+        layer: CorpusLayer,
+        id: &str,
+        relative_path: &str,
+        physical_path: &str,
+    ) -> IndexEntry {
+        let origin = layer.origin();
+        IndexEntry {
+            key: Some(ArtifactKey::new(&origin.source, id)),
+            artifact_path: Some(origin.path(relative_path)),
+            origin: Some(origin),
+            id: id.to_string(),
+            artifact_type: "Decision".to_string(),
+            title: None,
+            path: physical_path.to_string(),
+            aliases: vec![id.to_string()],
+            search_sections: Vec::new(),
+            inbound_count: 0,
+            tags: Vec::new(),
+        }
+    }
+
+    fn resolved(entry: &IndexEntry) -> ResolvedArtifact {
+        ResolvedArtifact {
+            key: entry.key.clone(),
+            artifact_path: entry.artifact_path.clone(),
+            origin: entry.origin.clone(),
+            id: entry.id.clone(),
+            artifact_type: entry.artifact_type.clone(),
+            title: entry.title.clone(),
+            path: entry.path.clone(),
+            section: None,
+            snippet: None,
+            evidence: None,
+            recency: None,
+            tags: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn source_aware_endpoints_do_not_alias_physical_or_display_paths() {
+        let parent = entry(
+            CorpusLayer::inherited("acme/standards", "standards", "sha256:0123"),
+            "ADR-PARENT",
+            "decisions/shared.md",
+            "/checkout/vendor/decisions/shared.md",
+        );
+        let local = entry(
+            CorpusLayer::local("acme/app"),
+            "ADR-LOCAL",
+            "decisions/shared.md",
+            "/checkout/decisions/shared.md",
+        );
+        let relationship = Relationship {
+            source_artifact: parent.artifact_path.clone(),
+            source_path: parent.path.clone(),
+            relationship: "depends_on".to_string(),
+            target: "ADR-LOCAL".to_string(),
+            resolved_artifact: local.artifact_path.clone(),
+            resolved_path: Some(local.path.clone()),
+            issue: None,
+        };
+        let parent_artifact = resolved(&parent);
+        let local_artifact = resolved(&local);
+        let view = GraphView::new(vec![parent, local], vec![relationship]);
+
+        assert!(view.is_federated());
+        assert_eq!(view.outgoing(&parent_artifact, false).total, 1);
+        assert_eq!(view.outgoing(&local_artifact, false).total, 0);
+
+        let incoming = view.incoming(&local_artifact, false);
+        assert_eq!(incoming.total, 1);
+        assert_eq!(incoming.items[0].id, "ADR-PARENT");
+        assert_eq!(incoming.items[0].path, "decisions/shared.md");
+        assert_eq!(
+            incoming.items[0]
+                .origin
+                .as_ref()
+                .map(|origin| origin.source.as_str()),
+            Some("acme/standards")
+        );
+    }
+
 }
 
 fn identity_projection(entry: &IndexEntry) -> IndexEntry {
@@ -429,13 +653,17 @@ fn identity_projection(entry: &IndexEntry) -> IndexEntry {
 #[derive(Default)]
 pub struct GraphCache {
     generation: Option<u64>,
+    federated_generation: Option<String>,
     view: Option<GraphView>,
     builds: u64,
 }
 
 impl GraphCache {
     pub fn view_for(&mut self, generation: u64, model: &TrackerModel) -> &GraphView {
-        if self.generation != Some(generation) || self.view.is_none() {
+        if self.generation != Some(generation)
+            || self.federated_generation.is_some()
+            || self.view.is_none()
+        {
             let started = rac_engine::timing::start();
             let replacement = GraphView::from_model(model);
             rac_engine::timing::emit_since(
@@ -449,9 +677,66 @@ impl GraphCache {
             );
             self.view = Some(replacement);
             self.generation = Some(generation);
+            self.federated_generation = None;
             self.builds += 1;
         }
         self.view.as_ref().expect("graph view built")
+    }
+
+    pub fn view_for_composed(
+        &mut self,
+        generation: &str,
+        corpus: &rac_engine::composition::ComposedCorpus,
+    ) -> &GraphView {
+        if self.federated_generation.as_deref() != Some(generation)
+            || self.generation.is_some()
+            || self.view.is_none()
+        {
+            let started = rac_engine::timing::start();
+            let replacement = GraphView::from_composed(corpus);
+            rac_engine::timing::emit_since(
+                "graph.view_build",
+                started,
+                &[
+                    ("entries", replacement.entry_count() as u64),
+                    ("relationships", replacement.relationship_count() as u64),
+                    ("payload_bytes", replacement.estimated_payload_bytes() as u64),
+                ],
+            );
+            self.view = Some(replacement);
+            self.generation = None;
+            self.federated_generation = Some(generation.to_string());
+            self.builds += 1;
+        }
+        self.view.as_ref().expect("federated graph view built")
+    }
+
+    pub fn view_for_graph(
+        &mut self,
+        generation: &str,
+        corpus: &rac_engine::graph_composition::GraphComposition,
+    ) -> &GraphView {
+        if self.federated_generation.as_deref() != Some(generation)
+            || self.generation.is_some()
+            || self.view.is_none()
+        {
+            let started = rac_engine::timing::start();
+            let replacement = GraphView::from_graph(corpus);
+            rac_engine::timing::emit_since(
+                "graph.view_build",
+                started,
+                &[
+                    ("entries", replacement.entry_count() as u64),
+                    ("relationships", replacement.relationship_count() as u64),
+                    ("payload_bytes", replacement.estimated_payload_bytes() as u64),
+                ],
+            );
+            self.view = Some(replacement);
+            self.generation = None;
+            self.federated_generation = Some(generation.to_string());
+            self.builds += 1;
+        }
+        self.view.as_ref().expect("graph federation view built")
     }
 
     #[cfg(test)]

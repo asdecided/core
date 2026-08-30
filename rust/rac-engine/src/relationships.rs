@@ -989,6 +989,7 @@ pub(crate) fn validation_from_rows_with_index(
 pub struct ArtifactRelationships {
     pub path: String,
     pub type_name: String,
+    pub origin: Option<ArtifactOrigin>,
     /// `(snake_section, refs)` in `spec.optional` order.
     pub relationships: Vec<(String, Vec<String>)>,
 }
@@ -1101,11 +1102,71 @@ fn build_report(directory: &str, items: Vec<CorpusItem>, recursive: bool) -> Rel
             artifacts.push(ArtifactRelationships {
                 path: item.path.clone(),
                 type_name: spec.name.clone(),
+                origin: None,
                 relationships,
             });
         }
     }
     let labels = resolution_labels(&artifacts, &items);
+    RelationshipReport {
+        directory: directory.to_string(),
+        recursive,
+        total_files: items.len(),
+        artifacts,
+        labels,
+    }
+}
+
+/// Relationship inspection over the authoritative effective view. Labels
+/// resolve through `ComposedCorpus::resolve`, so qualified aliases and
+/// canonical override redirects match every other reader.
+pub fn build_relationship_report_from_composed(
+    directory: &str,
+    recursive: bool,
+    corpus: &crate::composition::ComposedCorpus,
+) -> RelationshipReport {
+    let items: Vec<&CorpusItem> = corpus.effective().collect();
+    let mut artifacts = Vec::new();
+    for item in &items {
+        let Some(spec) = item.spec else {
+            continue;
+        };
+        let relationships = extract_relationships_full(&item.artifact, spec);
+        if !relationships.is_empty() {
+            artifacts.push(ArtifactRelationships {
+                path: item.path.clone(),
+                type_name: spec.name.clone(),
+                origin: Some(item.origin.clone()),
+                relationships,
+            });
+        }
+    }
+    let mut labels = HashMap::new();
+    for artifact in &artifacts {
+        for (_, references) in &artifact.relationships {
+            for reference in references {
+                let folded = py_casefold(reference);
+                if labels.contains_key(&folded) {
+                    continue;
+                }
+                let Ok(item) = corpus.resolve(reference) else {
+                    continue;
+                };
+                let type_name = item.spec.map(|spec| spec.name.as_str()).unwrap_or("unknown");
+                let display = item
+                    .artifact
+                    .product
+                    .title
+                    .as_deref()
+                    .filter(|title| !title.is_empty())
+                    .unwrap_or(&item.key.canonical_id);
+                labels.insert(
+                    folded,
+                    format!("{display} ({type_name} · {})", item.key.canonical_id),
+                );
+            }
+        }
+    }
     RelationshipReport {
         directory: directory.to_string(),
         recursive,

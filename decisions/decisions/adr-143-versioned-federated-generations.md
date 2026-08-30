@@ -49,7 +49,12 @@ prevent stale inherited governance from being served as current.
 
 ## Status
 
-Accepted
+Superseded
+
+Superseded by ADR-148 for manifest-version-2 closure generations. This ADR's
+single-parent generation, verified reuse, fail-closed freshness, store-layout,
+recency, and no-manifest behavior remain the exact version-1 compatibility
+contract.
 
 ## Category
 
@@ -88,10 +93,12 @@ parent corpus and would misstate provenance.
 - adr-119
 - adr-135
 - adr-138
+- adr-148
 
 ## Related Designs
 
 - corpus-federation-mechanism
+- corpus-federation-graph-composition
 
 ## Related Requirements
 

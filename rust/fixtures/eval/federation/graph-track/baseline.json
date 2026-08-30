@@ -1,0 +1,31 @@
+{
+  "overall": {
+    "p_at_1": 1.0,
+    "p_at_3": 0.333333,
+    "p_at_5": 0.2,
+    "r_at_1": 1.0,
+    "r_at_3": 1.0,
+    "r_at_5": 1.0,
+    "negative_violations": 0
+  },
+  "by_category": {
+    "graph_large_parent": {
+      "p_at_1": 1.0,
+      "r_at_5": 1.0
+    },
+    "graph_transitive_inheritance": {
+      "p_at_1": 1.0,
+      "r_at_5": 1.0
+    }
+  },
+  "by_tool": {
+    "get_related": {
+      "p_at_1": 1.0,
+      "r_at_5": 1.0
+    },
+    "search_artifacts": {
+      "p_at_1": 1.0,
+      "r_at_5": 1.0
+    }
+  }
+}

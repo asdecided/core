@@ -32,6 +32,10 @@ use crate::spec::spec_for;
 pub const OUTCOME_RESOLVED: &str = "resolved";
 pub const OUTCOME_NOT_FOUND: &str = "not-found";
 pub const OUTCOME_DUPLICATE: &str = "duplicate";
+/// Version-2 federation keeps equal canonical ids as distinct source-owned
+/// records. A bare reference to several such records is an ambiguity, not a
+/// duplicate within one corpus.
+pub const OUTCOME_AMBIGUOUS: &str = "ambiguous";
 
 // Match-field tier ladder (ADR-037/038/109): id, title, tags, path, heading,
 // body — lower rank wins.
@@ -1148,7 +1152,7 @@ pub fn artifact_status(artifact: &Artifact) -> String {
 }
 
 /// `agent_rules.is_live_decision`: Accepted and not retired.
-pub(crate) fn is_live_decision(artifact: &Artifact) -> bool {
+pub fn is_live_decision(artifact: &Artifact) -> bool {
     let status = py_casefold(&artifact_status(artifact));
     if status != "accepted" {
         return false;
