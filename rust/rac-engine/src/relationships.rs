@@ -464,6 +464,12 @@ pub fn resolution_index_from_rows(rows: &[ValidationRow]) -> ResolutionIndex {
 pub struct RelationshipIssue {
     pub code: String,
     pub source_path: Option<String>,
+    /// Stable source-relative identity for the artifact which declared the
+    /// relationship. Absent on released single-corpus output and findings
+    /// which span multiple artifacts.
+    pub source_artifact: Option<ArtifactPath>,
+    /// Additive source/layer/pin provenance on composed findings only.
+    pub origin: Option<ArtifactOrigin>,
     pub relationship: Option<String>,
     pub target: Option<String>,
     pub identifier: Option<String>,
@@ -475,11 +481,28 @@ impl RelationshipIssue {
         RelationshipIssue {
             code: code.to_string(),
             source_path: Some(source_path.to_string()),
+            source_artifact: None,
+            origin: None,
             relationship: Some(relationship.to_string()),
             target: Some(target.to_string()),
             identifier: None,
             paths: None,
         }
+    }
+
+    fn reference_from_row(
+        code: &str,
+        row: &ValidationRow,
+        relationship: &str,
+        target: &str,
+        include_provenance: bool,
+    ) -> Self {
+        let mut issue = Self::reference(code, &row.path, relationship, target);
+        if include_provenance {
+            issue.source_artifact = Some(row.artifact_path.clone());
+            issue.origin = Some(row.origin.clone());
+        }
+        issue
     }
 }
 
@@ -582,8 +605,9 @@ fn classify_reference<'a>(
 fn resolve_references(
     rows: &[ValidationRow],
     index: &ResolutionIndex,
+    include_provenance: bool,
 ) -> (usize, Vec<RelationshipIssue>) {
-    let (checked, issues, _) = resolve_references_full(rows, index);
+    let (checked, issues, _) = resolve_references_full(rows, index, include_provenance);
     (checked, issues)
 }
 
@@ -723,6 +747,8 @@ fn cycle_issues(
             issues.push(RelationshipIssue {
                 code: ISSUE_RELATIONSHIP_CYCLE.to_string(),
                 source_path: None,
+                source_artifact: None,
+                origin: None,
                 relationship: Some(kind.to_string()),
                 target: None,
                 identifier: None,
@@ -738,7 +764,11 @@ fn cycle_issues(
     issues
 }
 
-fn scope_validation_issues(directory: &str, rows: &[ValidationRow]) -> Vec<RelationshipIssue> {
+fn scope_validation_issues(
+    directory: &str,
+    rows: &[ValidationRow],
+    include_provenance: bool,
+) -> Vec<RelationshipIssue> {
     let root: PathBuf = repository_root(directory);
     let mut issues = Vec::new();
     for row in rows {
@@ -761,11 +791,12 @@ fn scope_validation_issues(directory: &str, rows: &[ValidationRow]) -> Vec<Relat
                         continue;
                     }
                 }
-                issues.push(RelationshipIssue::reference(
+                issues.push(RelationshipIssue::reference_from_row(
                     ISSUE_SCOPE_TARGET_NOT_FOUND,
-                    &row.path,
+                    row,
                     section,
                     reference,
+                    include_provenance,
                 ));
             }
         }
@@ -780,7 +811,7 @@ pub fn validation_from_rows(
     recursive: bool,
 ) -> RelationshipValidation {
     let index = resolution_index_from_rows(rows);
-    validation_from_rows_with_index(directory, rows, rows, recursive, &index, true)
+    validation_from_rows_with_index(directory, rows, rows, recursive, &index, true, false)
 }
 
 /// Source-aware validation core used by the composed read model. The caller
@@ -793,6 +824,7 @@ pub(crate) fn validation_from_rows_with_index(
     recursive: bool,
     index: &ResolutionIndex,
     include_duplicate_identifiers: bool,
+    include_provenance: bool,
 ) -> RelationshipValidation {
     let mut issues: Vec<RelationshipIssue> = Vec::new();
 
@@ -831,6 +863,8 @@ pub(crate) fn validation_from_rows_with_index(
             issues.push(RelationshipIssue {
                 code: ISSUE_DUPLICATE_IDENTIFIER.to_string(),
                 source_path: None,
+                source_artifact: None,
+                origin: None,
                 relationship: None,
                 target: None,
                 identifier: Some(display),
@@ -848,6 +882,8 @@ pub(crate) fn validation_from_rows_with_index(
             issues.push(RelationshipIssue {
                 code: ISSUE_EDGE_UNSUPPORTED.to_string(),
                 source_path: Some(row.path.clone()),
+                source_artifact: include_provenance.then(|| row.artifact_path.clone()),
+                origin: include_provenance.then(|| row.origin.clone()),
                 relationship: Some(snake(section)),
                 target: None,
                 identifier: None,
@@ -882,11 +918,12 @@ pub(crate) fn validation_from_rows_with_index(
                     continue;
                 };
                 if !edge.range.contains(&target_spec) {
-                    issues.push(RelationshipIssue::reference(
+                    issues.push(RelationshipIssue::reference_from_row(
                         ISSUE_TARGET_TYPE_MISMATCH,
-                        &row.path,
+                        row,
                         section,
                         reference,
+                        include_provenance,
                     ));
                 }
             }
@@ -913,11 +950,12 @@ pub(crate) fn validation_from_rows_with_index(
                     .get(&target.key)
                     .is_some_and(|target_row| target_row.retired)
                 {
-                    issues.push(RelationshipIssue::reference(
+                    issues.push(RelationshipIssue::reference_from_row(
                         ISSUE_TARGET_SUPERSEDED,
-                        &row.path,
+                        row,
                         section,
                         reference,
+                        include_provenance,
                     ));
                 }
             }
@@ -928,11 +966,11 @@ pub(crate) fn validation_from_rows_with_index(
     issues.extend(cycle_issues(rows, target_rows, index));
 
     // Referential integrity.
-    let (checked, ref_issues) = resolve_references(rows, index);
+    let (checked, ref_issues) = resolve_references(rows, index, include_provenance);
     issues.extend(ref_issues);
 
     // Code-scope existence (appended last).
-    issues.extend(scope_validation_issues(directory, rows));
+    issues.extend(scope_validation_issues(directory, rows, include_provenance));
 
     RelationshipValidation {
         directory: directory.to_string(),
@@ -1248,8 +1286,8 @@ pub fn validate_document_against_corpus(
 /// uniquely to another artifact.
 #[derive(Debug, Clone)]
 pub struct Relationship {
-    /// Stable source-aware endpoint. `None` only when reconstructed from the
-    /// pre-federation v1 persistent store; the v2 cutover owns its codec.
+    /// Stable source-aware endpoint. `None` remains representable for
+    /// unresolved/external edges and legacy compatibility fixtures.
     pub source_artifact: Option<ArtifactPath>,
     pub source_path: String,
     pub relationship: String,
@@ -1343,6 +1381,7 @@ pub struct RelationshipSummary {
 fn resolve_references_full(
     rows: &[ValidationRow],
     index: &ResolutionIndex,
+    include_provenance: bool,
 ) -> (
     usize,
     Vec<RelationshipIssue>,
@@ -1371,7 +1410,13 @@ fn resolve_references_full(
                     ReferenceResolution::Ambiguous => ISSUE_TARGET_AMBIGUOUS,
                     ReferenceResolution::SelfRef => ISSUE_SELF_REFERENCE,
                 };
-                issues.push(RelationshipIssue::reference(code, &row.path, section, reference));
+                issues.push(RelationshipIssue::reference_from_row(
+                    code,
+                    row,
+                    section,
+                    reference,
+                    include_provenance,
+                ));
             }
         }
     }
@@ -1380,6 +1425,18 @@ fn resolve_references_full(
 
 /// `summary_from_rows(rows)`.
 pub fn summary_from_rows(rows: &[ValidationRow]) -> RelationshipSummary {
+    let index = resolution_index_from_rows(rows);
+    summary_from_rows_with_index(rows, &index, false)
+}
+
+/// Relationship summary against an already-authoritative resolution index.
+/// The composed read model uses this seam so qualified aliases and override
+/// redirects cannot diverge from point lookup or graph construction.
+pub(crate) fn summary_from_rows_with_index(
+    rows: &[ValidationRow],
+    index: &ResolutionIndex,
+    include_provenance: bool,
+) -> RelationshipSummary {
     if rows.is_empty() {
         return RelationshipSummary {
             total: 0,
@@ -1390,8 +1447,8 @@ pub fn summary_from_rows(rows: &[ValidationRow]) -> RelationshipSummary {
             issues: Vec::new(),
         };
     }
-    let index = resolution_index_from_rows(rows);
-    let (checked, ref_issues, resolved_targets) = resolve_references_full(rows, &index);
+    let (checked, ref_issues, resolved_targets) =
+        resolve_references_full(rows, index, include_provenance);
     let broken = ref_issues.len();
     let valid = checked - broken;
 

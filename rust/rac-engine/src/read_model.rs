@@ -185,12 +185,14 @@ pub fn store_search(
 
 /// Live-decision topic search served from the store (ADR-067): the
 /// decision-typed search, then the liveness filter over the precomputed
-/// live-decision paths — `ReadModelView.find_decisions`.
+/// source-aware live-decision keys — `ReadModelView.find_decisions`.
 pub fn store_find_decisions(reader: &MmapIndexReader, topic: &str) -> SearchResult {
     let mut result = store_search(reader, topic, Some("decision"), &[], false);
-    let live: std::collections::HashSet<String> =
-        reader.live_decision_paths().unwrap_or_default().into_iter().collect();
-    result.matches.retain(|m| live.contains(&m.path));
+    let live_keys: std::collections::HashSet<_> =
+        reader.live_decision_keys().unwrap_or_default().into_iter().collect();
+    result
+        .matches
+        .retain(|m| m.key.as_ref().is_some_and(|key| live_keys.contains(key)));
     result
 }
 
@@ -215,7 +217,7 @@ pub fn store_resolve(
     if docids.len() > 1 {
         let mut paths: Vec<String> = docids
             .iter()
-            .filter_map(|&docid| reader.entry_path(docid).ok())
+            .filter_map(|&docid| reader.identity_entry(docid).ok().map(|entry| entry.path))
             .collect();
         paths.sort();
         return crate::resolve::ResolutionResult {
@@ -251,7 +253,7 @@ pub fn store_resolve(
 pub fn store_identity_entries(
     reader: &MmapIndexReader,
 ) -> Vec<crate::resolve::IndexEntry> {
-    (0..reader.doc_count)
+    (0..reader.identity_count().unwrap_or(0))
         .filter_map(|docid| reader.identity_entry(docid).ok())
         .collect()
 }
@@ -263,7 +265,25 @@ pub fn find_decisions_in(
     live_paths: &[String],
     topic: &str,
 ) -> SearchResult {
+    find_decisions_in_source_aware(entries, &[], live_paths, topic)
+}
+
+/// Source-aware live-decision filter for a composed cold model. Empty
+/// `live_keys` retains the released display-path behaviour.
+pub fn find_decisions_in_source_aware(
+    entries: &[crate::resolve::IndexEntry],
+    live_keys: &[crate::corpus::ArtifactKey],
+    live_paths: &[String],
+    topic: &str,
+) -> SearchResult {
     let mut result = crate::resolve::search_index(entries, topic, Some("decision"), &[]);
+    if !live_keys.is_empty() {
+        let live: std::collections::HashSet<_> = live_keys.iter().collect();
+        result
+            .matches
+            .retain(|m| m.key.as_ref().is_some_and(|key| live.contains(key)));
+        return result;
+    }
     let live: std::collections::HashSet<&str> = live_paths.iter().map(String::as_str).collect();
     result.matches.retain(|m| live.contains(m.path.as_str()));
     result

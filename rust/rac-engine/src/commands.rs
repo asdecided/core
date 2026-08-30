@@ -3,6 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::corpus::{ArtifactOrigin, CorpusLayer};
 use crate::output;
 use crate::parse::{parse_file, parse_text, Artifact, Issue};
 use crate::relationships::{
@@ -59,6 +60,10 @@ pub struct FileValidation {
     pub artifact_type: String,
     pub status: &'static str,
     pub issues: Vec<Issue>,
+    /// Stable source and layer identity for rows built from a composed corpus.
+    /// Released single-corpus validation leaves this absent so its rendered
+    /// output remains byte-identical.
+    pub origin: Option<ArtifactOrigin>,
 }
 
 pub struct DirectoryValidation {
@@ -126,6 +131,7 @@ pub fn validate_directory(directory: &str, recursive: bool) -> DirectoryValidati
                     artifact_type,
                     status: STATUS_SKIPPED,
                     issues: Vec::new(),
+                    origin: None,
                 };
             }
             let issues = apply_overrides(
@@ -143,6 +149,7 @@ pub fn validate_directory(directory: &str, recursive: bool) -> DirectoryValidati
                 artifact_type,
                 status,
                 issues,
+                origin: None,
             }
         })
         .collect();
@@ -191,6 +198,7 @@ pub(crate) fn validate_directory_from_items(
                     artifact_type,
                     status: STATUS_SKIPPED,
                     issues: Vec::new(),
+                    origin: Some(item.origin.clone()),
                 };
             }
             let issues = if item.origin.layer == crate::corpus::Layer::Inherited {
@@ -212,6 +220,7 @@ pub(crate) fn validate_directory_from_items(
                 artifact_type,
                 status,
                 issues,
+                origin: Some(item.origin.clone()),
             }
         })
         .collect();
@@ -448,6 +457,7 @@ pub fn validate_directory_incremental_in(
                     line: i.line.map(i64::from),
                 })
                 .collect(),
+            origin: None,
         });
         let file_name = entry
             .display
@@ -565,6 +575,25 @@ fn read_validate_input(target: &str) -> Result<Artifact, i32> {
     read_named_file(target)
 }
 
+/// Recover the declared inherited identity for a composed-corpus load error.
+/// A malformed or unreadable manifest has no trustworthy provenance, while a
+/// successfully parsed declaration can still identify failures from later
+/// materialisation, pin, or composition checks.
+fn manifest_failure_origin(directory: &str) -> Option<ArtifactOrigin> {
+    let repository_root = crate::validate::repository_root(directory);
+    let manifest = crate::federation::load_manifest(&repository_root)
+        .ok()
+        .flatten()?;
+    Some(
+        CorpusLayer::inherited(
+            manifest.inherits.source,
+            manifest.inherits.alias,
+            manifest.inherits.digest,
+        )
+        .origin(),
+    )
+}
+
 pub fn cmd_validate(args: &ValidateArgs) -> i32 {
     // Directory? Validate every recognized artifact beneath it.
     if args.file != "-" && Path::new(&args.file).is_dir() {
@@ -586,22 +615,26 @@ pub fn cmd_validate(args: &ValidateArgs) -> i32 {
                 validate_directory_incremental(&args.file, !args.top_level, args.verify)
             }
             Ok(None) => validate_directory(&args.file, !args.top_level),
-            Err(error) => DirectoryValidation {
-                directory: args.file.clone(),
-                recursive: !args.top_level,
-                files: vec![FileValidation {
-                    path: crate::federation::MANIFEST_RELATIVE_PATH.to_string(),
-                    artifact_type: "corpus-manifest".to_string(),
-                    status: STATUS_INVALID,
-                    issues: vec![Issue::new(
-                        "error",
-                        error.stable_code(),
-                        error.to_string(),
-                        None,
-                    )],
-                }],
-                okf: None,
-            },
+            Err(error) => {
+                let origin = manifest_failure_origin(&args.file);
+                DirectoryValidation {
+                    directory: args.file.clone(),
+                    recursive: !args.top_level,
+                    files: vec![FileValidation {
+                        path: crate::federation::MANIFEST_RELATIVE_PATH.to_string(),
+                        artifact_type: "corpus-manifest".to_string(),
+                        status: STATUS_INVALID,
+                        issues: vec![Issue::new(
+                            "error",
+                            error.stable_code(),
+                            error.to_string(),
+                            None,
+                        )],
+                        origin,
+                    }],
+                    okf: None,
+                }
+            }
         };
         if args.sarif {
             emit(output::render_validate_sarif(&result));
@@ -2750,4 +2783,117 @@ pub fn cmd_telemetry(args: &TelemetryArgs) -> i32 {
         }
     }
     EXIT_OK
+}
+
+#[cfg(test)]
+mod validation_provenance_tests {
+    use std::fs;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use super::*;
+
+    static COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+    fn scratch() -> PathBuf {
+        let count = COUNTER.fetch_add(1, Ordering::SeqCst);
+        let root = std::env::temp_dir().join(format!(
+            "asdecided-validation-provenance-{}-{count}",
+            std::process::id()
+        ));
+        fs::create_dir_all(root.join(".decided")).unwrap();
+        fs::create_dir_all(root.join("decisions")).unwrap();
+        root
+    }
+
+    fn validation(origin: Option<ArtifactOrigin>) -> DirectoryValidation {
+        DirectoryValidation {
+            directory: "decisions".to_string(),
+            recursive: true,
+            files: vec![FileValidation {
+                path: "decisions/example.md".to_string(),
+                artifact_type: "Decision".to_string(),
+                status: STATUS_INVALID,
+                issues: vec![Issue::new(
+                    "error",
+                    "missing-title",
+                    "Title is required.".to_string(),
+                    Some(3),
+                )],
+                origin,
+            }],
+            okf: None,
+        }
+    }
+
+    #[test]
+    fn composed_validation_adds_machine_provenance_only() {
+        let legacy = validation(None);
+        let composed = validation(Some(
+            CorpusLayer::inherited(
+                "acme/standards",
+                "standards",
+                "sha256:0123456789abcdef",
+            )
+            .origin(),
+        ));
+
+        assert_eq!(
+            output::render_validate_dir_human(&legacy),
+            output::render_validate_dir_human(&composed)
+        );
+
+        let legacy_json: serde_json::Value =
+            serde_json::from_str(&output::render_validate_dir_json(&legacy)).unwrap();
+        assert!(legacy_json["files"][0].get("provenance").is_none());
+        let composed_json: serde_json::Value =
+            serde_json::from_str(&output::render_validate_dir_json(&composed)).unwrap();
+        assert_eq!(
+            composed_json["files"][0]["provenance"],
+            serde_json::json!({
+                "layer": "inherited",
+                "pin": "sha256:0123456789abcdef",
+                "source": "acme/standards",
+            })
+        );
+
+        let legacy_sarif: serde_json::Value =
+            serde_json::from_str(&output::render_validate_sarif(&legacy)).unwrap();
+        assert!(legacy_sarif["runs"][0]["results"][0]
+            .get("properties")
+            .is_none());
+        let composed_sarif: serde_json::Value =
+            serde_json::from_str(&output::render_validate_sarif(&composed)).unwrap();
+        assert_eq!(
+            composed_sarif["runs"][0]["results"][0]["properties"],
+            composed_json["files"][0]["provenance"]
+        );
+    }
+
+    #[test]
+    fn parsed_manifest_identity_provenances_later_load_failures() {
+        let root = scratch();
+        fs::write(
+            root.join(".decided/config.yaml"),
+            "repository_key: APP\ncorpus:\n  source: acme/app\n",
+        )
+        .unwrap();
+        let pin = format!("sha256:{}", "0".repeat(64));
+        fs::write(
+            root.join(crate::federation::MANIFEST_RELATIVE_PATH),
+            format!(
+                "# Corpus\n\n## inherits\n\n```yaml\nversion: 1\nalias: standards\n\
+                 source: acme/standards\nroot: vendor/standards\ncorpus: decisions\n\
+                 digest: {pin}\n```\n"
+            ),
+        )
+        .unwrap();
+
+        let origin = manifest_failure_origin(&root.join("decisions").to_string_lossy()).unwrap();
+        assert_eq!(origin.source, "acme/standards");
+        assert_eq!(origin.layer, crate::corpus::Layer::Inherited);
+        assert_eq!(origin.alias.as_deref(), Some("standards"));
+        assert_eq!(origin.pin.as_deref(), Some(pin.as_str()));
+
+        fs::remove_dir_all(root).unwrap();
+    }
 }

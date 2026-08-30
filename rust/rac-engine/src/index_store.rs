@@ -14,7 +14,8 @@ use std::path::{Path, PathBuf};
 use memmap2::Mmap;
 use serde_json::Value;
 
-use crate::derived::DerivedIndex;
+use crate::corpus::{ArtifactKey, ArtifactOrigin, ArtifactPath, CorpusLayer, Layer};
+use crate::derived::{CanonicalRedirect, DerivedIndex, SourceAwareArtifact};
 use crate::index_format::{
     encode_segment, segment_payload, write_indexed, IndexFormatError, IndexedSegment, Reader,
     Writer,
@@ -28,10 +29,14 @@ use crate::walk::find_markdown_files;
 pub const FIELDS: [&str; 6] = ["id", "title", "path", "heading", "body", "tags"];
 
 pub const STORE_DIRNAME: &str = "store";
-pub const STORE_LAYOUT_VERSION: &str = "v1";
+/// The source-aware store layout. The pre-federation `store/v1` tree is
+/// deliberately never opened as v2; it therefore degrades to an ordinary
+/// cache miss instead of being reinterpreted without provenance (ADR-143).
+pub const STORE_LAYOUT_VERSION: &str = "v2";
 
 const SEG_HEADER: &str = "header.seg";
 const SEG_ENTRIES: &str = "entries.seg";
+const SEG_IDENTITIES: &str = "identities.seg";
 const SEG_SECTIONS: &str = "sections.seg";
 const SEG_TOKENS: &str = "tokens.seg";
 const SEG_TERMDICT: &str = "termdict.seg";
@@ -42,10 +47,15 @@ const SEG_SCOPE: &str = "scope.seg";
 const SEG_PORTFOLIO: &str = "portfolio.seg";
 const SEG_ALIASMAP: &str = "aliasmap.seg";
 const SEG_PATHMAP: &str = "pathmap.seg";
+const SEG_KEYMAP: &str = "keymap.seg";
+const SEG_ARTIFACTPATHMAP: &str = "artifactpathmap.seg";
+const SEG_LAYERS: &str = "layers.seg";
+const SEG_REDIRECTS: &str = "redirects.seg";
 
-const ALL_SEGMENTS: [&str; 12] = [
+const ALL_SEGMENTS: [&str; 17] = [
     SEG_HEADER,
     SEG_ENTRIES,
+    SEG_IDENTITIES,
     SEG_SECTIONS,
     SEG_TOKENS,
     SEG_TERMDICT,
@@ -56,6 +66,10 @@ const ALL_SEGMENTS: [&str; 12] = [
     SEG_PORTFOLIO,
     SEG_ALIASMAP,
     SEG_PATHMAP,
+    SEG_KEYMAP,
+    SEG_ARTIFACTPATHMAP,
+    SEG_LAYERS,
+    SEG_REDIRECTS,
 ];
 
 /// The pinned scoring-constant fingerprint (spec/index-store-format.md §3.1).
@@ -107,6 +121,145 @@ pub fn store_dir(cache_dir: &Path, corpus_hash: &str) -> PathBuf {
 // Writer — one DerivedIndex -> a directory of segment files, atomically.
 // ---------------------------------------------------------------------------
 
+fn write_presence(writer: &mut Writer, present: bool) -> Result<(), IndexFormatError> {
+    writer.u32(u64::from(present))
+}
+
+fn read_presence(reader: &mut Reader<'_>, field: &str) -> Result<bool, IndexFormatError> {
+    match reader.u32()? {
+        0 => Ok(false),
+        1 => Ok(true),
+        value => Err(IndexFormatError(format!(
+            "invalid {field} presence flag: {value}"
+        ))),
+    }
+}
+
+fn write_artifact_key(
+    writer: &mut Writer,
+    key: Option<&ArtifactKey>,
+) -> Result<(), IndexFormatError> {
+    write_presence(writer, key.is_some())?;
+    if let Some(key) = key {
+        writer.text(&key.source)?;
+        writer.text(&key.canonical_id)?;
+    }
+    Ok(())
+}
+
+fn read_artifact_key(reader: &mut Reader<'_>) -> Result<Option<ArtifactKey>, IndexFormatError> {
+    if !read_presence(reader, "artifact-key")? {
+        return Ok(None);
+    }
+    Ok(Some(ArtifactKey::new(reader.text()?, reader.text()?)))
+}
+
+fn write_artifact_path(
+    writer: &mut Writer,
+    path: Option<&ArtifactPath>,
+) -> Result<(), IndexFormatError> {
+    write_presence(writer, path.is_some())?;
+    if let Some(path) = path {
+        writer.text(&path.source)?;
+        writer.text(&path.relative_path)?;
+    }
+    Ok(())
+}
+
+fn read_artifact_path(reader: &mut Reader<'_>) -> Result<Option<ArtifactPath>, IndexFormatError> {
+    if !read_presence(reader, "artifact-path")? {
+        return Ok(None);
+    }
+    Ok(Some(ArtifactPath::new(reader.text()?, reader.text()?)))
+}
+
+fn write_origin(
+    writer: &mut Writer,
+    origin: Option<&ArtifactOrigin>,
+) -> Result<(), IndexFormatError> {
+    write_presence(writer, origin.is_some())?;
+    if let Some(origin) = origin {
+        writer.text(&origin.source)?;
+        writer.text(origin.layer.as_str())?;
+        writer.opt_text(origin.pin.as_deref())?;
+        writer.opt_text(origin.alias.as_deref())?;
+    }
+    Ok(())
+}
+
+fn read_origin(reader: &mut Reader<'_>) -> Result<Option<ArtifactOrigin>, IndexFormatError> {
+    if !read_presence(reader, "artifact-origin")? {
+        return Ok(None);
+    }
+    let source = reader.text()?;
+    let layer = match reader.text()?.as_str() {
+        "local" => Layer::Local,
+        "inherited" => Layer::Inherited,
+        other => return Err(IndexFormatError(format!("invalid corpus layer: {other}"))),
+    };
+    Ok(Some(ArtifactOrigin {
+        source,
+        layer,
+        pin: reader.opt_text()?,
+        alias: reader.opt_text()?,
+    }))
+}
+
+fn write_layer(writer: &mut Writer, layer: &CorpusLayer) -> Result<(), IndexFormatError> {
+    writer.text(&layer.source)?;
+    writer.text(layer.layer.as_str())?;
+    writer.opt_text(layer.pin.as_deref())?;
+    writer.opt_text(layer.alias.as_deref())?;
+    Ok(())
+}
+
+fn read_layer(reader: &mut Reader<'_>) -> Result<CorpusLayer, IndexFormatError> {
+    let source = reader.text()?;
+    let layer = match reader.text()?.as_str() {
+        "local" => Layer::Local,
+        "inherited" => Layer::Inherited,
+        other => return Err(IndexFormatError(format!("invalid corpus layer: {other}"))),
+    };
+    Ok(CorpusLayer {
+        source,
+        layer,
+        pin: reader.opt_text()?,
+        alias: reader.opt_text()?,
+    })
+}
+
+fn write_identity_entry(
+    writer: &mut Writer,
+    entry: &IndexEntry,
+) -> Result<(), IndexFormatError> {
+    writer.text(&entry.id)?;
+    writer.text(&entry.artifact_type)?;
+    writer.opt_text(entry.title.as_deref())?;
+    writer.text(&entry.path)?;
+    writer.text_list(&entry.aliases)?;
+    writer.text_list(&entry.tags)?;
+    write_artifact_key(writer, entry.key.as_ref())?;
+    write_artifact_path(writer, entry.artifact_path.as_ref())?;
+    write_origin(writer, entry.origin.as_ref())?;
+    Ok(())
+}
+
+fn read_identity_entry(reader: &mut Reader<'_>) -> Result<IndexEntry, IndexFormatError> {
+    Ok(IndexEntry {
+        id: reader.text()?,
+        artifact_type: reader.text()?,
+        title: reader.opt_text()?,
+        path: reader.text()?,
+        aliases: reader.text_list()?,
+        tags: reader.text_list()?,
+        key: read_artifact_key(reader)?,
+        artifact_path: read_artifact_path(reader)?,
+        origin: read_origin(reader)?,
+        search_sections: Vec::new(),
+        inbound_count: 0,
+    })
+}
+
 fn encode_segments(
     corpus_hash: &str,
     bundle_version: &str,
@@ -114,6 +267,23 @@ fn encode_segments(
 ) -> Result<Vec<(&'static str, Vec<u8>)>, IndexFormatError> {
     let entries = &derived.index_entries;
     let field_tokens = &derived.field_tokens;
+    if derived.source_artifacts.len() != entries.len() {
+        return Err(IndexFormatError(
+            "source-aware artifact rows are not parallel to index entries".into(),
+        ));
+    }
+    for entry in &derived.resolution.entries {
+        if entry.key.is_none() || entry.artifact_path.is_none() || entry.origin.is_none() {
+            return Err(IndexFormatError(
+                "v2 identity rows require key, artifact path, and origin".into(),
+            ));
+        }
+    }
+    if derived.live_decision_keys.len() != derived.live_decision_paths.len() {
+        return Err(IndexFormatError(
+            "live decision keys are not parallel to display paths".into(),
+        ));
+    }
 
     // Global vocabulary -> sorted term dictionary -> term id (code-point
     // order — BTreeMap keys iterate sorted).
@@ -135,10 +305,13 @@ fn encode_segments(
     let mut section_rows: Vec<Vec<u8>> = Vec::with_capacity(entries.len());
     let mut token_rows: Vec<Vec<u8>> = Vec::with_capacity(entries.len());
     let mut postings_lists: Vec<Vec<u32>> = vec![Vec::new(); termdict.len()];
-    // Casefolded identifier -> ascending docids (consecutive-dup guarded).
-    let mut alias_docids: BTreeMap<String, Vec<u32>> = BTreeMap::new();
-
     for (docid, entry) in entries.iter().enumerate() {
+        let source_artifact = &derived.source_artifacts[docid];
+        if source_artifact.display_path != entry.path {
+            return Err(IndexFormatError(
+                "source-aware display path does not match index entry".into(),
+            ));
+        }
         let docid = docid as u32;
         let fields = &field_tokens[docid as usize];
         let lengths: Vec<u64> = FIELDS
@@ -147,13 +320,6 @@ fn encode_segments(
             .collect();
         for (i, value) in lengths.iter().enumerate() {
             length_sums[i] += value;
-        }
-
-        for alias in &entry.aliases {
-            let docids = alias_docids.entry(py_casefold(alias)).or_default();
-            if docids.last() != Some(&docid) {
-                docids.push(docid);
-            }
         }
 
         let mut row = Writer::new();
@@ -167,6 +333,9 @@ fn encode_segments(
         for value in &lengths {
             row.u32(*value)?;
         }
+        write_artifact_key(&mut row, Some(&source_artifact.key))?;
+        write_artifact_path(&mut row, Some(&source_artifact.path))?;
+        write_origin(&mut row, Some(&source_artifact.origin))?;
         entry_rows.push(row.payload());
 
         let mut sec = Writer::new();
@@ -197,9 +366,24 @@ fn encode_segments(
     let n_entries = entries.len() as u64;
     let n_terms = termdict.len() as u64;
 
-    let mut out: Vec<(&'static str, Vec<u8>)> = Vec::with_capacity(12);
+    let mut out: Vec<(&'static str, Vec<u8>)> = Vec::with_capacity(17);
     out.push((SEG_ENTRIES, encode_segment(&write_indexed(&entry_rows)?)));
     drop(entry_rows);
+    let identity_rows: Vec<Vec<u8>> = derived
+        .resolution
+        .entries
+        .iter()
+        .map(|entry| {
+            let mut row = Writer::new();
+            write_identity_entry(&mut row, entry)?;
+            Ok(row.payload())
+        })
+        .collect::<Result<_, IndexFormatError>>()?;
+    out.push((
+        SEG_IDENTITIES,
+        encode_segment(&write_indexed(&identity_rows)?),
+    ));
+    drop(identity_rows);
     out.push((SEG_SECTIONS, encode_segment(&write_indexed(&section_rows)?)));
     drop(section_rows);
     out.push((SEG_TOKENS, encode_segment(&write_indexed(&token_rows)?)));
@@ -228,6 +412,19 @@ fn encode_segments(
     out.push((SEG_TERMDICT, encode_segment(&write_indexed(&termdict_rows)?)));
     drop(termdict_rows);
 
+    // The central identity projection, not the searchable effective rows,
+    // owns exact point resolution. In federation this retains qualified
+    // parent aliases and canonical override redirects.
+    let mut alias_docids: BTreeMap<String, Vec<u32>> = BTreeMap::new();
+    for (docid, entry) in derived.resolution.entries.iter().enumerate() {
+        let docid = docid as u32;
+        for alias in &entry.aliases {
+            let docids = alias_docids.entry(py_casefold(alias)).or_default();
+            if docids.last() != Some(&docid) {
+                docids.push(docid);
+            }
+        }
+    }
     let aliasmap_rows: Vec<Vec<u8>> = alias_docids
         .iter()
         .map(|(key, docids)| {
@@ -260,6 +457,69 @@ fn encode_segments(
     out.push((SEG_PATHMAP, encode_segment(&write_indexed(&pathmap_rows)?)));
     drop(pathmap_rows);
 
+    let mut key_docids: BTreeMap<&ArtifactKey, Vec<u32>> = BTreeMap::new();
+    for (docid, entry) in derived.resolution.entries.iter().enumerate() {
+        key_docids
+            .entry(entry.key.as_ref().expect("identity key checked"))
+            .or_default()
+            .push(docid as u32);
+    }
+    let keymap_rows: Vec<Vec<u8>> = key_docids
+        .iter()
+        .map(|(key, docids)| {
+            let mut w = Writer::new();
+            w.text(&key.source)?;
+            w.text(&key.canonical_id)?;
+            w.u32_list(docids)?;
+            Ok(w.payload())
+        })
+        .collect::<Result<_, IndexFormatError>>()?;
+    out.push((SEG_KEYMAP, encode_segment(&write_indexed(&keymap_rows)?)));
+
+    let mut artifact_path_pairs: Vec<(&ArtifactPath, u32)> = derived
+        .resolution
+        .entries
+        .iter()
+        .enumerate()
+        .map(|(docid, entry)| {
+            (
+                entry.artifact_path.as_ref().expect("identity path checked"),
+                docid as u32,
+            )
+        })
+        .collect();
+    artifact_path_pairs.sort_by(|(left, _), (right, _)| left.cmp(right));
+    let artifactpathmap_rows: Vec<Vec<u8>> = artifact_path_pairs
+        .iter()
+        .map(|(path, docid)| {
+            let mut w = Writer::new();
+            w.text(&path.source)?;
+            w.text(&path.relative_path)?;
+            w.u32(u64::from(*docid))?;
+            Ok(w.payload())
+        })
+        .collect::<Result<_, IndexFormatError>>()?;
+    out.push((
+        SEG_ARTIFACTPATHMAP,
+        encode_segment(&write_indexed(&artifactpathmap_rows)?),
+    ));
+
+    let mut layers = Writer::new();
+    layers.u32(derived.layers.len() as u64)?;
+    for layer in &derived.layers {
+        write_layer(&mut layers, layer)?;
+    }
+    out.push((SEG_LAYERS, encode_segment(&layers.payload())));
+
+    let mut redirects = Writer::new();
+    redirects.u32(derived.resolution.canonical_redirects.len() as u64)?;
+    for redirect in &derived.resolution.canonical_redirects {
+        write_artifact_key(&mut redirects, Some(&redirect.parent))?;
+        write_artifact_key(&mut redirects, Some(&redirect.replacement))?;
+        write_artifact_key(&mut redirects, Some(&redirect.rationale))?;
+    }
+    out.push((SEG_REDIRECTS, encode_segment(&redirects.payload())));
+
     let mut relationships = Writer::new();
     relationships.u32(derived.relationships.len() as u64)?;
     for rel in &derived.relationships {
@@ -268,16 +528,29 @@ fn encode_segments(
         relationships.text(&rel.target)?;
         relationships.opt_text(rel.resolved_path.as_deref())?;
         relationships.opt_text(rel.issue.as_deref())?;
+        write_artifact_path(&mut relationships, rel.source_artifact.as_ref())?;
+        write_artifact_path(&mut relationships, rel.resolved_artifact.as_ref())?;
     }
     out.push((SEG_RELATIONSHIPS, encode_segment(&relationships.payload())));
 
     let mut live = Writer::new();
-    live.text_list(&derived.live_decision_paths)?;
+    live.u32(derived.live_decision_keys.len() as u64)?;
+    for (key, path) in derived
+        .live_decision_keys
+        .iter()
+        .zip(&derived.live_decision_paths)
+    {
+        write_artifact_key(&mut live, Some(key))?;
+        live.text(path)?;
+    }
     out.push((SEG_LIVE, encode_segment(&live.payload())));
 
     let mut scope = Writer::new();
     scope.u32(derived.scope_rows.len() as u64)?;
     for row in &derived.scope_rows {
+        write_artifact_key(&mut scope, row.key.as_ref())?;
+        write_artifact_path(&mut scope, row.artifact_path.as_ref())?;
+        write_origin(&mut scope, row.origin.as_ref())?;
         scope.text(&row.id)?;
         scope.text(&row.title)?;
         scope.text(&row.status)?;
@@ -532,26 +805,11 @@ impl MmapIndexReader {
 
     /// The lightweight identity row (no sections, no inbound).
     pub fn identity_entry(&self, docid: u32) -> Result<IndexEntry, IndexFormatError> {
-        let mut reader = self.indexed(SEG_ENTRIES)?.row(docid)?;
-        let id = reader.text()?;
-        let artifact_type = reader.text()?;
-        let title = reader.opt_text()?;
-        let path = reader.text()?;
-        let aliases = reader.text_list()?;
-        let tags = reader.text_list()?;
-        Ok(IndexEntry {
-            key: None,
-            artifact_path: None,
-            origin: None,
-            id,
-            artifact_type,
-            title,
-            path,
-            aliases,
-            search_sections: Vec::new(),
-            inbound_count: 0,
-            tags,
-        })
+        read_identity_entry(&mut self.indexed(SEG_IDENTITIES)?.row(docid)?)
+    }
+
+    pub fn identity_count(&self) -> Result<u32, IndexFormatError> {
+        Ok(self.indexed(SEG_IDENTITIES)?.count())
     }
 
     /// The full index row: identity plus searchable sections and inbound.
@@ -564,11 +822,17 @@ impl MmapIndexReader {
         let aliases = reader.text_list()?;
         let tags = reader.text_list()?;
         let inbound = reader.u32()?;
+        for _ in 0..6 {
+            reader.u32()?; // field lengths
+        }
+        let key = read_artifact_key(&mut reader)?;
+        let artifact_path = read_artifact_path(&mut reader)?;
+        let origin = read_origin(&mut reader)?;
         let sections = self.read_sections(docid)?;
         Ok(IndexEntry {
-            key: None,
-            artifact_path: None,
-            origin: None,
+            key,
+            artifact_path,
+            origin,
             id,
             artifact_type,
             title,
@@ -577,6 +841,26 @@ impl MmapIndexReader {
             search_sections: sections,
             inbound_count: i64::from(inbound),
             tags,
+        })
+    }
+
+    /// Stable source-aware identity parallel to one persisted index row.
+    pub fn source_artifact(&self, docid: u32) -> Result<SourceAwareArtifact, IndexFormatError> {
+        let entry = self.identity_entry(docid)?;
+        let key = entry
+            .key
+            .ok_or_else(|| IndexFormatError("v2 entry is missing its artifact key".into()))?;
+        let path = entry
+            .artifact_path
+            .ok_or_else(|| IndexFormatError("v2 entry is missing its artifact path".into()))?;
+        let origin = entry
+            .origin
+            .ok_or_else(|| IndexFormatError("v2 entry is missing its origin".into()))?;
+        Ok(SourceAwareArtifact {
+            key,
+            path,
+            origin,
+            display_path: entry.path,
         })
     }
 
@@ -773,26 +1057,151 @@ impl MmapIndexReader {
         Ok(None)
     }
 
+    /// Resolve the stable `(source, canonical_id)` identity to every matching
+    /// docid. More than one result remains observable as an ambiguity rather
+    /// than acquiring iteration-order precedence.
+    pub fn docids_for_key(&self, key: &ArtifactKey) -> Result<Vec<u32>, IndexFormatError> {
+        let segment = self.indexed(SEG_KEYMAP)?;
+        let (mut lo, mut hi) = (0u32, segment.count());
+        while lo < hi {
+            let mid = (lo + hi) / 2;
+            let mut reader = segment.row(mid)?;
+            let source = reader.text()?;
+            let canonical_id = reader.text()?;
+            match (source.as_str(), canonical_id.as_str())
+                .cmp(&(key.source.as_str(), key.canonical_id.as_str()))
+            {
+                std::cmp::Ordering::Less => lo = mid + 1,
+                std::cmp::Ordering::Greater => hi = mid,
+                std::cmp::Ordering::Equal => return reader.u32_list(),
+            }
+        }
+        Ok(Vec::new())
+    }
+
+    /// Return one stable-key match only when it is unambiguous.
+    pub fn docid_for_key(&self, key: &ArtifactKey) -> Result<Option<u32>, IndexFormatError> {
+        let docids = self.docids_for_key(key)?;
+        Ok((docids.len() == 1).then(|| docids[0]))
+    }
+
+    /// Resolve the stable `(source, corpus-relative path)` identity to a
+    /// docid without using a checkout or display path.
+    pub fn docid_for_artifact_path(
+        &self,
+        path: &ArtifactPath,
+    ) -> Result<Option<u32>, IndexFormatError> {
+        let segment = self.indexed(SEG_ARTIFACTPATHMAP)?;
+        let (mut lo, mut hi) = (0u32, segment.count());
+        while lo < hi {
+            let mid = (lo + hi) / 2;
+            let mut reader = segment.row(mid)?;
+            let source = reader.text()?;
+            let relative_path = reader.text()?;
+            match (source.as_str(), relative_path.as_str())
+                .cmp(&(path.source.as_str(), path.relative_path.as_str()))
+            {
+                std::cmp::Ordering::Less => lo = mid + 1,
+                std::cmp::Ordering::Greater => hi = mid,
+                std::cmp::Ordering::Equal => return Ok(Some(reader.u32()?)),
+            }
+        }
+        Ok(None)
+    }
+
+    /// Stable layer identities represented by this persisted generation.
+    pub fn layers(&self) -> Result<Vec<CorpusLayer>, IndexFormatError> {
+        let mut reader = Reader::new(self.payload(SEG_LAYERS));
+        let count = reader.u32()?;
+        let mut layers = Vec::with_capacity(count.min(1 << 20) as usize);
+        for _ in 0..count {
+            layers.push(read_layer(&mut reader)?);
+        }
+        Ok(layers)
+    }
+
+    /// Validated canonical redirects retained by the composed generation.
+    pub fn canonical_redirects(&self) -> Result<Vec<CanonicalRedirect>, IndexFormatError> {
+        let mut reader = Reader::new(self.payload(SEG_REDIRECTS));
+        let count = reader.u32()?;
+        let mut redirects = Vec::with_capacity(count.min(1 << 20) as usize);
+        for _ in 0..count {
+            let parent = read_artifact_key(&mut reader)?
+                .ok_or_else(|| IndexFormatError("redirect parent is absent".into()))?;
+            let replacement = read_artifact_key(&mut reader)?
+                .ok_or_else(|| IndexFormatError("redirect replacement is absent".into()))?;
+            let rationale = read_artifact_key(&mut reader)?
+                .ok_or_else(|| IndexFormatError("redirect rationale is absent".into()))?;
+            redirects.push(CanonicalRedirect {
+                parent,
+                replacement,
+                rationale,
+            });
+        }
+        Ok(redirects)
+    }
+
+    pub fn canonical_redirect(
+        &self,
+        parent: &ArtifactKey,
+    ) -> Result<Option<CanonicalRedirect>, IndexFormatError> {
+        Ok(self
+            .canonical_redirects()?
+            .into_iter()
+            .find(|redirect| &redirect.parent == parent))
+    }
+
     pub fn relationships(&self) -> Result<Vec<Relationship>, IndexFormatError> {
         let mut reader = Reader::new(self.payload(SEG_RELATIONSHIPS));
         let count = reader.u32()?;
         let mut result = Vec::with_capacity(count.min(1 << 20) as usize);
         for _ in 0..count {
+            let source_path = reader.text()?;
+            let relationship = reader.text()?;
+            let target = reader.text()?;
+            let resolved_path = reader.opt_text()?;
+            let issue = reader.opt_text()?;
+            let source_artifact = read_artifact_path(&mut reader)?;
+            let resolved_artifact = read_artifact_path(&mut reader)?;
             result.push(Relationship {
-                source_artifact: None,
-                source_path: reader.text()?,
-                relationship: reader.text()?,
-                target: reader.text()?,
-                resolved_artifact: None,
-                resolved_path: reader.opt_text()?,
-                issue: reader.opt_text()?,
+                source_artifact,
+                source_path,
+                relationship,
+                target,
+                resolved_artifact,
+                resolved_path,
+                issue,
             });
         }
         Ok(result)
     }
 
+    fn live_decisions(&self) -> Result<Vec<(ArtifactKey, String)>, IndexFormatError> {
+        let mut reader = Reader::new(self.payload(SEG_LIVE));
+        let count = reader.u32()?;
+        let mut rows = Vec::with_capacity(count.min(1 << 20) as usize);
+        for _ in 0..count {
+            let key = read_artifact_key(&mut reader)?
+                .ok_or_else(|| IndexFormatError("live decision key is absent".into()))?;
+            rows.push((key, reader.text()?));
+        }
+        Ok(rows)
+    }
+
+    pub fn live_decision_keys(&self) -> Result<Vec<ArtifactKey>, IndexFormatError> {
+        Ok(self
+            .live_decisions()?
+            .into_iter()
+            .map(|(key, _)| key)
+            .collect())
+    }
+
     pub fn live_decision_paths(&self) -> Result<Vec<String>, IndexFormatError> {
-        Reader::new(self.payload(SEG_LIVE)).text_list()
+        Ok(self
+            .live_decisions()?
+            .into_iter()
+            .map(|(_, path)| path)
+            .collect())
     }
 
     pub fn scope_rows(&self) -> Result<Vec<crate::retrieve::ScopeRow>, IndexFormatError> {
@@ -801,9 +1210,9 @@ impl MmapIndexReader {
         let mut rows = Vec::with_capacity(count.min(1 << 20) as usize);
         for _ in 0..count {
             rows.push(crate::retrieve::ScopeRow {
-                key: None,
-                artifact_path: None,
-                origin: None,
+                key: read_artifact_key(&mut reader)?,
+                artifact_path: read_artifact_path(&mut reader)?,
+                origin: read_origin(&mut reader)?,
                 id: reader.text()?,
                 title: reader.text()?,
                 status: reader.text()?,

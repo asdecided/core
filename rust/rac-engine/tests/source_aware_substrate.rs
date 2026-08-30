@@ -153,8 +153,8 @@ fn no_manifest_keeps_the_released_index_projection_byte_exact() {
     assert_eq!(resolved.key, Some(items[0].key.clone()));
     assert_eq!(resolved.origin, Some(items[0].origin.clone()));
 
-    // The frozen v1 codec remains untouched in this substrate-only change.
-    assert_eq!(rac_engine::index_store::STORE_LAYOUT_VERSION, "v1");
+    // ADR-143 gates source-aware persisted rows behind an explicit layout.
+    assert_eq!(rac_engine::index_store::STORE_LAYOUT_VERSION, "v2");
 
     let _ = fs::remove_dir_all(root);
 }

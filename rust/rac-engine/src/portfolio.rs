@@ -142,7 +142,20 @@ pub fn portfolio_from_corpus(
     items: &[CorpusItem],
     recursive: bool,
 ) -> PortfolioSummary {
-    let rows: Vec<PortfolioRow> = items.iter().map(portfolio_row).collect();
+    let rows: Vec<PortfolioRow> = items
+        .iter()
+        .map(|item| {
+            let mut row = portfolio_row(item);
+            if item.origin.layer == crate::corpus::Layer::Inherited {
+                // Parent structural warnings and completeness advisories are
+                // emitted by the parent corpus, not duplicated into every
+                // child summary. Parent errors already block composition.
+                row.validate_issues.clear();
+                row.missing_recommended.clear();
+            }
+            row
+        })
+        .collect();
     portfolio_from_rows(directory, &rows, recursive)
 }
 
@@ -153,6 +166,48 @@ pub fn portfolio_from_rows(
 ) -> PortfolioSummary {
     let validation_rows: Vec<ValidationRow> = rows.iter().map(|r| r.validation.clone()).collect();
     let overrides: SeverityOverrides = load_overrides(directory);
+    let rel_summary = summary_from_rows(&validation_rows);
+    let relationships_ok =
+        validation_from_rows(directory, &validation_rows, recursive).ok();
+    portfolio_from_rows_with_analysis(
+        directory,
+        rows,
+        recursive,
+        &overrides,
+        rel_summary,
+        relationships_ok,
+    )
+}
+
+/// Build a portfolio from the central composed relationship projection and
+/// the exact child-config snapshot belonging to the generation.
+pub(crate) fn portfolio_from_corpus_with_analysis(
+    directory: &str,
+    items: &[CorpusItem],
+    recursive: bool,
+    overrides: &SeverityOverrides,
+    relationship_summary: RelationshipSummary,
+    relationships_ok: bool,
+) -> PortfolioSummary {
+    let rows: Vec<PortfolioRow> = items.iter().map(portfolio_row).collect();
+    portfolio_from_rows_with_analysis(
+        directory,
+        &rows,
+        recursive,
+        overrides,
+        relationship_summary,
+        relationships_ok,
+    )
+}
+
+fn portfolio_from_rows_with_analysis(
+    directory: &str,
+    rows: &[PortfolioRow],
+    recursive: bool,
+    overrides: &SeverityOverrides,
+    rel_summary: RelationshipSummary,
+    relationships_ok: bool,
+) -> PortfolioSummary {
 
     let mut by_type: Vec<(String, usize)> =
         BY_TYPE_ORDER.iter().map(|t| (t.to_string(), 0)).collect();
@@ -181,7 +236,7 @@ pub fn portfolio_from_rows(
         }
         path_to_identifier.insert(row.path.clone(), row.identifier.clone());
 
-        let issues = apply_overrides(row.validate_issues.clone(), &row.artifact_type, &overrides);
+        let issues = apply_overrides(row.validate_issues.clone(), &row.artifact_type, overrides);
         if has_errors(&issues) {
             invalid_count += 1;
             let error_codes: Vec<String> = issues
@@ -215,10 +270,6 @@ pub fn portfolio_from_rows(
             });
         }
     }
-
-    let rel_summary = summary_from_rows(&validation_rows);
-    let relationships_ok =
-        validation_from_rows(directory, &validation_rows, recursive).ok();
 
     for issue in &rel_summary.issues {
         let source = issue.source_path.clone().unwrap_or_default();

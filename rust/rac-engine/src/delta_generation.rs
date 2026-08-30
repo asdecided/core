@@ -1228,12 +1228,18 @@ impl DeltaGeneration {
     pub fn materialize_derived(&self, directory: &str, recursive: bool) -> DerivedIndex {
         let (index_entries, field_tokens) = self.search.entries_and_fields(&self.graph);
         let compatibility_layer = crate::corpus::compatible_local_layer(directory);
+        let normalized_root = crate::walk::normalize_root(directory);
+        let display_prefix = format!("{normalized_root}/");
         let source_artifacts: Vec<crate::derived::SourceAwareArtifact> = index_entries
             .iter()
             .map(|entry| {
+                let identity_path = entry
+                    .path
+                    .strip_prefix(&display_prefix)
+                    .unwrap_or(&entry.path);
                 let path = self
                     .identity
-                    .artifact_path_for_path(&entry.path)
+                    .artifact_path_for_path(identity_path)
                     .cloned()
                     .unwrap_or_else(|| {
                         crate::corpus::ArtifactPath::new(
@@ -1243,7 +1249,7 @@ impl DeltaGeneration {
                     });
                 let origin = self
                     .identity
-                    .origin_for_path(&entry.path)
+                    .origin_for_path(identity_path)
                     .cloned()
                     .unwrap_or_else(|| compatibility_layer.origin());
                 crate::derived::SourceAwareArtifact {
@@ -1263,13 +1269,35 @@ impl DeltaGeneration {
         if layers.is_empty() {
             layers.push(compatibility_layer);
         }
+        let identity_entries = index_entries
+            .iter()
+            .cloned()
+            .map(|mut entry| {
+                entry.search_sections.clear();
+                entry.inbound_count = 0;
+                entry
+            })
+            .collect();
+        let live_decision_paths = self.scope.live_paths();
+        let live_path_set: std::collections::HashSet<&str> =
+            live_decision_paths.iter().map(String::as_str).collect();
+        let live_decision_keys = source_artifacts
+            .iter()
+            .filter(|artifact| live_path_set.contains(artifact.display_path.as_str()))
+            .map(|artifact| artifact.key.clone())
+            .collect();
         DerivedIndex {
             layers,
             source_artifacts,
+            resolution: Box::new(crate::derived::ResolutionProjection {
+                entries: identity_entries,
+                canonical_redirects: Vec::new(),
+            }),
             index_entries,
             field_tokens,
             relationships: self.graph.relationships(),
-            live_decision_paths: self.scope.live_paths(),
+            live_decision_keys,
+            live_decision_paths,
             portfolio_summary: self.summary.value(directory, recursive),
             scope_rows: self.scope.rows(),
         }
