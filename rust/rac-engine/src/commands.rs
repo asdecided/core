@@ -148,6 +148,7 @@ pub fn validate_directory(directory: &str, recursive: bool) -> DirectoryValidati
         .collect();
     let okf_entries: Vec<OkfEntry> = entries
         .iter()
+        .filter(|item| item.origin.layer == crate::corpus::Layer::Local)
         .map(|item| OkfEntry {
             path: &item.path,
             artifact_type: item
@@ -163,6 +164,100 @@ pub fn validate_directory(directory: &str, recursive: bool) -> DirectoryValidati
         recursive,
         files,
         okf: Some(okf),
+    }
+}
+
+/// Structural validation over the effective projection of one already-loaded
+/// composition. Inherited errors were collapsed by the loader; their warnings
+/// remain parent-owned and are not repeated in every child.
+pub(crate) fn validate_directory_from_items(
+    directory: &str,
+    recursive: bool,
+    entries: &[crate::relationships::CorpusItem],
+) -> DirectoryValidation {
+    let overrides = load_overrides(directory);
+    let provider = load_ticketing_provider(directory);
+    use rayon::prelude::*;
+    let files: Vec<FileValidation> = entries
+        .par_iter()
+        .map(|item| {
+            let artifact_type = item
+                .spec
+                .map(|spec| spec.name.clone())
+                .unwrap_or_else(|| "unknown".to_string());
+            if item.spec.is_none() {
+                return FileValidation {
+                    path: item.path.clone(),
+                    artifact_type,
+                    status: STATUS_SKIPPED,
+                    issues: Vec::new(),
+                };
+            }
+            let issues = if item.origin.layer == crate::corpus::Layer::Inherited {
+                Vec::new()
+            } else {
+                apply_overrides(
+                    validate(&item.artifact, provider.as_deref(), Some(&artifact_type)),
+                    &artifact_type,
+                    &overrides,
+                )
+            };
+            let status = if has_errors(&issues) {
+                STATUS_INVALID
+            } else {
+                STATUS_VALID
+            };
+            FileValidation {
+                path: item.path.clone(),
+                artifact_type,
+                status,
+                issues,
+            }
+        })
+        .collect();
+    let okf_entries: Vec<OkfEntry> = entries
+        .iter()
+        .filter(|item| item.origin.layer == crate::corpus::Layer::Local)
+        .map(|item| OkfEntry {
+            path: &item.path,
+            artifact_type: item.spec.map(|spec| spec.name.as_str()).unwrap_or("unknown"),
+            file_name: item.path.rsplit('/').next().unwrap_or(&item.path),
+        })
+        .collect();
+    DirectoryValidation {
+        directory: directory.to_string(),
+        recursive,
+        files,
+        okf: Some(check_okf_conformance(&okf_entries, &overrides)),
+    }
+}
+
+fn load_composed_or_exit(
+    directory: &str,
+    recursive: bool,
+) -> Result<Option<crate::composition::ComposedCorpus>, i32> {
+    match crate::federated_corpus::load_composed_corpus(directory, recursive) {
+        Ok(corpus) => Ok(corpus),
+        Err(error) => {
+            eprintln!("decided: {error}");
+            Err(EXIT_VALIDATION_FAILED)
+        }
+    }
+}
+
+fn refuse_read_only_target(path: &str) -> Option<i32> {
+    match crate::federated_corpus::is_read_only_materialised_path(path) {
+        Ok(false) => None,
+        Ok(true) => {
+            eprintln!(
+                "decided: refusing to write inside the inherited read-only parent materialisation: {path}"
+            );
+            Some(EXIT_VALIDATION_FAILED)
+        }
+        Err(error) => {
+            eprintln!("decided: {error}");
+            Some(EXIT_VALIDATION_FAILED)
+        }
     }
 }
 
@@ -476,12 +571,37 @@ pub fn cmd_validate(args: &ValidateArgs) -> i32 {
         if args.corpus.is_some() {
             return usage_error("--corpus applies to stdin ('-') or a single file");
         }
+        let composed = crate::federated_corpus::load_composed_corpus(
+            &args.file,
+            !args.top_level,
+        );
         // The cache reuses per-file results across runs (ADR-106),
         // byte-identical to the uncached path; on by default per ADR-112.
-        let result = if crate::derived_cache::cache_enabled(args.cache) {
-            validate_directory_incremental(&args.file, !args.top_level, args.verify)
-        } else {
-            validate_directory(&args.file, !args.top_level)
+        let result = match composed {
+            Ok(Some(composed)) => {
+                let items: Vec<_> = composed.effective().cloned().collect();
+                validate_directory_from_items(&args.file, !args.top_level, &items)
+            }
+            Ok(None) if crate::derived_cache::cache_enabled(args.cache) => {
+                validate_directory_incremental(&args.file, !args.top_level, args.verify)
+            }
+            Ok(None) => validate_directory(&args.file, !args.top_level),
+            Err(error) => DirectoryValidation {
+                directory: args.file.clone(),
+                recursive: !args.top_level,
+                files: vec![FileValidation {
+                    path: crate::federation::MANIFEST_RELATIVE_PATH.to_string(),
+                    artifact_type: "corpus-manifest".to_string(),
+                    status: STATUS_INVALID,
+                    issues: vec![Issue::new(
+                        "error",
+                        error.stable_code(),
+                        error.to_string(),
+                        None,
+                    )],
+                }],
+                okf: None,
+            },
         };
         if args.sarif {
             emit(output::render_validate_sarif(&result));
@@ -736,7 +856,13 @@ pub fn cmd_relationships(args: &RelationshipsArgs) -> i32 {
 
     if args.validate {
         let report = if is_dir {
-            validate_relationships(&args.path, !args.top_level)
+            match load_composed_or_exit(&args.path, !args.top_level) {
+                Ok(Some(composed)) => {
+                    composed.validate_relationships(&args.path, !args.top_level)
+                }
+                Ok(None) => validate_relationships(&args.path, !args.top_level),
+                Err(code) => return code,
+            }
         } else {
             validate_relationships_file(&args.path)
         };
@@ -883,9 +1009,23 @@ pub fn cmd_decisions_for(args: &DecisionsForArgs) -> i32 {
     if !Path::new(&args.directory).is_dir() {
         return usage_error(&format!("not a directory: {}", args.directory));
     }
-    let result = crate::retrieve::decisions_for_path(&args.directory, &args.path, !args.top_level);
+    let composed = match load_composed_or_exit(&args.directory, !args.top_level) {
+        Ok(composed) => composed,
+        Err(code) => return code,
+    };
+    let result = if let Some(composed) = &composed {
+        let items: Vec<_> = composed.effective().cloned().collect();
+        let rows = crate::retrieve::scope_rows_from_items(&items);
+        crate::retrieve::decisions_for_path_with_rows(&rows, &args.directory, &args.path)
+    } else {
+        crate::retrieve::decisions_for_path(&args.directory, &args.path, !args.top_level)
+    };
     if args.json {
-        emit(output::render_decisions_for_json(&result));
+        emit(if let Some(composed) = &composed {
+            output::render_decisions_for_json_with_composed(&result, composed)
+        } else {
+            output::render_decisions_for_json(&result)
+        });
     } else {
         emit(output::render_decisions_for_human(&result));
     }
@@ -919,15 +1059,27 @@ pub fn cmd_gate(args: &GateArgs) -> i32 {
     if args.code && !args.full && args.base.is_none() {
         return usage_error("a diff base is required for --code unless --full is supplied");
     }
-    let report = match crate::gate::build_gate_with_code(
-        &args.directory,
-        !args.top_level,
+    let composed = match load_composed_or_exit(&args.directory, !args.top_level) {
+        Ok(composed) => composed,
+        Err(code) => return code,
+    };
+    let code_options = || {
         args.code.then_some(crate::gate::CodeGateOptions {
             repository: &args.repository,
             base: args.base.as_deref(),
             full_tree: args.full,
-        }),
-    ) {
+        })
+    };
+    let report = match if let Some(composed) = &composed {
+        crate::gate::build_gate_with_composed(
+            &args.directory,
+            !args.top_level,
+            code_options(),
+            composed,
+        )
+    } else {
+        crate::gate::build_gate_with_code(&args.directory, !args.top_level, code_options())
+    } {
         Ok(report) => report,
         Err(exc) => {
             eprintln!("decided: {}", exc.message());
@@ -966,13 +1118,33 @@ pub fn cmd_sentry(args: &SentryArgs) -> i32 {
     if !Path::new(&args.directory).is_dir() {
         return usage_error(&format!("not a directory: {}", args.directory));
     }
-    let report = match crate::sentry::analyze(
-        &args.directory,
-        &args.repository,
-        !args.top_level,
-        args.base.as_deref(),
-        args.full,
-    ) {
+    let composed = match load_composed_or_exit(&args.directory, !args.top_level) {
+        Ok(composed) => composed,
+        Err(code) => return code,
+    };
+    let composed_items: Vec<_> = composed
+        .as_ref()
+        .map(|corpus| corpus.effective().cloned().collect())
+        .unwrap_or_default();
+    let report = match if let Some(composed) = &composed {
+        crate::sentry::analyze_with_items(
+            &args.directory,
+            &args.repository,
+            args.base.as_deref(),
+            args.full,
+            &composed_items,
+            true,
+            composed.read_only_root(),
+        )
+    } else {
+        crate::sentry::analyze(
+            &args.directory,
+            &args.repository,
+            !args.top_level,
+            args.base.as_deref(),
+            args.full,
+        )
+    } {
         Ok(report) => report,
         Err(message) => return usage_error(&message),
     };
@@ -1319,8 +1491,14 @@ fn cmd_agent_rules(args: &ExportArgs) -> i32 {
     // Invalid --client values were already rejected by the argv parser
     // (argparse choices), so `unknown_clients` is unreachable here.
     let root = crate::agent_rules::agent_rules_root(&args.directory, args.out.as_deref());
+    if let Some(code) = refuse_read_only_target(&root) {
+        return code;
+    }
     let result = if args.check {
-        crate::agent_rules::check_agent_rules(&args.directory, &root, &args.client)
+        match crate::agent_rules::check_agent_rules(&args.directory, &root, &args.client) {
+            Ok(result) => result,
+            Err(exc) => return usage_error(&format!("cannot read corpus: {exc}")),
+        }
     } else {
         match crate::agent_rules::generate_agent_rules(&args.directory, &root, &args.client) {
             Ok(result) => result,
@@ -1413,17 +1591,89 @@ pub struct ResolveArgs {
     pub top_level: bool,
 }
 
+fn composed_resolution(
+    corpus: &crate::composition::ComposedCorpus,
+    artifact_id: &str,
+) -> Result<crate::resolve::ResolutionResult, crate::composition::LookupError> {
+    let reference = crate::pycompat::py_strip(artifact_id);
+    match corpus.resolve(reference) {
+        Ok(item) => {
+            let entry = crate::resolve::identity_entry_from_item(item);
+            Ok(crate::resolve::ResolutionResult {
+                artifact_id: artifact_id.to_string(),
+                outcome: crate::resolve::OUTCOME_RESOLVED,
+                artifact: Some(crate::resolve::resolved_from_entry(&entry)),
+                duplicate_paths: Vec::new(),
+            })
+        }
+        Err(crate::composition::LookupError::NotFound) => Ok(crate::resolve::ResolutionResult {
+            artifact_id: artifact_id.to_string(),
+            outcome: crate::resolve::OUTCOME_NOT_FOUND,
+            artifact: None,
+            duplicate_paths: Vec::new(),
+        }),
+        Err(crate::composition::LookupError::Ambiguous(keys)) => {
+            let mut paths: Vec<String> = keys
+                .iter()
+                .filter_map(|key| corpus.item(key))
+                .map(|item| {
+                    format!(
+                        "{}::{}",
+                        item.artifact_path.source, item.artifact_path.relative_path
+                    )
+                })
+                .collect();
+            paths.sort();
+            Ok(crate::resolve::ResolutionResult {
+                artifact_id: artifact_id.to_string(),
+                outcome: crate::resolve::OUTCOME_DUPLICATE,
+                artifact: None,
+                duplicate_paths: paths,
+            })
+        }
+        Err(error) => Err(error),
+    }
+}
+
 pub fn cmd_resolve(args: &ResolveArgs) -> i32 {
     if !Path::new(&args.directory).is_dir() {
         return usage_error(&format!("not a directory: {}", args.directory));
     }
-    let result = crate::resolve::resolve_artifact(&args.directory, &args.id, !args.top_level);
+    let composed = match load_composed_or_exit(&args.directory, !args.top_level) {
+        Ok(composed) => composed,
+        Err(code) => return code,
+    };
+    let result = if let Some(composed) = &composed {
+        match composed_resolution(composed, &args.id) {
+            Ok(result) => result,
+            Err(crate::composition::LookupError::QualifiedCanonicalRequired) => {
+                eprintln!(
+                    "decided: qualified references require a canonical artifact ID after `::`: {}",
+                    args.id
+                );
+                return EXIT_VALIDATION_FAILED;
+            }
+            Err(_) => {
+                eprintln!("decided: invalid qualified artifact reference: {}", args.id);
+                return EXIT_VALIDATION_FAILED;
+            }
+        }
+    } else {
+        crate::resolve::resolve_artifact(&args.directory, &args.id, !args.top_level)
+    };
     if args.json {
-        emit(output::render_resolve_json(&result));
+        emit(if let Some(composed) = &composed {
+            output::render_resolve_json_with_composed(&result, composed)
+        } else {
+            output::render_resolve_json(&result)
+        });
     } else if result.outcome == crate::resolve::OUTCOME_RESOLVED {
-        emit(output::render_resolve_human(
-            result.artifact.as_ref().expect("resolved implies artifact"),
-        ));
+        let artifact = result.artifact.as_ref().expect("resolved implies artifact");
+        emit(if composed.is_some() {
+            output::render_resolve_human_with_origin(artifact)
+        } else {
+            output::render_resolve_human(artifact)
+        });
     } else if result.outcome == crate::resolve::OUTCOME_DUPLICATE {
         let found: Vec<String> = result
             .duplicate_paths
@@ -1555,7 +1805,32 @@ pub fn cmd_find(args: &FindArgs) -> i32 {
     if !Path::new(&args.directory).is_dir() {
         return usage_error(&format!("not a directory: {}", args.directory));
     }
-    let mut result = if crate::derived_cache::cache_enabled(args.cache) {
+    let composed = match load_composed_or_exit(&args.directory, !args.top_level) {
+        Ok(composed) => composed,
+        Err(code) => return code,
+    };
+    let mut result = if let Some(composed) = &composed {
+        let entries = composed.effective_index();
+        if args.decisions {
+            let live_paths: Vec<String> = composed
+                .effective()
+                .filter(|item| {
+                    item.spec.map(|spec| spec.name.as_str()) == Some("decision")
+                        && crate::resolve::is_live_decision(&item.artifact)
+                })
+                .map(|item| item.path.clone())
+                .collect();
+            crate::read_model::find_decisions_in(&entries, &live_paths, &args.query)
+        } else {
+            crate::resolve::search_index_filtered(
+                &entries,
+                &args.query,
+                args.artifact_type.as_deref(),
+                &args.tags,
+                args.live,
+            )
+        }
+    } else if crate::derived_cache::cache_enabled(args.cache) {
         // Default store reuse (ADR-112): serve from the persistent index
         // store instead of a fresh walk, byte-identical to the walk below.
         find_from_store(args)
@@ -1573,10 +1848,16 @@ pub fn cmd_find(args: &FindArgs) -> i32 {
             args.live,
         )
     };
-    annotate_search_recency(&mut result.matches, &args.directory);
+    if composed.is_none() {
+        annotate_search_recency(&mut result.matches, &args.directory);
+    }
     let render_started = crate::timing::start();
     let rendered = if args.json {
-        output::render_find_json(&result, args.explain)
+        if let Some(composed) = &composed {
+            output::render_find_json_with_composed(&result, args.explain, composed)
+        } else {
+            output::render_find_json(&result, args.explain)
+        }
     } else {
         output::render_find_human(&result, args.explain)
     };
@@ -1608,20 +1889,55 @@ pub fn cmd_diagnose(args: &DiagnoseArgs) -> i32 {
     if !Path::new(&args.directory).is_dir() {
         return usage_error(&format!("not a directory: {}", args.directory));
     }
-    let diagnosis = crate::resolve::diagnose_artifact(
-        &args.directory,
-        &args.query,
-        &args.target,
-        crate::resolve::DiagnoseOptions {
-            artifact_type: args.artifact_type.as_deref(),
-            recursive: !args.top_level,
-            tags: &args.tags,
-            live_only: args.live,
-            surface_limit: args.surface_limit,
-        },
-    );
+    let composed = match load_composed_or_exit(&args.directory, !args.top_level) {
+        Ok(composed) => composed,
+        Err(code) => return code,
+    };
+    let diagnosis = if let Some(composed) = &composed {
+        let identity = composed.identity_index();
+        let mut effective = composed.effective_index();
+        for entry in &mut effective {
+            let Some(key) = &entry.key else { continue };
+            if let Some(identity_entry) = identity
+                .iter()
+                .find(|candidate| candidate.key.as_ref() == Some(key))
+            {
+                entry.aliases = identity_entry.aliases.clone();
+            }
+        }
+        let target_is_effective = composed
+            .resolve(crate::pycompat::py_strip(&args.target))
+            .ok()
+            .is_some_and(|target| effective.iter().any(|entry| entry.key.as_ref() == Some(&target.key)));
+        crate::resolve::diagnose_index(
+            if target_is_effective { &effective } else { &identity },
+            &args.query,
+            &args.target,
+            args.artifact_type.as_deref(),
+            &args.tags,
+            args.live,
+            args.surface_limit,
+        )
+    } else {
+        crate::resolve::diagnose_artifact(
+            &args.directory,
+            &args.query,
+            &args.target,
+            crate::resolve::DiagnoseOptions {
+                artifact_type: args.artifact_type.as_deref(),
+                recursive: !args.top_level,
+                tags: &args.tags,
+                live_only: args.live,
+                surface_limit: args.surface_limit,
+            },
+        )
+    };
     if args.json {
-        emit(output::render_diagnosis_json(&diagnosis));
+        emit(if composed.is_some() {
+            output::render_diagnosis_json_with_origin(&diagnosis)
+        } else {
+            output::render_diagnosis_json(&diagnosis)
+        });
     } else {
         emit(output::render_diagnosis_human(&diagnosis));
     }
@@ -1655,14 +1971,30 @@ pub fn cmd_retrieve(args: &RetrieveArgs) -> i32 {
     if args.budget < 1 {
         return usage_error(&format!("--budget must be at least 1, got {}", args.budget));
     }
-    let payload = crate::retrieve::retrieve_grounding(
-        &args.directory,
-        &args.task,
-        args.scope.as_deref(),
-        args.top_k,
-        args.budget,
-        !args.all,
-    );
+    let composed = match load_composed_or_exit(&args.directory, true) {
+        Ok(composed) => composed,
+        Err(code) => return code,
+    };
+    let payload = if let Some(composed) = &composed {
+        crate::retrieve::retrieve_grounding_from_composed(
+            &args.directory,
+            &args.task,
+            args.scope.as_deref(),
+            args.top_k,
+            args.budget,
+            !args.all,
+            composed,
+        )
+    } else {
+        crate::retrieve::retrieve_grounding(
+            &args.directory,
+            &args.task,
+            args.scope.as_deref(),
+            args.top_k,
+            args.budget,
+            !args.all,
+        )
+    };
     let serialized = crate::budget::serialize(&payload, args.budget);
     if args.json {
         emit(serialized);
@@ -1915,6 +2247,9 @@ pub struct NewArgs {
 /// exit 1 — all stderr `decided: <msg>`.
 pub fn cmd_new(args: &NewArgs) -> i32 {
     use crate::scaffold::ScaffoldError;
+    if let Some(code) = refuse_read_only_target(&args.output_path) {
+        return code;
+    }
     let created = match crate::scaffold::create_artifact(&args.artifact_type, &args.output_path) {
         Ok(created) => created,
         Err(
@@ -2026,6 +2361,9 @@ pub fn cmd_init(args: &InitArgs) -> i32 {
     if !Path::new(&args.directory).is_dir() {
         return usage_error(&format!("not a directory: {}", args.directory));
     }
+    if let Some(code) = refuse_read_only_target(&args.directory) {
+        return code;
+    }
     let result = match crate::scaffold::init_repository(
         &args.directory,
         &args.key,
@@ -2069,6 +2407,9 @@ pub fn cmd_quickstart(args: &QuickstartArgs) -> i32 {
     if !Path::new(&args.directory).is_dir() {
         return usage_error(&format!("not a directory: {}", args.directory));
     }
+    if let Some(code) = refuse_read_only_target(&args.directory) {
+        return code;
+    }
     let result =
         match crate::scaffold::quickstart(&args.directory, &args.key, &args.artifact_type) {
             Ok(result) => result,
@@ -2107,6 +2448,9 @@ pub fn cmd_migrate(args: &MigrateArgs) -> i32 {
     use crate::scaffold::ScaffoldError;
     if !Path::new(&args.directory).is_dir() {
         return usage_error(&format!("not a directory: {}", args.directory));
+    }
+    if let Some(code) = refuse_read_only_target(&args.directory) {
+        return code;
     }
     if args.target == "layout" {
         return migrate_layout(args);
@@ -2206,8 +2550,39 @@ pub fn cmd_rename(args: &RenameArgs) -> i32 {
     if !Path::new(&args.directory).is_dir() {
         return usage_error(&format!("not a directory: {}", args.directory));
     }
-    let plan =
-        crate::rename::compute_rename(&args.directory, &args.old, &args.new, !args.top_level);
+    if let Some(code) = refuse_read_only_target(&args.directory) {
+        return code;
+    }
+    let composed = match load_composed_or_exit(&args.directory, !args.top_level) {
+        Ok(Some(composed)) => {
+            if composed
+                .resolve(crate::pycompat::py_strip(&args.old))
+                .ok()
+                .is_some_and(|item| item.origin.layer == crate::corpus::Layer::Inherited)
+            {
+                eprintln!(
+                    "decided: refusing to rename inherited read-only artifact {}",
+                    args.old
+                );
+                return EXIT_VALIDATION_FAILED;
+            }
+            Some(composed)
+        }
+        Ok(None) => None,
+        Err(code) => return code,
+    };
+    let plan = if let Some(corpus) = &composed {
+        let local: Vec<_> = corpus.local_items().cloned().collect();
+        crate::rename::compute_rename_from_items(
+            &args.directory,
+            &args.old,
+            &args.new,
+            !args.top_level,
+            &local,
+        )
+    } else {
+        crate::rename::compute_rename(&args.directory, &args.old, &args.new, !args.top_level)
+    };
 
     if !plan.ok {
         if args.json {

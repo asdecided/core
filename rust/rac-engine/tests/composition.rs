@@ -264,6 +264,18 @@ fn a_valid_override_redirects_only_the_parent_canonical_id_and_retains_history()
         corpus.content(&inherited_key),
         Some(&b"exact verified parent bytes"[..])
     );
+    let parent_provenance = corpus.provenance_for(&inherited_key).unwrap();
+    assert_eq!(parent_provenance.origin.layer, Layer::Inherited);
+    assert_eq!(parent_provenance.overrides.len(), 1);
+    assert_eq!(parent_provenance.overrides[0].state.as_str(), "overridden");
+    assert_eq!(parent_provenance.overrides[0].replacement, replacement_key);
+    let replacement_provenance = corpus.provenance_for(&replacement_key).unwrap();
+    assert_eq!(replacement_provenance.origin.layer, Layer::Local);
+    assert_eq!(replacement_provenance.overrides.len(), 1);
+    assert_eq!(
+        replacement_provenance.overrides[0].state.as_str(),
+        "replacement"
+    );
     assert!(!corpus
         .relationships()
         .iter()
