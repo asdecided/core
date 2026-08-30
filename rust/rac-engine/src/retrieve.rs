@@ -24,6 +24,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{json, Map, Value};
 
 use crate::budget::py_slice_to;
+use crate::corpus::{ArtifactKey, ArtifactOrigin, ArtifactPath};
 use crate::identity::artifact_identifier;
 use crate::pycompat::{py_casefold, py_strip, read_text_universal};
 use crate::relationships::{
@@ -341,6 +342,12 @@ fn normalize_query(path: &str, root: &Path) -> Option<String> {
 /// One live decision's declared `## Applies To` scope (`ScopeRow`).
 #[derive(Clone)]
 pub struct ScopeRow {
+    /// Absent only when reconstructed from the frozen v1 persistent store.
+    pub key: Option<ArtifactKey>,
+    /// Absent only when reconstructed from the frozen v1 persistent store.
+    pub artifact_path: Option<ArtifactPath>,
+    /// Absent only when reconstructed from the frozen v1 persistent store.
+    pub origin: Option<ArtifactOrigin>,
     pub id: String,
     pub title: String,
     pub status: String,
@@ -366,6 +373,9 @@ pub fn scope_rows_from_items(items: &[CorpusItem]) -> Vec<ScopeRow> {
             continue;
         }
         rows.push(ScopeRow {
+            key: Some(item.key.clone()),
+            artifact_path: Some(item.artifact_path.clone()),
+            origin: Some(item.origin.clone()),
             id: artifact_identifier(&item.artifact, Some(spec), &item.path),
             title: item.artifact.product.title.clone().unwrap_or_default(),
             status: artifact_status(&item.artifact),
@@ -379,6 +389,9 @@ pub fn scope_rows_from_items(items: &[CorpusItem]) -> Vec<ScopeRow> {
 /// One governing decision (`GoverningDecision` — the fields retrieve and
 /// `decided decisions-for` read).
 pub struct GoverningDecision {
+    pub key: Option<ArtifactKey>,
+    pub artifact_path: Option<ArtifactPath>,
+    pub origin: Option<ArtifactOrigin>,
     pub id: String,
     pub title: String,
     pub status: String,
@@ -397,6 +410,9 @@ fn governing_decisions(rows: &[ScopeRow], directory: &str, path: &str) -> Vec<Go
         for declared in &row.scope_entries {
             if entry_covers(declared, &query) {
                 matches.push(GoverningDecision {
+                    key: row.key.clone(),
+                    artifact_path: row.artifact_path.clone(),
+                    origin: row.origin.clone(),
                     id: row.id.clone(),
                     title: row.title.clone(),
                     status: row.status.clone(),

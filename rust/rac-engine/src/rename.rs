@@ -725,7 +725,7 @@ pub fn compute_rename(
     let mut targets: Vec<&str> = index
         .get(&py_casefold(old_ref))
         .iter()
-        .map(|(path, _)| path.as_str())
+        .map(|candidate| candidate.path.as_str())
         .collect::<HashSet<_>>()
         .into_iter()
         .collect();

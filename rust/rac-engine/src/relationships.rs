@@ -362,23 +362,58 @@ fn validation_row_with_identity(
     }
 }
 
-/// Insertion-ordered `{casefold(ident) -> [(path, ident)]}` index.
+/// One source-aware resolution candidate.
+///
+/// `path` is retained solely as the released display value. Identity and
+/// deterministic ordering use `key` and `artifact_path`, never a checkout
+/// path (ADR-135/ADR-136).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolutionCandidate {
+    pub key: ArtifactKey,
+    pub artifact_path: ArtifactPath,
+    pub path: String,
+    pub identifier: String,
+}
+
+impl ResolutionCandidate {
+    pub(crate) fn from_row(row: &ValidationRow, identifier: String) -> Self {
+        Self {
+            key: row.key.clone(),
+            artifact_path: row.artifact_path.clone(),
+            path: row.path.clone(),
+            identifier,
+        }
+    }
+}
+
+/// Insertion-ordered `{casefold(ident) -> [source-aware candidate]}` index.
 pub struct ResolutionIndex {
     order: Vec<String>,
-    map: HashMap<String, Vec<(String, String)>>,
+    map: HashMap<String, Vec<ResolutionCandidate>>,
 }
 
 impl ResolutionIndex {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         ResolutionIndex {
             order: Vec::new(),
             map: HashMap::new(),
         }
     }
 
-    fn insert(&mut self, key: String, value: (String, String)) {
+    pub(crate) fn insert(&mut self, key: String, value: ResolutionCandidate) {
         match self.map.get_mut(&key) {
-            Some(v) => v.push(value),
+            Some(v) => {
+                if !v.iter().any(|candidate| {
+                    candidate.key == value.key && candidate.artifact_path == value.artifact_path
+                }) {
+                    v.push(value);
+                    v.sort_by(|left, right| {
+                        left.artifact_path
+                            .cmp(&right.artifact_path)
+                            .then_with(|| left.key.cmp(&right.key))
+                    });
+                }
+            }
             None => {
                 self.map.insert(key.clone(), vec![value]);
                 self.order.push(key);
@@ -386,11 +421,24 @@ impl ResolutionIndex {
         }
     }
 
-    pub fn get(&self, key: &str) -> &[(String, String)] {
+    pub fn get(&self, key: &str) -> &[ResolutionCandidate] {
         self.map.get(key).map(|v| v.as_slice()).unwrap_or(&[])
     }
 
-    fn values(&self) -> impl Iterator<Item = &Vec<(String, String)>> {
+    pub(crate) fn reference_key(reference: &str) -> String {
+        match reference.split_once("::") {
+            Some((alias, canonical_id)) if !canonical_id.contains("::") => {
+                format!("{alias}::{}", py_casefold(canonical_id))
+            }
+            _ => py_casefold(reference),
+        }
+    }
+
+    pub(crate) fn get_reference(&self, reference: &str) -> &[ResolutionCandidate] {
+        self.get(&Self::reference_key(reference))
+    }
+
+    fn values(&self) -> impl Iterator<Item = &Vec<ResolutionCandidate>> {
         self.order.iter().map(|k| &self.map[k])
     }
 }
@@ -399,7 +447,10 @@ pub fn resolution_index_from_rows(rows: &[ValidationRow]) -> ResolutionIndex {
     let mut index = ResolutionIndex::new();
     for row in rows {
         for ident in &row.identifiers {
-            index.insert(py_casefold(ident), (row.path.clone(), ident.clone()));
+            index.insert(
+                py_casefold(ident),
+                ResolutionCandidate::from_row(row, ident.clone()),
+            );
         }
     }
     index
@@ -491,20 +542,20 @@ pub(crate) fn normalized_scope_path(entry: &str) -> Option<String> {
 fn resolved_unique<'a>(
     index: &'a ResolutionIndex,
     reference: &str,
-    source_path: &str,
-) -> Option<&'a str> {
-    let targets = index.get(&py_casefold(reference));
-    if targets.len() != 1 || targets[0].0 == source_path {
+    source_key: &ArtifactKey,
+) -> Option<&'a ResolutionCandidate> {
+    let targets = index.get_reference(reference);
+    if targets.len() != 1 || targets[0].key == *source_key {
         return None;
     }
-    Some(&targets[0].0)
+    Some(&targets[0])
 }
 
 /// Outcome of resolving one internal reference against the index: checked
 /// empty -> not found, then multiple -> ambiguous, then same-path -> self,
 /// else uniquely resolved. Shared by the issue and `Relationship` loops.
 enum ReferenceResolution<'a> {
-    Resolved(&'a str),
+    Resolved(&'a ResolutionCandidate),
     NotFound,
     Ambiguous,
     SelfRef,
@@ -513,17 +564,17 @@ enum ReferenceResolution<'a> {
 fn classify_reference<'a>(
     index: &'a ResolutionIndex,
     reference: &str,
-    source_path: &str,
+    source_key: &ArtifactKey,
 ) -> ReferenceResolution<'a> {
-    let targets = index.get(&py_casefold(reference));
+    let targets = index.get_reference(reference);
     if targets.is_empty() {
         ReferenceResolution::NotFound
     } else if targets.len() > 1 {
         ReferenceResolution::Ambiguous
-    } else if targets[0].0 == source_path {
+    } else if targets[0].key == *source_key {
         ReferenceResolution::SelfRef
     } else {
-        ReferenceResolution::Resolved(&targets[0].0)
+        ReferenceResolution::Resolved(&targets[0])
     }
 }
 
@@ -536,64 +587,69 @@ fn resolve_references(
     (checked, issues)
 }
 
-/// Tarjan SCC over the sorted-adjacency graph; components of size > 1,
-/// each sorted, ordered by first element.
-fn cyclic_components(adjacency: &[(String, Vec<String>)]) -> Vec<Vec<String>> {
-    let adj: HashMap<&str, &Vec<String>> =
-        adjacency.iter().map(|(k, v)| (k.as_str(), v)).collect();
-    let mut nodes: Vec<&str> = adjacency
+/// Tarjan SCC over source-aware keys. Traversal and output are ordered by the
+/// corresponding stable `(source, relative_path)`, not display paths.
+fn cyclic_components(
+    adjacency: &[(ArtifactKey, Vec<ArtifactKey>)],
+    paths: &HashMap<ArtifactKey, ArtifactPath>,
+) -> Vec<Vec<ArtifactKey>> {
+    let adj: HashMap<ArtifactKey, Vec<ArtifactKey>> = adjacency.iter().cloned().collect();
+    let mut nodes: Vec<ArtifactKey> = adjacency
         .iter()
-        .flat_map(|(k, vs)| std::iter::once(k.as_str()).chain(vs.iter().map(|v| v.as_str())))
+        .flat_map(|(key, values)| std::iter::once(key.clone()).chain(values.iter().cloned()))
         .collect();
-    nodes.sort();
+    nodes.sort_by(|left, right| paths[left].cmp(&paths[right]).then_with(|| left.cmp(right)));
     nodes.dedup();
 
-    struct State<'a> {
-        indices: HashMap<&'a str, usize>,
-        lowlink: HashMap<&'a str, usize>,
-        on_stack: std::collections::HashSet<&'a str>,
-        stack: Vec<&'a str>,
+    struct State {
+        indices: HashMap<ArtifactKey, usize>,
+        lowlink: HashMap<ArtifactKey, usize>,
+        on_stack: std::collections::HashSet<ArtifactKey>,
+        stack: Vec<ArtifactKey>,
         counter: usize,
-        components: Vec<Vec<String>>,
+        components: Vec<Vec<ArtifactKey>>,
     }
 
-    fn strongconnect<'a>(
-        v: &'a str,
-        adj: &HashMap<&'a str, &'a Vec<String>>,
-        st: &mut State<'a>,
+    fn strongconnect(
+        v: &ArtifactKey,
+        adj: &HashMap<ArtifactKey, Vec<ArtifactKey>>,
+        paths: &HashMap<ArtifactKey, ArtifactPath>,
+        st: &mut State,
     ) {
-        st.indices.insert(v, st.counter);
-        st.lowlink.insert(v, st.counter);
+        st.indices.insert(v.clone(), st.counter);
+        st.lowlink.insert(v.clone(), st.counter);
         st.counter += 1;
-        st.stack.push(v);
-        st.on_stack.insert(v);
+        st.stack.push(v.clone());
+        st.on_stack.insert(v.clone());
         if let Some(neighbors) = adj.get(v) {
-            for w in neighbors.iter() {
-                let w = w.as_str();
+            for w in neighbors {
                 if !st.indices.contains_key(w) {
-                    strongconnect(w, adj, st);
+                    strongconnect(w, adj, paths, st);
                     let lw = st.lowlink[w];
                     let lv = st.lowlink[v];
-                    st.lowlink.insert(v, lv.min(lw));
+                    st.lowlink.insert(v.clone(), lv.min(lw));
                 } else if st.on_stack.contains(w) {
                     let iw = st.indices[w];
                     let lv = st.lowlink[v];
-                    st.lowlink.insert(v, lv.min(iw));
+                    st.lowlink.insert(v.clone(), lv.min(iw));
                 }
             }
         }
         if st.lowlink[v] == st.indices[v] {
-            let mut component: Vec<String> = Vec::new();
+            let mut component: Vec<ArtifactKey> = Vec::new();
             loop {
                 let w = st.stack.pop().expect("stack nonempty");
-                st.on_stack.remove(w);
-                component.push(w.to_string());
-                if w == v {
+                st.on_stack.remove(&w);
+                let complete = w == *v;
+                component.push(w);
+                if complete {
                     break;
                 }
             }
             if component.len() > 1 {
-                component.sort();
+                component.sort_by(|left, right| {
+                    paths[left].cmp(&paths[right]).then_with(|| left.cmp(right))
+                });
                 st.components.push(component);
             }
         }
@@ -609,19 +665,35 @@ fn cyclic_components(adjacency: &[(String, Vec<String>)]) -> Vec<Vec<String>> {
     };
     for node in &nodes {
         if !st.indices.contains_key(node) {
-            strongconnect(node, &adj, &mut st);
+            strongconnect(node, &adj, paths, &mut st);
         }
     }
-    st.components.sort_by(|a, b| a[0].cmp(&b[0]));
+    st.components.sort_by(|left, right| {
+        paths[&left[0]]
+            .cmp(&paths[&right[0]])
+            .then_with(|| left[0].cmp(&right[0]))
+    });
     st.components
 }
 
-fn cycle_issues(rows: &[ValidationRow], index: &ResolutionIndex) -> Vec<RelationshipIssue> {
+fn cycle_issues(
+    rows: &[ValidationRow],
+    target_rows: &[ValidationRow],
+    index: &ResolutionIndex,
+) -> Vec<RelationshipIssue> {
+    let paths: HashMap<ArtifactKey, ArtifactPath> = target_rows
+        .iter()
+        .map(|row| (row.key.clone(), row.artifact_path.clone()))
+        .collect();
+    let display_paths: HashMap<&ArtifactKey, &str> = target_rows
+        .iter()
+        .map(|row| (&row.key, row.path.as_str()))
+        .collect();
     // Sorted acyclic edge kinds — today only `supersedes`.
     let mut issues = Vec::new();
     for kind in ["supersedes"] {
         // `_acyclic_adjacency`: {source -> sorted unique resolved non-self targets}.
-        let mut adjacency: Vec<(String, Vec<String>)> = Vec::new();
+        let mut adjacency: Vec<(ArtifactKey, Vec<ArtifactKey>)> = Vec::new();
         for row in rows {
             if row.spec_name.is_none() {
                 continue;
@@ -632,27 +704,34 @@ fn cycle_issues(rows: &[ValidationRow], index: &ResolutionIndex) -> Vec<Relation
                 .find(|(s, _)| s == kind)
                 .map(|(_, r)| r.as_slice())
                 .unwrap_or(&[]);
-            let mut targets: Vec<String> = Vec::new();
+            let mut targets: Vec<ArtifactKey> = Vec::new();
             for reference in refs {
-                if let Some(t) = resolved_unique(index, reference, &row.path) {
-                    if !targets.iter().any(|x| x == t) {
-                        targets.push(t.to_string());
+                if let Some(target) = resolved_unique(index, reference, &row.key) {
+                    if !targets.iter().any(|key| key == &target.key) {
+                        targets.push(target.key.clone());
                     }
                 }
             }
             if !targets.is_empty() {
-                targets.sort();
-                adjacency.push((row.path.clone(), targets));
+                targets.sort_by(|left, right| {
+                    paths[left].cmp(&paths[right]).then_with(|| left.cmp(right))
+                });
+                adjacency.push((row.key.clone(), targets));
             }
         }
-        for component in cyclic_components(&adjacency) {
+        for component in cyclic_components(&adjacency, &paths) {
             issues.push(RelationshipIssue {
                 code: ISSUE_RELATIONSHIP_CYCLE.to_string(),
                 source_path: None,
                 relationship: Some(kind.to_string()),
                 target: None,
                 identifier: None,
-                paths: Some(component),
+                paths: Some(
+                    component
+                        .iter()
+                        .map(|key| display_paths[key].to_string())
+                        .collect(),
+                ),
             });
         }
     }
@@ -700,40 +779,64 @@ pub fn validation_from_rows(
     rows: &[ValidationRow],
     recursive: bool,
 ) -> RelationshipValidation {
+    let index = resolution_index_from_rows(rows);
+    validation_from_rows_with_index(directory, rows, rows, recursive, &index, true)
+}
+
+/// Source-aware validation core used by the composed read model. The caller
+/// supplies the one resolution index so qualified references and override
+/// redirects cannot diverge between graph construction and validation.
+pub(crate) fn validation_from_rows_with_index(
+    directory: &str,
+    rows: &[ValidationRow],
+    target_rows: &[ValidationRow],
+    recursive: bool,
+    index: &ResolutionIndex,
+    include_duplicate_identifiers: bool,
+) -> RelationshipValidation {
     let mut issues: Vec<RelationshipIssue> = Vec::new();
 
     // Duplicate identifiers first, sorted by display identifier (casefold).
-    let mut ident_index = ResolutionIndex::new();
-    for row in rows {
-        ident_index.insert(
-            py_casefold(&row.canonical_id),
-            (row.path.clone(), row.canonical_id.clone()),
-        );
-    }
-    let mut duplicates: Vec<(String, Vec<String>)> = Vec::new();
-    for entries in ident_index.values() {
-        if entries.len() > 1 {
-            let display = entries
-                .iter()
-                .min_by(|a, b| a.0.cmp(&b.0))
-                .expect("nonempty")
-                .1
-                .clone();
-            let mut paths: Vec<String> = entries.iter().map(|(p, _)| p.clone()).collect();
-            paths.sort();
-            duplicates.push((display, paths));
+    if include_duplicate_identifiers {
+        let mut ident_index = ResolutionIndex::new();
+        for row in rows {
+            ident_index.insert(
+                py_casefold(&row.canonical_id),
+                ResolutionCandidate::from_row(row, row.canonical_id.clone()),
+            );
         }
-    }
-    duplicates.sort_by_cached_key(|a| py_casefold(&a.0));
-    for (display, dup_paths) in duplicates {
-        issues.push(RelationshipIssue {
-            code: ISSUE_DUPLICATE_IDENTIFIER.to_string(),
-            source_path: None,
-            relationship: None,
-            target: None,
-            identifier: Some(display),
-            paths: Some(dup_paths),
-        });
+        let mut duplicates: Vec<(String, Vec<String>)> = Vec::new();
+        for entries in ident_index.values() {
+            if entries.len() > 1 {
+                let display = entries
+                    .iter()
+                    .min_by(|left, right| left.artifact_path.cmp(&right.artifact_path))
+                    .expect("nonempty")
+                    .identifier
+                    .clone();
+                let mut paths: Vec<&ResolutionCandidate> = entries.iter().collect();
+                paths.sort_by(|left, right| {
+                    left.artifact_path
+                        .cmp(&right.artifact_path)
+                        .then_with(|| left.key.cmp(&right.key))
+                });
+                duplicates.push((
+                    display,
+                    paths.into_iter().map(|entry| entry.path.clone()).collect(),
+                ));
+            }
+        }
+        duplicates.sort_by_cached_key(|entry| py_casefold(&entry.0));
+        for (display, dup_paths) in duplicates {
+            issues.push(RelationshipIssue {
+                code: ISSUE_DUPLICATE_IDENTIFIER.to_string(),
+                source_path: None,
+                relationship: None,
+                target: None,
+                identifier: Some(display),
+                paths: Some(dup_paths),
+            });
+        }
     }
 
     // Edge-legality: unsupported declared sections (canonical order per row).
@@ -753,9 +856,8 @@ pub fn validation_from_rows(
         }
     }
 
-    let index = resolution_index_from_rows(rows);
-    let by_path: HashMap<&str, &ValidationRow> =
-        rows.iter().map(|r| (r.path.as_str(), r)).collect();
+    let by_key: HashMap<&ArtifactKey, &ValidationRow> =
+        target_rows.iter().map(|row| (&row.key, row)).collect();
 
     // Range violations.
     for row in rows {
@@ -770,10 +872,13 @@ pub fn validation_from_rows(
                 continue;
             }
             for reference in refs {
-                let Some(target) = resolved_unique(&index, reference, &row.path) else {
+                let Some(target) = resolved_unique(index, reference, &row.key) else {
                     continue;
                 };
-                let Some(target_spec) = by_path[target].spec_name.as_deref() else {
+                let Some(target_row) = by_key.get(&target.key) else {
+                    continue;
+                };
+                let Some(target_spec) = target_row.spec_name.as_deref() else {
                     continue;
                 };
                 if !edge.range.contains(&target_spec) {
@@ -801,10 +906,13 @@ pub fn validation_from_rows(
                 continue;
             }
             for reference in refs {
-                let Some(target) = resolved_unique(&index, reference, &row.path) else {
+                let Some(target) = resolved_unique(index, reference, &row.key) else {
                     continue;
                 };
-                if by_path[target].retired {
+                if by_key
+                    .get(&target.key)
+                    .is_some_and(|target_row| target_row.retired)
+                {
                     issues.push(RelationshipIssue::reference(
                         ISSUE_TARGET_SUPERSEDED,
                         &row.path,
@@ -817,10 +925,10 @@ pub fn validation_from_rows(
     }
 
     // Acyclicity.
-    issues.extend(cycle_issues(rows, &index));
+    issues.extend(cycle_issues(rows, target_rows, index));
 
     // Referential integrity.
-    let (checked, ref_issues) = resolve_references(rows, &index);
+    let (checked, ref_issues) = resolve_references(rows, index);
     issues.extend(ref_issues);
 
     // Code-scope existence (appended last).
@@ -893,16 +1001,24 @@ fn resolution_labels(
 ) -> HashMap<String, String> {
     // Resolution index over every alias of every item, in item order.
     let mut index = ResolutionIndex::new();
-    let mut info: HashMap<&str, (String, Option<&'static ArtifactSpec>, Option<String>)> =
+    let mut info: HashMap<&ArtifactKey, (String, Option<&'static ArtifactSpec>, Option<String>)> =
         HashMap::new();
     for item in items {
         let identifiers = artifact_identifiers(&item.artifact, item.spec, &item.path);
         for ident in &identifiers {
-            index.insert(py_casefold(ident), (item.path.clone(), ident.clone()));
+            index.insert(
+                py_casefold(ident),
+                ResolutionCandidate {
+                    key: item.key.clone(),
+                    artifact_path: item.artifact_path.clone(),
+                    path: item.path.clone(),
+                    identifier: ident.clone(),
+                },
+            );
         }
         let canonical = artifact_identifier(&item.artifact, item.spec, &item.path);
         info.insert(
-            item.path.as_str(),
+            &item.key,
             (canonical, item.spec, item.artifact.product.title.clone()),
         );
     }
@@ -915,7 +1031,8 @@ fn resolution_labels(
                     continue;
                 }
                 let entries = index.get(&key);
-                let mut distinct: Vec<&str> = entries.iter().map(|(p, _)| p.as_str()).collect();
+                let mut distinct: Vec<&ArtifactKey> =
+                    entries.iter().map(|entry| &entry.key).collect();
                 distinct.sort();
                 distinct.dedup();
                 if distinct.len() != 1 {
@@ -1151,10 +1268,6 @@ pub fn resolve_relationships(
     index: &ResolutionIndex,
 ) -> Vec<Relationship> {
     let mut out = Vec::new();
-    let artifact_paths: HashMap<&str, &ArtifactPath> = rows
-        .iter()
-        .map(|row| (row.path.as_str(), &row.artifact_path))
-        .collect();
     for row in rows {
         for (section, refs) in &row.edges {
             let external = edge_spec(section).is_some_and(|e| e.external);
@@ -1171,22 +1284,23 @@ pub fn resolve_relationships(
                     });
                     continue;
                 }
-                let (resolved, issue) = match classify_reference(index, reference, &row.path) {
-                    ReferenceResolution::Resolved(target) => (Some(target.to_string()), None),
+                let (resolved, resolved_artifact, issue) =
+                    match classify_reference(index, reference, &row.key) {
+                    ReferenceResolution::Resolved(target) => (
+                        Some(target.path.clone()),
+                        Some(target.artifact_path.clone()),
+                        None,
+                    ),
                     ReferenceResolution::NotFound => {
-                        (None, Some(ISSUE_TARGET_NOT_FOUND.to_string()))
+                        (None, None, Some(ISSUE_TARGET_NOT_FOUND.to_string()))
                     }
                     ReferenceResolution::Ambiguous => {
-                        (None, Some(ISSUE_TARGET_AMBIGUOUS.to_string()))
+                        (None, None, Some(ISSUE_TARGET_AMBIGUOUS.to_string()))
                     }
                     ReferenceResolution::SelfRef => {
-                        (None, Some(ISSUE_SELF_REFERENCE.to_string()))
+                        (None, None, Some(ISSUE_SELF_REFERENCE.to_string()))
                     }
                 };
-                let resolved_artifact = resolved
-                    .as_deref()
-                    .and_then(|path| artifact_paths.get(path).copied())
-                    .cloned();
                 out.push(Relationship {
                     source_artifact: Some(row.artifact_path.clone()),
                     source_path: row.path.clone(),
@@ -1229,9 +1343,14 @@ pub struct RelationshipSummary {
 fn resolve_references_full(
     rows: &[ValidationRow],
     index: &ResolutionIndex,
-) -> (usize, Vec<RelationshipIssue>, std::collections::HashSet<String>) {
+) -> (
+    usize,
+    Vec<RelationshipIssue>,
+    std::collections::HashSet<ArtifactKey>,
+) {
     let mut issues = Vec::new();
-    let mut resolved_targets: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut resolved_targets: std::collections::HashSet<ArtifactKey> =
+        std::collections::HashSet::new();
     let mut checked = 0usize;
     for row in rows {
         if row.spec_name.is_none() {
@@ -1243,9 +1362,9 @@ fn resolve_references_full(
             }
             for reference in refs {
                 checked += 1;
-                let code = match classify_reference(index, reference, &row.path) {
+                let code = match classify_reference(index, reference, &row.key) {
                     ReferenceResolution::Resolved(target) => {
-                        resolved_targets.insert(target.to_string());
+                        resolved_targets.insert(target.key.clone());
                         continue;
                     }
                     ReferenceResolution::NotFound => ISSUE_TARGET_NOT_FOUND,
@@ -1276,23 +1395,23 @@ pub fn summary_from_rows(rows: &[ValidationRow]) -> RelationshipSummary {
     let broken = ref_issues.len();
     let valid = checked - broken;
 
-    let known_paths: Vec<&str> = rows
+    let known_keys: Vec<&ArtifactKey> = rows
         .iter()
         .filter(|r| r.spec_name.is_some())
-        .map(|r| r.path.as_str())
+        .map(|r| &r.key)
         .collect();
-    let orphaned = known_paths
+    let orphaned = known_keys
         .iter()
-        .filter(|p| !resolved_targets.contains(**p))
+        .filter(|key| !resolved_targets.contains(**key))
         .count();
     let artifacts_with_rels = rows
         .iter()
         .filter(|r| r.spec_name.is_some() && !r.edges.is_empty())
         .count();
-    let coverage = if known_paths.is_empty() {
+    let coverage = if known_keys.is_empty() {
         1.0
     } else {
-        crate::pycompat::py_round(artifacts_with_rels as f64 / known_paths.len() as f64, 4)
+        crate::pycompat::py_round(artifacts_with_rels as f64 / known_keys.len() as f64, 4)
     };
     RelationshipSummary {
         total: checked,
