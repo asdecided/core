@@ -45,7 +45,7 @@ jobs:
     needs: version
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.version.outputs.tag }}
       - name: Require one matching SemVer entry
@@ -68,7 +68,7 @@ jobs:
       group: crates-publish-${{ needs.version.outputs.number }}
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.version.outputs.tag }}
       - name: Install pinned Rust toolchain
