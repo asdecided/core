@@ -147,6 +147,12 @@ jobs:
         with:
           workspaces: rust
 
+      # Formatting is a merge gate: the tree must match the pinned rustfmt
+      # exactly. Runs before the build so a drift fails in seconds.
+      - name: Formatting (rustfmt, pinned toolchain)
+        working-directory: rust
+        run: cargo fmt --all -- --check
+
       - name: Build native release binaries
         working-directory: rust
         run: cargo build --release --locked
