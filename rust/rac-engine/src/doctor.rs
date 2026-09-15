@@ -33,6 +33,7 @@ pub const CODE_HIGH_FAN_OUT_HUB: &str = "high-fan-out-hub";
 pub const CODE_INJECTION_CONTENT: &str = "injection-style-content";
 pub const CODE_UNLINKED_REFERENCE: &str = "unlinked-reference";
 pub const CODE_SUSPECT_ARTIFACT: &str = "suspect-artifact";
+pub const CODE_ARTIFACT_SPEC_SKIPPED: &str = crate::spec::CODE_SPEC_SKIPPED;
 
 const FIX_ORPHAN: &str = "Reference it from a related artifact (a `## Related ...` section), \
                           or confirm it is intentionally standalone.";
@@ -95,6 +96,7 @@ fn severity_rank(severity: &str) -> i64 {
 pub fn diagnose(directory: &str, recursive: bool, hub_threshold: i64) -> DoctorReport {
     let items = corpus_items(directory, recursive);
     let mut findings: Vec<DoctorFinding> = Vec::new();
+    findings.extend(spec_bundle_findings());
     findings.extend(validation_findings(directory, recursive));
     findings.extend(relationship_findings(directory, recursive));
     findings.extend(degree_findings(&items, hub_threshold));
@@ -131,6 +133,7 @@ pub fn diagnose_composed(
     let relationship_validation = corpus.validate_relationships(directory, recursive);
     let identity_index = corpus.identity_index();
     let mut findings = Vec::new();
+    findings.extend(spec_bundle_findings());
     findings.extend(validation_findings_from_result(&validation));
     findings.extend(relationship_findings_from_result(
         directory,
@@ -160,6 +163,34 @@ pub fn diagnose_composed(
         hub_threshold,
         findings,
     }
+}
+
+/// One warning per bundle element the registry skipped (ADR-083 decision
+/// 2). Empty — and therefore invisible — for a corpus with no pinned bundle.
+fn spec_bundle_findings() -> Vec<DoctorFinding> {
+    let Some(bundle) = crate::spec::active_bundle() else {
+        return Vec::new();
+    };
+    bundle
+        .warnings
+        .iter()
+        .map(|warning| DoctorFinding {
+            path: bundle.pin.path.clone(),
+            code: CODE_ARTIFACT_SPEC_SKIPPED,
+            severity: SEVERITY_WARNING,
+            problem: match &warning.name {
+                Some(name) => format!("bundle element {} skipped: {}", name, warning.message),
+                None => format!(
+                    "bundle element #{} skipped: {}",
+                    warning.index, warning.message
+                ),
+            },
+            fix: "Fix the element in the spec bundle and re-pin its digest in \
+                  .decided/config.yaml; built-ins always win and the first declaration \
+                  of a name wins (ADR-083)."
+                .to_string(),
+        })
+        .collect()
 }
 
 /// One finding per structurally invalid artifact; the problem names the

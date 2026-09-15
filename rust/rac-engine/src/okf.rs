@@ -16,19 +16,14 @@ use crate::gitinfo;
 use crate::markdown::split_frontmatter;
 use crate::pycompat::{py_relpath, py_strip, read_text_universal};
 
-/// RAC `type` → OKF `type` (`decided.core.okf.OKF_TYPE`, ADR-048).
-fn okf_type(rac_type: &str) -> &'static str {
-    match rac_type {
-        "requirement" => "Requirement",
-        "decision" => "ADR",
-        "design" => "Design",
-        "roadmap" => "Roadmap",
-        "prompt" => "Prompt",
-        // Unknown-type files are excluded from the export, so every
-        // exported artifact's type resolves (a KeyError would be an
-        // engine bug, not an input condition).
-        other => panic!("no OKF type mapping for {other:?}"),
-    }
+/// RAC `type` → OKF `type` (`decided.core.okf.OKF_TYPE`, ADR-048). The five
+/// built-in rows are fixed in `docs/okf-profile.md`; a bundle-declared type
+/// maps through its `okf_type`, defaulting to its display (ADR-083 decision
+/// 6). Unknown-type files are excluded from the export, so every exported
+/// artifact's type resolves; an unregistered type here would be an engine
+/// bug, not an input condition, and degrades to the raw type name.
+fn okf_type(rac_type: &str) -> String {
+    crate::spec::okf_type_for(rac_type).unwrap_or_else(|| rac_type.to_string())
 }
 
 /// Human plural headings for the index, in the fixed disclosure order.
@@ -188,7 +183,22 @@ fn index(export: &CorpusExport, rel: &HashMap<&str, String>) -> String {
              this index is a generated entry point."
         ),
     ];
-    for (type_name, heading) in INDEX_SECTIONS {
+    // The fixed five sections first, then one section per bundle-declared
+    // type in registry order (ADR-083 decision 6); a corpus without a
+    // bundle renders exactly the fixed five.
+    let mut sections: Vec<(String, String)> = INDEX_SECTIONS
+        .iter()
+        .map(|(type_name, heading)| (type_name.to_string(), heading.to_string()))
+        .collect();
+    for spec in crate::spec::specs() {
+        if !crate::spec::is_builtin(&spec.name) {
+            sections.push((
+                spec.name.clone(),
+                crate::spec::plural_display(&spec.display),
+            ));
+        }
+    }
+    for (type_name, heading) in sections {
         let members: Vec<&ExportArtifact> = export
             .artifacts
             .iter()
