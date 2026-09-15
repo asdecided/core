@@ -212,11 +212,7 @@ fn index(export: &CorpusExport, rel: &HashMap<&str, String>) -> String {
 /// `_log(export, recency, rel)` — corpus history grouped by commit date
 /// (the `%cI` civil date, offset preserved), newest first; within a day,
 /// path order. No git history → the placeholder.
-fn log(
-    export: &CorpusExport,
-    recency: &[ArtifactRecency],
-    rel: &HashMap<&str, String>,
-) -> String {
+fn log(export: &CorpusExport, recency: &[ArtifactRecency], rel: &HashMap<&str, String>) -> String {
     let title_by_path: HashMap<&str, &str> = export
         .artifacts
         .iter()
@@ -224,7 +220,9 @@ fn log(
         .collect();
     let mut dated: BTreeMap<String, Vec<&str>> = BTreeMap::new();
     for a in recency {
-        let Some(committed) = &a.last_committed else { continue };
+        let Some(committed) = &a.last_committed else {
+            continue;
+        };
         if !title_by_path.contains_key(a.path.as_str()) {
             continue;
         }

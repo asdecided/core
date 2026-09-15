@@ -331,14 +331,7 @@ impl ComposedCorpus {
             .iter()
             .find(|item| item.origin.layer == Layer::Local)
             .map(|item| item.origin.source.clone());
-        Self::build(
-            items,
-            child_source,
-            None,
-            None,
-            Vec::new(),
-            HashMap::new(),
-        )
+        Self::build(items, child_source, None, None, Vec::new(), HashMap::new())
     }
 
     /// Compose one writable child with one already-verified read-only parent.

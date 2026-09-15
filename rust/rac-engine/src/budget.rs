@@ -62,7 +62,11 @@ pub fn char_len(s: &str) -> i64 {
 /// share can go negative).
 pub fn py_slice_to(s: &str, stop: i64) -> String {
     let n = char_len(s);
-    let stop = if stop < 0 { (n + stop).max(0) } else { stop.min(n) };
+    let stop = if stop < 0 {
+        (n + stop).max(0)
+    } else {
+        stop.min(n)
+    };
     s.chars().take(stop as usize).collect()
 }
 
@@ -159,12 +163,7 @@ fn existing_omitted(payload: &Value) -> i64 {
         .unwrap_or(0)
 }
 
-fn truncate_list_strategy(
-    payload: &Value,
-    key: &str,
-    budget: i64,
-    hint: &str,
-) -> (Value, bool) {
+fn truncate_list_strategy(payload: &Value, key: &str, budget: i64, hint: &str) -> (Value, bool) {
     let Some(items) = payload.get(key).and_then(Value::as_array) else {
         return (payload.clone(), false);
     };

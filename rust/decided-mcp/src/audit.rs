@@ -44,12 +44,17 @@ pub struct AuditConfig {
 /// audit posture is never silently misconfigured).
 pub fn load_audit_config(root: &str) -> Result<AuditConfig, String> {
     use rac_engine::frontmatter::{yaml_load_config, Yaml};
-    let disabled = AuditConfig { enabled: false, path: String::new(), on_write_error: "warn".into() };
+    let disabled = AuditConfig {
+        enabled: false,
+        path: String::new(),
+        on_write_error: "warn".into(),
+    };
     let Some(config_path) = find_config_file(root) else {
         return Ok(disabled);
     };
     let text = std::fs::read_to_string(&config_path).map_err(|e| format!("invalid YAML: {e}"))?;
-    let Yaml::Map(pairs) = yaml_load_config(&text).map_err(|p| format!("invalid YAML: {p}"))? else {
+    let Yaml::Map(pairs) = yaml_load_config(&text).map_err(|p| format!("invalid YAML: {p}"))?
+    else {
         return Ok(disabled);
     };
     let get = |m: &[(Yaml, Yaml)], key: &str| -> Option<Yaml> {
@@ -79,7 +84,11 @@ pub fn load_audit_config(root: &str) -> Result<AuditConfig, String> {
         Some(Yaml::Str(s)) if s == "warn" || s == "block" => s,
         Some(_) => return Err("'audit.on_write_error' must be one of warn, block".to_string()),
     };
-    Ok(AuditConfig { enabled, path, on_write_error })
+    Ok(AuditConfig {
+        enabled,
+        path,
+        on_write_error,
+    })
 }
 
 /// `DECIDED_AUDIT_PATH` > config `path` > `$XDG_STATE_HOME/decided/audit.jsonl`.
@@ -96,7 +105,9 @@ pub fn resolve_audit_path(configured: &str) -> PathBuf {
         .map(PathBuf::from)
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or_else(|| {
-            let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+            let home = std::env::var_os("HOME")
+                .map(PathBuf::from)
+                .unwrap_or_default();
             home.join(".local").join("state")
         });
     base.join("decided").join(AUDIT_FILENAME)
@@ -162,7 +173,9 @@ pub struct Recorder {
 /// `X-AsDecided-Principal` is the only accepted carrier. Duplicate
 /// occurrences are rejected because accepting them would make intermediary
 /// header coalescing ambiguous.
-pub fn resolve_http_principal(headers: &[(String, String)]) -> Result<Option<String>, &'static str> {
+pub fn resolve_http_principal(
+    headers: &[(String, String)],
+) -> Result<Option<String>, &'static str> {
     principal_values(headers, CANONICAL_PRINCIPAL_HEADER)
 }
 
@@ -206,7 +219,11 @@ pub fn build(root: &str, transport: &'static str, config: &AuditConfig) -> Optio
     Some(Recorder {
         path,
         principal: resolve_principal(root, !shared),
-        on_write_error: if shared { "block".to_string() } else { config.on_write_error.clone() },
+        on_write_error: if shared {
+            "block".to_string()
+        } else {
+            config.on_write_error.clone()
+        },
         transport,
         session: token_hex(8),
         warned: false,
@@ -217,12 +234,19 @@ impl Recorder {
     fn record(&mut self, event: &Value) -> bool {
         use std::io::Write;
         let line = dumps_compact(event) + "\n";
-        match std::fs::OpenOptions::new().create(true).append(true).open(&self.path) {
+        match std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.path)
+        {
             Ok(mut f) => f.write_all(line.as_bytes()).is_ok(),
             Err(e) => {
                 if !self.warned {
-                    let action =
-                        if self.on_write_error == "block" { "refusing tool calls" } else { "continuing" };
+                    let action = if self.on_write_error == "block" {
+                        "refusing tool calls"
+                    } else {
+                        "continuing"
+                    };
                     eprintln!(
                         "decided-mcp: audit write failed ({e}); {action} \
 (audit.on_write_error={}, path={}).",
@@ -291,7 +315,10 @@ pub fn observe_result(
     );
     if !recorder.record(&event) && recorder.on_write_error == "block" {
         let mut err = Map::new();
-        err.insert("schema_version".into(), Value::String(SCHEMA_VERSION.into()));
+        err.insert(
+            "schema_version".into(),
+            Value::String(SCHEMA_VERSION.into()),
+        );
         err.insert("error".into(), Value::String("audit-unavailable".into()));
         err.insert("tool".into(), Value::String(tool.into()));
         // Preserve the established block-on-write wire behavior: the audit
@@ -313,7 +340,10 @@ fn build_event(
     asserted: bool,
 ) -> Value {
     let mut e = Map::new();
-    e.insert("schema_version".into(), Value::String(SCHEMA_VERSION.into()));
+    e.insert(
+        "schema_version".into(),
+        Value::String(SCHEMA_VERSION.into()),
+    );
     e.insert("ts".into(), Value::String(iso_now()));
     e.insert("session".into(), Value::String(recorder.session.clone()));
     e.insert("principal".into(), Value::String(principal.into()));
@@ -431,7 +461,9 @@ fn token_hex(nbytes: usize) -> String {
             state ^= d.as_nanos() as u64;
         }
         for b in &mut buf {
-            state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             *b = (state >> 33) as u8;
         }
     }
@@ -445,7 +477,9 @@ fn token_hex(nbytes: usize) -> String {
 
 /// `datetime.now(UTC).isoformat(timespec="milliseconds")` with `+00:00`→`Z`.
 fn iso_now() -> String {
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
     let secs = now.as_secs() as i64;
     let millis = now.subsec_millis();
     let days = secs.div_euclid(86_400);
@@ -475,10 +509,11 @@ mod tests {
 
     #[test]
     fn canonical_principal_is_resolved_and_trimmed() {
-        let headers = vec![
-            (CANONICAL_PRINCIPAL_HEADER.to_string(), "alice".to_string()),
-        ];
-        assert_eq!(resolve_http_principal(&headers).unwrap().as_deref(), Some("alice"));
+        let headers = vec![(CANONICAL_PRINCIPAL_HEADER.to_string(), "alice".to_string())];
+        assert_eq!(
+            resolve_http_principal(&headers).unwrap().as_deref(),
+            Some("alice")
+        );
     }
 
     #[test]
@@ -487,7 +522,10 @@ mod tests {
             (CANONICAL_PRINCIPAL_HEADER.to_string(), "alice".to_string()),
             (CANONICAL_PRINCIPAL_HEADER.to_string(), "alice".to_string()),
         ];
-        assert_eq!(resolve_http_principal(&duplicate), Err("duplicate principal header"));
+        assert_eq!(
+            resolve_http_principal(&duplicate),
+            Err("duplicate principal header")
+        );
     }
 
     #[test]
@@ -495,11 +533,20 @@ mod tests {
         let empty = vec![(CANONICAL_PRINCIPAL_HEADER.to_string(), "  ".to_string())];
         assert_eq!(resolve_http_principal(&empty).unwrap(), None);
 
-        let malformed = vec![(CANONICAL_PRINCIPAL_HEADER.to_string(), "alice\nproxy".to_string())];
-        assert_eq!(resolve_http_principal(&malformed), Err("malformed principal header"));
+        let malformed = vec![(
+            CANONICAL_PRINCIPAL_HEADER.to_string(),
+            "alice\nproxy".to_string(),
+        )];
+        assert_eq!(
+            resolve_http_principal(&malformed),
+            Err("malformed principal header")
+        );
 
         let oversized = vec![(CANONICAL_PRINCIPAL_HEADER.to_string(), "a".repeat(513))];
-        assert_eq!(resolve_http_principal(&oversized), Err("malformed principal header"));
+        assert_eq!(
+            resolve_http_principal(&oversized),
+            Err("malformed principal header")
+        );
     }
 
     #[test]
@@ -526,7 +573,9 @@ mod tests {
                 json!({"id": "F", "resolved": true, "provenance": {"path": "f.md"}}),
             ]
         );
-        assert!(!returned_records(&payload).iter().any(|item| item.to_string().contains("secret")));
+        assert!(!returned_records(&payload)
+            .iter()
+            .any(|item| item.to_string().contains("secret")));
         assert!(returned_records(r#"{"error":{"code":-1},"id":"A"}"#).is_empty());
     }
 

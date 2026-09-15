@@ -5,10 +5,12 @@
 use crate::classify::missing_sections;
 use crate::pycompat::py_round;
 use crate::relationships::{
-    summary_from_rows, validation_from_rows, CorpusItem, RelationshipSummary,
-    ValidationRow, ISSUE_SELF_REFERENCE, ISSUE_TARGET_AMBIGUOUS, ISSUE_TARGET_NOT_FOUND,
+    summary_from_rows, validation_from_rows, CorpusItem, RelationshipSummary, ValidationRow,
+    ISSUE_SELF_REFERENCE, ISSUE_TARGET_AMBIGUOUS, ISSUE_TARGET_NOT_FOUND,
 };
-use crate::validate::{apply_overrides, has_errors, load_overrides, py_title, validate, SeverityOverrides};
+use crate::validate::{
+    apply_overrides, has_errors, load_overrides, py_title, validate, SeverityOverrides,
+};
 
 // Stable attention codes (JSON contract, ADR-007).
 pub const ATTENTION_INVALID: &str = "invalid-artifact";
@@ -115,8 +117,7 @@ pub fn portfolio_row(item: &CorpusItem) -> PortfolioRow {
         },
         Some(spec) => {
             let (_, missing_rec) = missing_sections(&item.artifact, spec);
-            let identifier =
-                crate::identity::artifact_identifier(&item.artifact, item.spec, &path);
+            let identifier = crate::identity::artifact_identifier(&item.artifact, item.spec, &path);
             PortfolioRow {
                 path,
                 artifact_type: artifact_type.clone(),
@@ -213,8 +214,7 @@ pub fn portfolio_from_rows(
     let validation_rows: Vec<ValidationRow> = rows.iter().map(|r| r.validation.clone()).collect();
     let overrides: SeverityOverrides = load_overrides(directory);
     let rel_summary = summary_from_rows(&validation_rows);
-    let relationships_ok =
-        validation_from_rows(directory, &validation_rows, recursive).ok();
+    let relationships_ok = validation_from_rows(directory, &validation_rows, recursive).ok();
     portfolio_from_rows_with_analysis(
         directory,
         rows,
@@ -267,7 +267,6 @@ fn portfolio_from_rows_with_analysis(
     relationships_ok: bool,
     include_provenance: bool,
 ) -> PortfolioSummary {
-
     let mut by_type: Vec<(String, usize)> =
         BY_TYPE_ORDER.iter().map(|t| (t.to_string(), 0)).collect();
     let bump = |by_type: &mut Vec<(String, usize)>, t: &str| {
@@ -298,10 +297,8 @@ fn portfolio_from_rows_with_analysis(
             continue;
         }
         path_to_identifier.insert(row.path.clone(), row.identifier.clone());
-        artifact_path_to_identifier.insert(
-            row.validation.artifact_path.clone(),
-            row.identifier.clone(),
-        );
+        artifact_path_to_identifier
+            .insert(row.validation.artifact_path.clone(), row.identifier.clone());
 
         let issues = apply_overrides(row.validate_issues.clone(), &row.artifact_type, overrides);
         if has_errors(&issues) {
@@ -342,7 +339,13 @@ fn portfolio_from_rows_with_analysis(
 
     for issue in &rel_summary.issues {
         let source = issue.source_path.clone().unwrap_or_default();
-        let label = py_title(&issue.relationship.clone().unwrap_or_default().replace('_', " "));
+        let label = py_title(
+            &issue
+                .relationship
+                .clone()
+                .unwrap_or_default()
+                .replace('_', " "),
+        );
         let phrase = rel_issue_phrase(&issue.code);
         let identifier = if include_provenance {
             issue

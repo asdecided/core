@@ -319,11 +319,7 @@ impl FreshnessTracker {
                 self.items.insert(rel, item);
             }
         }
-        let current: HashSet<String> = self
-            .manifest
-            .iter()
-            .map(|(rel, _)| rel.clone())
-            .collect();
+        let current: HashSet<String> = self.manifest.iter().map(|(rel, _)| rel.clone()).collect();
         self.items.retain(|rel, _| current.contains(rel));
         if !changed.is_empty() {
             self.delta_paths.extend(changed.iter().cloned());
@@ -333,9 +329,12 @@ impl FreshnessTracker {
 
     fn reparse_full(&mut self) {
         let root = PathBuf::from(&self.root_str);
-        let paths: Vec<PathBuf> = self.manifest.iter().map(|(rel, _)| root.join(rel)).collect();
-        let (parsed, workers) =
-            crate::parallel_build::parallel_parse_paths(&self.root_str, &paths);
+        let paths: Vec<PathBuf> = self
+            .manifest
+            .iter()
+            .map(|(rel, _)| root.join(rel))
+            .collect();
+        let (parsed, workers) = crate::parallel_build::parallel_parse_paths(&self.root_str, &paths);
         self.last_parse_workers = workers;
         self.last_parse_files = paths.len();
         self.items = parsed
@@ -360,8 +359,7 @@ impl FreshnessTracker {
                 return;
             }
         }
-        let derived =
-            build_derived_index_from_items(&self.root_str, &self.ordered_items(), true);
+        let derived = build_derived_index_from_items(&self.root_str, &self.ordered_items(), true);
         self.model = Some(TrackerModel::Snapshot(Box::new(derived)));
         self.serving_generation += 1;
     }
@@ -395,44 +393,43 @@ impl FreshnessTracker {
             graph_candidate,
             scope_candidate,
             summary_candidate,
-        ) =
-            if self.model.is_none() && parsed.len() == present.len() {
-                self.delta_candidate_from_parsed(parsed)
-            } else if parsed.len() == present.len() {
-                let identity = self
-                    .delta_identity
-                    .as_ref()
-                    .expect("delta identity")
-                    .stage(changed, &parsed);
-                let search = self
-                    .delta_search
-                    .as_ref()
-                    .expect("delta search")
-                    .stage(changed, &parsed);
-                let graph = self
-                    .delta_graph
-                    .as_ref()
-                    .expect("delta graph")
-                    .stage(changed, &parsed, &identity);
-                let scope = self
-                    .delta_scope
-                    .as_ref()
-                    .expect("delta scope")
-                    .stage(changed, &parsed);
-                let summary = self
-                    .delta_summary
-                    .as_ref()
-                    .expect("delta summary")
-                    .stage(changed, &parsed);
-                let documents = self
-                    .delta_documents
-                    .as_ref()
-                    .expect("delta documents")
-                    .stage(changed, parsed);
-                (documents, identity, search, graph, scope, summary)
-            } else {
-                self.full_delta_candidate()
-            };
+        ) = if self.model.is_none() && parsed.len() == present.len() {
+            self.delta_candidate_from_parsed(parsed)
+        } else if parsed.len() == present.len() {
+            let identity = self
+                .delta_identity
+                .as_ref()
+                .expect("delta identity")
+                .stage(changed, &parsed);
+            let search = self
+                .delta_search
+                .as_ref()
+                .expect("delta search")
+                .stage(changed, &parsed);
+            let graph = self
+                .delta_graph
+                .as_ref()
+                .expect("delta graph")
+                .stage(changed, &parsed, &identity);
+            let scope = self
+                .delta_scope
+                .as_ref()
+                .expect("delta scope")
+                .stage(changed, &parsed);
+            let summary = self
+                .delta_summary
+                .as_ref()
+                .expect("delta summary")
+                .stage(changed, &parsed);
+            let documents = self
+                .delta_documents
+                .as_ref()
+                .expect("delta documents")
+                .stage(changed, parsed);
+            (documents, identity, search, graph, scope, summary)
+        } else {
+            self.full_delta_candidate()
+        };
         let (
             candidate,
             identity_candidate,
@@ -440,19 +437,18 @@ impl FreshnessTracker {
             graph_candidate,
             scope_candidate,
             summary_candidate,
-        ) =
-            if candidate.live_len() == self.manifest.len() {
-                (
-                    candidate,
-                    identity_candidate,
-                    search_candidate,
-                    graph_candidate,
-                    scope_candidate,
-                    summary_candidate,
-                )
-            } else {
-                self.full_delta_candidate()
-            };
+        ) = if candidate.live_len() == self.manifest.len() {
+            (
+                candidate,
+                identity_candidate,
+                search_candidate,
+                graph_candidate,
+                scope_candidate,
+                summary_candidate,
+            )
+        } else {
+            self.full_delta_candidate()
+        };
         let hash = corpus_hash_from_complete_manifest(&self.manifest);
         let serving_generation = self.serving_generation + 1;
         let generation = DeltaGeneration {
@@ -493,8 +489,7 @@ impl FreshnessTracker {
             .iter()
             .map(|(rel, _)| root.join(rel))
             .collect();
-        let (parsed, workers) =
-            crate::parallel_build::parallel_parse_paths(&self.root_str, &paths);
+        let (parsed, workers) = crate::parallel_build::parallel_parse_paths(&self.root_str, &paths);
         self.last_parse_workers = workers;
         self.last_parse_files = paths.len();
         let parsed: BTreeMap<String, CorpusItem> = parsed
@@ -515,22 +510,18 @@ impl FreshnessTracker {
         ScopeGeneration,
         SummaryGeneration,
     ) {
-        let identity = IdentityGeneration::from_items(
-            parsed.iter().map(|(path, item)| (path.as_str(), item)),
-        );
-        let search = SearchGeneration::from_items(
-            parsed.iter().map(|(path, item)| (path.as_str(), item)),
-        );
+        let identity =
+            IdentityGeneration::from_items(parsed.iter().map(|(path, item)| (path.as_str(), item)));
+        let search =
+            SearchGeneration::from_items(parsed.iter().map(|(path, item)| (path.as_str(), item)));
         let graph = GraphGeneration::from_items(
             parsed.iter().map(|(path, item)| (path.as_str(), item)),
             &identity,
         );
-        let scope = ScopeGeneration::from_items(
-            parsed.iter().map(|(path, item)| (path.as_str(), item)),
-        );
-        let summary = SummaryGeneration::from_items(
-            parsed.iter().map(|(path, item)| (path.as_str(), item)),
-        );
+        let scope =
+            ScopeGeneration::from_items(parsed.iter().map(|(path, item)| (path.as_str(), item)));
+        let summary =
+            SummaryGeneration::from_items(parsed.iter().map(|(path, item)| (path.as_str(), item)));
         let changed = self.manifest.iter().map(|(rel, _)| rel.clone()).collect();
         (
             DeltaDocuments::empty().stage(&changed, parsed),
@@ -545,7 +536,8 @@ impl FreshnessTracker {
     // --- compaction -----------------------------------------------------------
 
     fn threshold_for(&self, base_count: usize) -> usize {
-        self.threshold.unwrap_or_else(|| 10_000.max(base_count / 100))
+        self.threshold
+            .unwrap_or_else(|| 10_000.max(base_count / 100))
     }
 
     fn maybe_compact(&mut self) {
@@ -585,24 +577,16 @@ impl FreshnessTracker {
         self.base_generation += 1;
         self.delta_paths.clear();
         if let Some(documents) = self.delta_documents.as_mut() {
-            let ordered_paths: Vec<&str> = self.manifest.iter().map(|(rel, _)| rel.as_str()).collect();
+            let ordered_paths: Vec<&str> =
+                self.manifest.iter().map(|(rel, _)| rel.as_str()).collect();
             documents.promote(ordered_paths);
             self.delta_identity
                 .as_mut()
                 .expect("delta identity")
                 .promote();
-            self.delta_search
-                .as_mut()
-                .expect("delta search")
-                .promote();
-            self.delta_graph
-                .as_mut()
-                .expect("delta graph")
-                .promote();
-            self.delta_scope
-                .as_mut()
-                .expect("delta scope")
-                .promote();
+            self.delta_search.as_mut().expect("delta search").promote();
+            self.delta_graph.as_mut().expect("delta graph").promote();
+            self.delta_scope.as_mut().expect("delta scope").promote();
             self.delta_summary
                 .as_mut()
                 .expect("delta summary")

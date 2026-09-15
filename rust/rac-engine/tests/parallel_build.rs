@@ -46,10 +46,8 @@ fn worker_count_is_invisible_in_the_store_bytes_and_faults_degrade() {
         let (derived, stats) = build_derived_index_parallel(directory, true, Some(workers));
         assert_eq!(stats.workers, workers);
         assert_eq!(stats.files, 11);
-        let cache = std::env::temp_dir().join(format!(
-            "rac-pb-test-{workers}-{}",
-            std::process::id()
-        ));
+        let cache =
+            std::env::temp_dir().join(format!("rac-pb-test-{workers}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&cache);
         assert!(write_store(&cache, &corpus_hash, SCHEMA_VERSION, &derived));
         all_hashes.push(store_hashes(&cache, &corpus_hash));

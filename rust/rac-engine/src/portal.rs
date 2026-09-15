@@ -21,8 +21,7 @@ const SEAM: &str = r#"<script type="application/json" id="lore-export"></script>
 // its one direct-mapping property read at render time, leaving the packaged
 // v1 bytes and every v1 HTML export exact.
 const V1_OVERRIDE_TARGET_READ: &str = r#"T.state==="replacement"&&b(T.parent.id,$)"#;
-const V2_OVERRIDE_TARGET_READ: &str =
-    r#"T.state!=="overridden"&&b((T.target??T.parent).id,$)"#;
+const V2_OVERRIDE_TARGET_READ: &str = r#"T.state!=="overridden"&&b((T.target??T.parent).id,$)"#;
 
 /// `_escape_for_script(payload)` — make serialized JSON safe inside a
 /// `<script>` element with two valid JSON escapes, applied in the oracle's
@@ -69,11 +68,8 @@ pub fn render_federated_export_html(export: &CorpusExport) -> Result<String, Str
                     .to_string(),
             );
         }
-        let graph_shell = FEDERATED_SHELL.replacen(
-            V1_OVERRIDE_TARGET_READ,
-            V2_OVERRIDE_TARGET_READ,
-            1,
-        );
+        let graph_shell =
+            FEDERATED_SHELL.replacen(V1_OVERRIDE_TARGET_READ, V2_OVERRIDE_TARGET_READ, 1);
         render_export_html_with_shell(export, &graph_shell)
     } else {
         render_export_html_with_shell(export, FEDERATED_SHELL)

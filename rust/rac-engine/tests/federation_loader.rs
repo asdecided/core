@@ -279,7 +279,10 @@ fn nonexistent_traversal_targets_resolve_inside_the_read_only_parent() {
         child.join("vendor/sibling/../standards/new.html"),
         child.join("vendor/sibling/../standards/new-okf"),
     ] {
-        assert!(is_read_only_materialised_path(&target).unwrap(), "{target:?}");
+        assert!(
+            is_read_only_materialised_path(&target).unwrap(),
+            "{target:?}"
+        );
         assert!(!target.exists());
     }
     fs::remove_dir_all(child).unwrap();
@@ -307,7 +310,10 @@ fn symlinked_parent_subdir_then_parent_component_stays_read_only() {
         child.join("vendor/parent-subdir-link/../new.html"),
         child.join("vendor/parent-subdir-link/../new-okf"),
     ] {
-        assert!(is_read_only_materialised_path(&target).unwrap(), "{target:?}");
+        assert!(
+            is_read_only_materialised_path(&target).unwrap(),
+            "{target:?}"
+        );
         assert!(!target.exists());
     }
     fs::remove_dir_all(child).unwrap();

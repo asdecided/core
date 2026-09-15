@@ -294,7 +294,10 @@ fn error_codes(artifact: &Artifact, artifact_type: &str) -> Vec<String> {
 fn present_relationship_sections(artifact: &Artifact, spec: &ArtifactSpec) -> Vec<String> {
     let mut present = Vec::new();
     for section in &spec.optional {
-        if !RELATIONSHIP_SECTIONS.iter().any(|(name, _)| name == section) {
+        if !RELATIONSHIP_SECTIONS
+            .iter()
+            .any(|(name, _)| name == section)
+        {
             continue;
         }
         if let Some(body) = artifact.section(section) {
@@ -307,10 +310,7 @@ fn present_relationship_sections(artifact: &Artifact, spec: &ArtifactSpec) -> Ve
 }
 
 /// `_attach_decision_metadata` → (status, category).
-fn decision_metadata(
-    artifact: &Artifact,
-    spec: &ArtifactSpec,
-) -> (Option<String>, Option<String>) {
+fn decision_metadata(artifact: &Artifact, spec: &ArtifactSpec) -> (Option<String>, Option<String>) {
     let mut status = None;
     let mut category = None;
     for (field_name, allowed) in &spec.metadata {
@@ -367,8 +367,7 @@ fn collect_stats_from_projection(
 
         match type_name {
             "decision" => {
-                let (status, category) =
-                    decision_metadata(artifact, spec.expect("decision spec"));
+                let (status, category) = decision_metadata(artifact, spec.expect("decision spec"));
                 stats.decisions.push(DecisionStat {
                     path: path.clone(),
                     name,

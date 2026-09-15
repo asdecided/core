@@ -6,16 +6,16 @@
 //! Every failure mode degrades to a fresh build: enabling the cache can only
 //! change latency, never an answer or an exit code (ADR-080).
 
+use rayon::prelude::*;
 use std::collections::BTreeSet;
 use std::fmt;
 use std::path::{Path, PathBuf};
-use rayon::prelude::*;
 
 use crate::derived::{DerivedIndex, SCHEMA_VERSION};
 use crate::index_store::{
-    manifest_root_key, open_freshness_manifest, open_graph_store, open_store,
-    remove_graph_store, remove_store, store_dir, write_freshness_manifest, write_graph_store,
-    write_store, FileState, GraphStoreMetadata, MmapIndexReader,
+    manifest_root_key, open_freshness_manifest, open_graph_store, open_store, remove_graph_store,
+    remove_store, store_dir, write_freshness_manifest, write_graph_store, write_store, FileState,
+    GraphStoreMetadata, MmapIndexReader,
 };
 use crate::walk::find_markdown_files;
 
@@ -25,7 +25,10 @@ pub const CACHE_DIR_ENV: &str = "DECIDED_CACHE_DIR";
 /// on by default; `--no-cache` per invocation, non-empty `DECIDED_NO_CACHE`
 /// environment-wide.
 pub fn cache_enabled(cache_flag: bool) -> bool {
-    cache_flag && std::env::var("DECIDED_NO_CACHE").unwrap_or_default().is_empty()
+    cache_flag
+        && std::env::var("DECIDED_NO_CACHE")
+            .unwrap_or_default()
+            .is_empty()
 }
 
 /// The derived-cache directory ladder: `DECIDED_CACHE_DIR` >
@@ -213,10 +216,7 @@ fn write_marker(cache_dir: &Path, corpus_hash: &str, store_written: bool) -> boo
     // json.dumps default separators over an insertion-ordered dict.
     let payload =
         format!("{{\"schema_version\": \"{SCHEMA_VERSION}\", \"corpus_hash\": \"{corpus_hash}\"}}");
-    let tmp = cache_dir.join(format!(
-        ".{corpus_hash}.{}.tmp",
-        std::process::id()
-    ));
+    let tmp = cache_dir.join(format!(".{corpus_hash}.{}.tmp", std::process::id()));
     if std::fs::write(&tmp, payload).is_err() {
         let _ = std::fs::remove_file(&tmp);
         return false;
@@ -413,10 +413,7 @@ fn generation_frame(hasher: &mut crate::sha256::Sha256, tag: u8, bytes: &[u8]) {
     hasher.update(bytes);
 }
 
-fn legacy_child_corpus_hash(
-    directory: &str,
-    recursive: bool,
-) -> String {
+fn legacy_child_corpus_hash(directory: &str, recursive: bool) -> String {
     let mut hasher = crate::sha256::Sha256::new();
     for entry in find_markdown_files(directory, recursive) {
         let rel = entry.components.join("/");
@@ -449,12 +446,11 @@ fn stable_child_corpus_path(
             message: error.to_string(),
         }
     })?;
-    let corpus_root = std::fs::canonicalize(corpus_root).map_err(|error| {
-        FederatedCacheError::ChildSnapshot {
+    let corpus_root =
+        std::fs::canonicalize(corpus_root).map_err(|error| FederatedCacheError::ChildSnapshot {
             logical_path: "child corpus".to_string(),
             message: error.to_string(),
-        }
-    })?;
+        })?;
     let relative = corpus_root.strip_prefix(&repository_root).map_err(|_| {
         FederatedCacheError::ChildSnapshot {
             logical_path: "child corpus".to_string(),
@@ -466,7 +462,11 @@ fn stable_child_corpus_path(
         .map(|component| component.as_os_str().to_string_lossy())
         .collect::<Vec<_>>()
         .join("/");
-    Ok(if path.is_empty() { ".".to_string() } else { path })
+    Ok(if path.is_empty() {
+        ".".to_string()
+    } else {
+        path
+    })
 }
 
 fn capture_child_snapshot(
@@ -478,12 +478,11 @@ fn capture_child_snapshot(
         .into_iter()
         .filter(|entry| !parent.contains_materialised_path(&entry.abs))
         .map(|entry| {
-            let bytes = std::fs::read(&entry.abs).map_err(|error| {
-                FederatedCacheError::ChildSnapshot {
+            let bytes =
+                std::fs::read(&entry.abs).map_err(|error| FederatedCacheError::ChildSnapshot {
                     logical_path: entry.rel(),
                     message: error.to_string(),
-                }
-            })?;
+                })?;
             Ok(crate::federation::SnapshotFile {
                 relative_path: entry.rel(),
                 absolute_path: entry.abs,
@@ -501,8 +500,13 @@ pub enum FederatedCacheError {
         logical_path: String,
         message: String,
     },
-    Composition { code: String, message: String },
-    InvalidModel { message: String },
+    Composition {
+        code: String,
+        message: String,
+    },
+    InvalidModel {
+        message: String,
+    },
 }
 
 impl FederatedCacheError {
@@ -554,7 +558,11 @@ impl fmt::Display for FederatedCacheError {
                 message,
                 ..
             } => {
-                write!(formatter, "{}: {logical_path}: {message}", self.stable_code())
+                write!(
+                    formatter,
+                    "{}: {logical_path}: {message}",
+                    self.stable_code()
+                )
             }
             Self::Composition { code, message } => write!(formatter, "{code}: {message}"),
             Self::InvalidModel { message } => {
@@ -585,7 +593,9 @@ pub struct FederatedGenerationIdentity {
 /// released single-corpus key when `.decided/corpus.md` is absent.
 #[derive(Debug, Clone, PartialEq)]
 pub enum LogicalGeneration {
-    Legacy { corpus_hash: String },
+    Legacy {
+        corpus_hash: String,
+    },
     Federated {
         identity: FederatedGenerationIdentity,
         parent: Box<crate::federation::VerifiedParent>,
@@ -650,10 +660,8 @@ fn capture_federated_generation(
 ) -> Result<LogicalGeneration, FederatedCacheError> {
     let child_files = capture_child_snapshot(child_corpus, recursive, &parent)?;
     let child_hash = child_snapshot_hash(&child_files);
-    let child_corpus_path = stable_child_corpus_path(
-        &parent.child_repository_root,
-        Path::new(child_corpus),
-    )?;
+    let child_corpus_path =
+        stable_child_corpus_path(&parent.child_repository_root, Path::new(child_corpus))?;
 
     let local_layer = crate::corpus::CorpusLayer::local(parent.child_source.clone());
     let inherited_layer = crate::corpus::CorpusLayer::inherited(
@@ -682,11 +690,7 @@ fn capture_federated_generation(
     generation_frame(&mut hasher, 0x08, parent.declaration.alias.as_bytes());
     generation_frame(&mut hasher, 0x09, &override_payload);
     generation_frame(&mut hasher, 0x0a, local_layer.layer.as_str().as_bytes());
-    generation_frame(
-        &mut hasher,
-        0x0b,
-        inherited_layer.layer.as_str().as_bytes(),
-    );
+    generation_frame(&mut hasher, 0x0b, inherited_layer.layer.as_str().as_bytes());
     generation_frame(&mut hasher, 0x0c, &[u8::from(recursive)]);
     generation_frame(&mut hasher, 0x0d, child_corpus_path.as_bytes());
     let cache_key = hasher.hexdigest();
@@ -753,9 +757,7 @@ pub struct FederatedCacheRead<'a, C = ()> {
 impl<C> FederatedCacheRead<'_, C> {
     /// Captured inherited bytes addressed by stable source-relative path.
     pub fn inherited_bytes(&self, path: &crate::corpus::ArtifactPath) -> Option<&[u8]> {
-        self.generation
-            .verified_parent()?
-            .artifact_bytes(path)
+        self.generation.verified_parent()?.artifact_bytes(path)
     }
 
     /// Existing `get_artifact` decoding over captured bytes, without a second
@@ -843,7 +845,10 @@ impl<C> FederatedCacheTracker<C> {
                 refresh: FederatedCacheRefresh::WarmReuse,
                 model: self.model.as_ref().expect("current key has a model"),
                 generation: self.generation.as_ref().expect("generation installed"),
-                composed: self.composed.as_ref().expect("current key has a composition"),
+                composed: self
+                    .composed
+                    .as_ref()
+                    .expect("current key has a composition"),
             });
         }
 
@@ -903,11 +908,12 @@ impl FederatedCacheTracker<crate::composition::ComposedCorpus> {
             child_corpus,
             recursive,
             |generation| {
-                let identity = generation.identity().ok_or_else(|| {
-                    FederatedCacheError::InvalidModel {
-                        message: "composed cache reads require .decided/corpus.md".to_string(),
-                    }
-                })?;
+                let identity =
+                    generation
+                        .identity()
+                        .ok_or_else(|| FederatedCacheError::InvalidModel {
+                            message: "composed cache reads require .decided/corpus.md".to_string(),
+                        })?;
                 let composed = compose_logical_generation(child_corpus, generation)?;
                 let parent = generation
                     .verified_parent()
@@ -1027,12 +1033,9 @@ impl GraphFederatedCacheTracker {
             &derived,
             metadata,
         ) {
-            if let Some(model) = open_validated_graph_store(
-                &self.cache_dir,
-                generation,
-                metadata,
-                corpus,
-            ) {
+            if let Some(model) =
+                open_validated_graph_store(&self.cache_dir, generation, metadata, corpus)
+            {
                 return ReadModel::View(model);
             }
             remove_graph_store(&self.cache_dir, generation);
@@ -1061,19 +1064,17 @@ impl GraphFederatedCacheTracker {
     {
         // Reverification precedes semantic adaptation, resident reuse, and
         // store lookup on every request. Any failure drops the prior handle.
-        let verified = match crate::federation::verify_federation(
-            repository_root,
-            root_corpus_relative,
-        ) {
-            Ok(Some(verified)) => verified,
-            Ok(None) => {
-                return self.fail(FederatedCacheError::InvalidModel {
-                    message: "graph cache reads require a version-2 federation manifest"
-                        .to_string(),
-                });
-            }
-            Err(error) => return self.fail(error.into()),
-        };
+        let verified =
+            match crate::federation::verify_federation(repository_root, root_corpus_relative) {
+                Ok(Some(verified)) => verified,
+                Ok(None) => {
+                    return self.fail(FederatedCacheError::InvalidModel {
+                        message: "graph cache reads require a version-2 federation manifest"
+                            .to_string(),
+                    });
+                }
+                Err(error) => return self.fail(error.into()),
+            };
         let corpus = match crate::graph_federated_corpus::compose_verified_federation(verified) {
             Ok(corpus) => corpus,
             Err(error) => {
@@ -1095,11 +1096,8 @@ impl GraphFederatedCacheTracker {
             &corpus.composition,
         );
         let layers = corpus.canonical_layers.values().cloned().collect();
-        let metadata = GraphStoreMetadata::from_composition(
-            generation.clone(),
-            layers,
-            &corpus.composition,
-        );
+        let metadata =
+            GraphStoreMetadata::from_composition(generation.clone(), layers, &corpus.composition);
 
         if self.current_generation.as_deref() == Some(generation.as_str())
             && self.metadata.as_ref() == Some(&metadata)
@@ -1110,7 +1108,10 @@ impl GraphFederatedCacheTracker {
             self.metadata = Some(metadata);
             return Ok(GraphFederatedCacheRead {
                 refresh: FederatedCacheRefresh::WarmReuse,
-                model: self.model.as_ref().expect("current graph generation has a model"),
+                model: self
+                    .model
+                    .as_ref()
+                    .expect("current graph generation has a model"),
                 generation: self
                     .current_generation
                     .as_deref()
@@ -1122,12 +1123,7 @@ impl GraphFederatedCacheTracker {
 
         let cold = self.current_generation.is_none();
         let (refresh, model) = if cold && persistent_cache {
-            match open_validated_graph_store(
-                &self.cache_dir,
-                &generation,
-                &metadata,
-                &corpus,
-            ) {
+            match open_validated_graph_store(&self.cache_dir, &generation, &metadata, &corpus) {
                 Some(model) => (FederatedCacheRefresh::StoreHit, ReadModel::View(model)),
                 None => {
                     remove_graph_store(&self.cache_dir, &generation);
@@ -1136,9 +1132,7 @@ impl GraphFederatedCacheTracker {
                         Err(error) => return self.fail(error),
                     };
                     if let Err(error) = validate_graph_model(&corpus, &metadata, &derived) {
-                        return self.fail(FederatedCacheError::InvalidModel {
-                            message: error,
-                        });
+                        return self.fail(FederatedCacheError::InvalidModel { message: error });
                     }
                     (
                         FederatedCacheRefresh::Recomposed,
@@ -1155,9 +1149,7 @@ impl GraphFederatedCacheTracker {
                 Err(error) => return self.fail(error),
             };
             if let Err(error) = validate_graph_model(&corpus, &metadata, &derived) {
-                return self.fail(FederatedCacheError::InvalidModel {
-                    message: error,
-                });
+                return self.fail(FederatedCacheError::InvalidModel { message: error });
             }
             let model = if persistent_cache {
                 self.persist(&corpus, &generation, derived, &metadata)
@@ -1280,7 +1272,9 @@ fn validate_graph_model(
         .map(|item| item.key.clone())
         .collect::<BTreeSet<_>>();
     if !graph_key_projection_complete(&expected_effective, &expected_catalog, derived) {
-        return Err("graph projection omits or duplicates a catalog/effective identity".to_string());
+        return Err(
+            "graph projection omits or duplicates a catalog/effective identity".to_string(),
+        );
     }
     let expected_entries = corpus.composition.effective_index();
     let expected_identities = corpus.composition.identity_index();
@@ -1366,16 +1360,20 @@ fn validate_graph_model(
     let effective_items = effective.into_iter().cloned().collect::<Vec<_>>();
     let expected_scope = crate::retrieve::scope_rows_from_items(&effective_items);
     if derived.scope_rows.len() != expected_scope.len()
-        || derived.scope_rows.iter().zip(expected_scope).any(|(actual, expected)| {
-            actual.key != expected.key
-                || actual.artifact_path != expected.artifact_path
-                || actual.origin != expected.origin
-                || actual.id != expected.id
-                || actual.title != expected.title
-                || actual.status != expected.status
-                || actual.path != expected.path
-                || actual.scope_entries != expected.scope_entries
-        })
+        || derived
+            .scope_rows
+            .iter()
+            .zip(expected_scope)
+            .any(|(actual, expected)| {
+                actual.key != expected.key
+                    || actual.artifact_path != expected.artifact_path
+                    || actual.origin != expected.origin
+                    || actual.id != expected.id
+                    || actual.title != expected.title
+                    || actual.status != expected.status
+                    || actual.path != expected.path
+                    || actual.scope_entries != expected.scope_entries
+            })
     {
         return Err("graph scope projection differs from composition".to_string());
     }
@@ -1481,16 +1479,19 @@ fn validate_graph_store_view(
     let expected_scope = crate::retrieve::scope_rows_from_items(&effective_items);
     let stored_scope = reader.scope_rows().map_err(|error| error.to_string())?;
     if stored_scope.len() != expected_scope.len()
-        || stored_scope.iter().zip(expected_scope).any(|(actual, expected)| {
-            actual.key != expected.key
-                || actual.artifact_path != expected.artifact_path
-                || actual.origin != expected.origin
-                || actual.id != expected.id
-                || actual.title != expected.title
-                || actual.status != expected.status
-                || actual.path != expected.path
-                || actual.scope_entries != expected.scope_entries
-        })
+        || stored_scope
+            .iter()
+            .zip(expected_scope)
+            .any(|(actual, expected)| {
+                actual.key != expected.key
+                    || actual.artifact_path != expected.artifact_path
+                    || actual.origin != expected.origin
+                    || actual.id != expected.id
+                    || actual.title != expected.title
+                    || actual.status != expected.status
+                    || actual.path != expected.path
+                    || actual.scope_entries != expected.scope_entries
+            })
     {
         return Err("stored graph scope rows differ from composition".to_string());
     }
@@ -1558,7 +1559,9 @@ fn validate_federated_model(
                     &artifact.display_path,
                 ) || artifact.key.source != artifact.origin.source
                     || artifact.path.source != artifact.origin.source
-                    || expected_by_source.get(artifact.origin.source.as_str()).copied()
+                    || expected_by_source
+                        .get(artifact.origin.source.as_str())
+                        .copied()
                         != Some(&crate::corpus::CorpusLayer::from(&artifact.origin))
                     || entry.key.as_ref() != Some(&artifact.key)
                     || entry.artifact_path.as_ref() != Some(&artifact.path)
@@ -1612,7 +1615,9 @@ fn validate_federated_model(
                         || row.path != path.relative_path
                 })
                 || row.origin.as_ref().is_none_or(|origin| {
-                    row.key.as_ref().is_none_or(|key| key.source != origin.source)
+                    row.key
+                        .as_ref()
+                        .is_none_or(|key| key.source != origin.source)
                         || row
                             .artifact_path
                             .as_ref()
@@ -1632,11 +1637,16 @@ fn validate_federated_model(
         .iter()
         .filter_map(|entry| entry.key.as_ref())
         .collect();
-    if derived.resolution.canonical_redirects.iter().any(|redirect| {
-        !identity_keys.contains(&redirect.parent)
-            || !identity_keys.contains(&redirect.replacement)
-            || !identity_keys.contains(&redirect.rationale)
-    }) {
+    if derived
+        .resolution
+        .canonical_redirects
+        .iter()
+        .any(|redirect| {
+            !identity_keys.contains(&redirect.parent)
+                || !identity_keys.contains(&redirect.replacement)
+                || !identity_keys.contains(&redirect.rationale)
+        })
+    {
         return Err(FederatedCacheError::InvalidModel {
             message: "canonical redirect endpoints are absent from the identity projection"
                 .to_string(),

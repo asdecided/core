@@ -127,10 +127,7 @@ pub fn parse_text(text: &str, source_path: &str) -> Artifact {
 /// Markdown snapshots.
 pub fn parse_bytes(bytes: &[u8], source_path: &str) -> Artifact {
     let source_text = String::from_utf8_lossy(bytes).into_owned();
-    attach_metadata(
-        markdown::parse_bytes(bytes, source_path),
-        Some(source_text),
-    )
+    attach_metadata(markdown::parse_bytes(bytes, source_path), Some(source_text))
 }
 
 /// `decided.core.markdown.parse_file(path)` with metadata attached.

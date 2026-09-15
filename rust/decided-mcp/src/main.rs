@@ -35,9 +35,7 @@ pub(crate) struct ServerState {
     persistent_cache: bool,
     tracker: Option<rac_engine::freshness::FreshnessTracker>,
     federated_tracker: Option<
-        rac_engine::derived_cache::FederatedCacheTracker<
-            rac_engine::composition::ComposedCorpus,
-        >,
+        rac_engine::derived_cache::FederatedCacheTracker<rac_engine::composition::ComposedCorpus>,
     >,
     graph_tracker: rac_engine::derived_cache::GraphFederatedCacheTracker,
     graph_cache: graph::GraphCache,
@@ -56,10 +54,7 @@ enum RequestRead<'a> {
         model: Option<&'a rac_engine::freshness::TrackerModel>,
     },
     FederatedCached(
-        rac_engine::derived_cache::FederatedCacheRead<
-            'a,
-            rac_engine::composition::ComposedCorpus,
-        >,
+        rac_engine::derived_cache::FederatedCacheRead<'a, rac_engine::composition::ComposedCorpus>,
     ),
     FederatedFresh {
         generation: rac_engine::derived_cache::LogicalGeneration,
@@ -299,9 +294,7 @@ fn check_corpus(root: &str, topology: &RepositoryTopology) {
         .unwrap_or_else(|error| usage_error(&error.to_string()));
         let composed = rac_engine::derived_cache::compose_logical_generation(root, &generation)
             .unwrap_or_else(|error| usage_error(&error.to_string()));
-        let has_artifacts = composed
-            .effective()
-            .any(|item| item.spec.is_some());
+        let has_artifacts = composed.effective().any(|item| item.spec.is_some());
         has_artifacts
     } else {
         rac_engine::resolve::build_index(root, true)
@@ -348,7 +341,10 @@ fn repository_topology(
     federation_mode: &mut Option<FederationMode>,
 ) -> Result<RepositoryTopology, String> {
     let resolved_root = std::fs::canonicalize(root).map_err(|error| {
-        format!("cannot resolve MCP corpus root {}: {error}", Path::new(root).display())
+        format!(
+            "cannot resolve MCP corpus root {}: {error}",
+            Path::new(root).display()
+        )
     })?;
     let repository_root = if let Some(pinned) = pinned_root {
         pinned.to_path_buf()
@@ -590,12 +586,7 @@ pub(crate) fn process_request(
 /// payload under `structuredContent.result` (the handlers return `str` and an
 /// outputSchema exists — landmine 1); SDK-text errors ride `isError:true`
 /// with no `structuredContent`.
-fn call_result_frame(
-    era: protocol::Era,
-    id_json: &str,
-    text: &str,
-    is_error: bool,
-) -> String {
+fn call_result_frame(era: protocol::Era, id_json: &str, text: &str, is_error: bool) -> String {
     let mut content_item = Map::new();
     content_item.insert("type".to_string(), json!("text"));
     content_item.insert("text".to_string(), json!(text));
@@ -704,9 +695,7 @@ fn read_request<'a>(
     persistent_cache: bool,
     tracker: &'a mut Option<rac_engine::freshness::FreshnessTracker>,
     federated_tracker: &'a mut Option<
-        rac_engine::derived_cache::FederatedCacheTracker<
-            rac_engine::composition::ComposedCorpus,
-        >,
+        rac_engine::derived_cache::FederatedCacheTracker<rac_engine::composition::ComposedCorpus>,
     >,
     graph_tracker: &'a mut rac_engine::derived_cache::GraphFederatedCacheTracker,
 ) -> Result<RequestRead<'a>, String> {
@@ -746,11 +735,9 @@ fn read_request<'a>(
                     true,
                 )
                 .map_err(|error| error.to_string())?;
-                let composed = rac_engine::derived_cache::compose_logical_generation(
-                    root,
-                    &generation,
-                )
-                .map_err(|error| error.to_string())?;
+                let composed =
+                    rac_engine::derived_cache::compose_logical_generation(root, &generation)
+                        .map_err(|error| error.to_string())?;
                 Ok(RequestRead::FederatedFresh {
                     generation,
                     composed: Box::new(composed),
@@ -812,8 +799,16 @@ fn dispatch(
     match name {
         "get_artifact" => {
             let params = [
-                Param { name: "id", kind: Kind::Str, required: true },
-                Param { name: "budget", kind: Kind::Int, required: false },
+                Param {
+                    name: "id",
+                    kind: Kind::Str,
+                    required: true,
+                },
+                Param {
+                    name: "budget",
+                    kind: Kind::Int,
+                    required: false,
+                },
             ];
             let a = args::validate(name, "get_artifactArguments", &params, arguments)?;
             let effective = tools::effective_budget(server_budget, a_int(&a, 1, 0));
@@ -833,19 +828,9 @@ fn dispatch(
                     )?;
                     let (_, model) = request.legacy();
                     Ok(if let Some(read) = request.graph() {
-                        tools::get_artifact_graph(
-                            root,
-                            read.corpus,
-                            &a_str(&a, 0, ""),
-                            effective,
-                        )
+                        tools::get_artifact_graph(root, read.corpus, &a_str(&a, 0, ""), effective)
                     } else if let Some(corpus) = request.composed() {
-                        tools::get_artifact_composed(
-                            root,
-                            corpus,
-                            &a_str(&a, 0, ""),
-                            effective,
-                        )
+                        tools::get_artifact_composed(root, corpus, &a_str(&a, 0, ""), effective)
                     } else {
                         tools::get_artifact(root, model, &a_str(&a, 0, ""), effective)
                     })
@@ -854,10 +839,26 @@ fn dispatch(
         }
         "search_artifacts" => {
             let params = [
-                Param { name: "query", kind: Kind::Str, required: true },
-                Param { name: "type", kind: Kind::OptStr, required: false },
-                Param { name: "tags", kind: Kind::OptListStr, required: false },
-                Param { name: "live_only", kind: Kind::Bool, required: false },
+                Param {
+                    name: "query",
+                    kind: Kind::Str,
+                    required: true,
+                },
+                Param {
+                    name: "type",
+                    kind: Kind::OptStr,
+                    required: false,
+                },
+                Param {
+                    name: "tags",
+                    kind: Kind::OptListStr,
+                    required: false,
+                },
+                Param {
+                    name: "live_only",
+                    kind: Kind::Bool,
+                    required: false,
+                },
             ];
             let a = args::validate(name, "search_artifactsArguments", &params, arguments)?;
             let query = a_str(&a, 0, "");
@@ -866,9 +867,15 @@ fn dispatch(
             let live_only = a_bool(&a, 3, false);
             let mut m = Map::new();
             m.insert("query".into(), Value::String(query.clone()));
-            m.insert("type".into(), artifact_type.clone().map_or(Value::Null, Value::String));
+            m.insert(
+                "type".into(),
+                artifact_type.clone().map_or(Value::Null, Value::String),
+            );
             if !tags.is_empty() {
-                m.insert("tags".into(), Value::Array(tags.iter().cloned().map(Value::String).collect()));
+                m.insert(
+                    "tags".into(),
+                    Value::Array(tags.iter().cloned().map(Value::String).collect()),
+                );
             }
             if live_only {
                 m.insert("live_only".into(), Value::Bool(true));
@@ -925,11 +932,31 @@ fn dispatch(
         }
         "retrieve_grounding" => {
             let params = [
-                Param { name: "task", kind: Kind::Str, required: true },
-                Param { name: "scope", kind: Kind::Str, required: false },
-                Param { name: "top_k", kind: Kind::Int, required: false },
-                Param { name: "budget", kind: Kind::Int, required: false },
-                Param { name: "live_only", kind: Kind::Bool, required: false },
+                Param {
+                    name: "task",
+                    kind: Kind::Str,
+                    required: true,
+                },
+                Param {
+                    name: "scope",
+                    kind: Kind::Str,
+                    required: false,
+                },
+                Param {
+                    name: "top_k",
+                    kind: Kind::Int,
+                    required: false,
+                },
+                Param {
+                    name: "budget",
+                    kind: Kind::Int,
+                    required: false,
+                },
+                Param {
+                    name: "live_only",
+                    kind: Kind::Bool,
+                    required: false,
+                },
             ];
             let a = args::validate(name, "retrieve_grounding_toolArguments", &params, arguments)?;
             let task = a_str(&a, 0, "");
@@ -991,8 +1018,16 @@ fn dispatch(
         }
         "find_decisions" => {
             let params = [
-                Param { name: "topic", kind: Kind::Str, required: false },
-                Param { name: "path", kind: Kind::OptStr, required: false },
+                Param {
+                    name: "topic",
+                    kind: Kind::Str,
+                    required: false,
+                },
+                Param {
+                    name: "path",
+                    kind: Kind::OptStr,
+                    required: false,
+                },
             ];
             let a = args::validate(name, "find_decisions_toolArguments", &params, arguments)?;
             let topic = a_str(&a, 0, "");
@@ -1047,8 +1082,16 @@ fn dispatch(
         }
         "get_related" => {
             let params = [
-                Param { name: "id", kind: Kind::Str, required: true },
-                Param { name: "depth", kind: Kind::Int, required: false },
+                Param {
+                    name: "id",
+                    kind: Kind::Str,
+                    required: true,
+                },
+                Param {
+                    name: "depth",
+                    kind: Kind::Int,
+                    required: false,
+                },
             ];
             let a = args::validate(name, "get_relatedArguments", &params, arguments)?;
             let id = a_str(&a, 0, "");
@@ -1086,21 +1129,9 @@ fn dispatch(
                         }
                     };
                     Ok(if let Some(read) = request.graph() {
-                        tools::get_related_graph(
-                            graph_view,
-                            read.corpus,
-                            &id,
-                            depth,
-                            server_budget,
-                        )
+                        tools::get_related_graph(graph_view, read.corpus, &id, depth, server_budget)
                     } else if let Some(corpus) = request.composed() {
-                        tools::get_related_composed(
-                            graph_view,
-                            corpus,
-                            &id,
-                            depth,
-                            server_budget,
-                        )
+                        tools::get_related_composed(graph_view, corpus, &id, depth, server_budget)
                     } else {
                         tools::get_related(graph_view, &id, depth, server_budget)
                     })
@@ -1129,12 +1160,7 @@ fn dispatch(
                     } else if let (Some(corpus), Some(generation)) =
                         (request.composed(), request.logical_generation())
                     {
-                        tools::get_summary_composed(
-                            root,
-                            generation,
-                            corpus,
-                            server_budget,
-                        )
+                        tools::get_summary_composed(root, generation, corpus, server_budget)
                     } else {
                         tools::get_summary(root, model, server_budget)
                     })
@@ -1178,10 +1204,8 @@ mod tests {
     }
 
     fn scratch(tag: &str) -> std::path::PathBuf {
-        let directory = std::env::temp_dir().join(format!(
-            "decided-mcp-{tag}-{}",
-            std::process::id()
-        ));
+        let directory =
+            std::env::temp_dir().join(format!("decided-mcp-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&directory);
         std::fs::create_dir_all(&directory).expect("scratch");
         directory
@@ -1223,7 +1247,11 @@ mod tests {
         let corpus = scratch("graph-corpus");
         let cache = scratch("graph-cache");
         std::fs::write(corpus.join("decision.md"), DECISION).unwrap();
-        std::fs::write(corpus.join("requirement-1.md"), requirement("FIX-0REQ1GRAPH00")).unwrap();
+        std::fs::write(
+            corpus.join("requirement-1.md"),
+            requirement("FIX-0REQ1GRAPH00"),
+        )
+        .unwrap();
         let root = corpus.to_string_lossy().into_owned();
         let mut state = ServerState {
             repository_root: corpus.clone(),
@@ -1274,7 +1302,11 @@ mod tests {
             first_generation
         );
 
-        std::fs::write(corpus.join("requirement-2.md"), requirement("FIX-0REQ2GRAPH00")).unwrap();
+        std::fs::write(
+            corpus.join("requirement-2.md"),
+            requirement("FIX-0REQ2GRAPH00"),
+        )
+        .unwrap();
         let changed = dispatch(
             &root,
             &mut state,

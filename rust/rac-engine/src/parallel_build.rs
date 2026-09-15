@@ -105,7 +105,9 @@ fn fragment_for(
     let field_tokens = field_tokens_of(&index_entry);
     let live = item.spec.map(|s| s.name == DECISION_TYPE).unwrap_or(false)
         && is_live_decision(&item.artifact);
-    let scope_row = scope_rows_from_items(std::slice::from_ref(&item)).into_iter().next();
+    let scope_row = scope_rows_from_items(std::slice::from_ref(&item))
+        .into_iter()
+        .next();
     DocFragment {
         item,
         index_entry,
@@ -300,8 +302,7 @@ pub fn parallel_parse_paths(root: &str, paths: &[PathBuf]) -> (Vec<CorpusItem>, 
         .par_iter()
         .map(|path| {
             let artifact = crate::parse::parse_file(path);
-            let spec =
-                crate::spec::spec_for(&crate::classify::classify(&artifact).artifact_type);
+            let spec = crate::spec::spec_for(&crate::classify::classify(&artifact).artifact_type);
             let relative_path = PathBuf::from(path)
                 .strip_prefix(&corpus_root)
                 .unwrap_or_else(|_| std::path::Path::new(path))

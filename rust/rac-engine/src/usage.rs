@@ -134,7 +134,10 @@ pub fn summarize_usage() -> Result<UsageSummary, LogNotUtf8> {
 /// `UsageSummary.to_dict()` — pinned key order.
 pub fn cli_value(summary: &UsageSummary) -> Value {
     let mut m = Map::new();
-    m.insert("schema_version".into(), Value::String(SCHEMA_VERSION.into()));
+    m.insert(
+        "schema_version".into(),
+        Value::String(SCHEMA_VERSION.into()),
+    );
     m.insert("total".into(), Value::from(summary.total));
     m.insert("sessions".into(), Value::from(summary.sessions));
     m.insert(
@@ -165,7 +168,10 @@ pub fn cli_value(summary: &UsageSummary) -> Value {
 /// Unlike mcp-stats' share report, the guide dict keeps its `path`.
 pub fn combined_value(cli: &UsageSummary, guide: &TelemetrySummary) -> Value {
     let mut m = Map::new();
-    m.insert("schema_version".into(), Value::String(SCHEMA_VERSION.into()));
+    m.insert(
+        "schema_version".into(),
+        Value::String(SCHEMA_VERSION.into()),
+    );
     m.insert("cli".into(), cli_value(cli));
     m.insert("guide".into(), summary_value(guide));
     Value::Object(m)
@@ -208,7 +214,10 @@ pub fn record_command(command: &str, outcome: &str, duration_ms: i64) {
     }
     let (secs, micros) = now_epoch();
     let mut event = Map::new();
-    event.insert("schema_version".into(), Value::String(SCHEMA_VERSION.into()));
+    event.insert(
+        "schema_version".into(),
+        Value::String(SCHEMA_VERSION.into()),
+    );
     event.insert(
         "ts".into(),
         Value::String(utc_isoformat_micros(secs, micros)),

@@ -473,12 +473,8 @@ fn resolve_graph_row(row: &ValidationRow, identity: &IdentityGeneration) -> Vec<
             } else {
                 let result = identity.resolve(target);
                 match result.outcome {
-                    OUTCOME_NOT_FOUND => {
-                        (None, None, Some(ISSUE_TARGET_NOT_FOUND.to_string()))
-                    }
-                    OUTCOME_DUPLICATE => {
-                        (None, None, Some(ISSUE_TARGET_AMBIGUOUS.to_string()))
-                    }
+                    OUTCOME_NOT_FOUND => (None, None, Some(ISSUE_TARGET_NOT_FOUND.to_string())),
+                    OUTCOME_DUPLICATE => (None, None, Some(ISSUE_TARGET_AMBIGUOUS.to_string())),
                     OUTCOME_RESOLVED => {
                         let path = result
                             .artifact
@@ -570,16 +566,11 @@ impl SearchGeneration {
         }
     }
 
-    pub fn stage(
-        &self,
-        changed: &BTreeSet<String>,
-        parsed: &BTreeMap<String, CorpusItem>,
-    ) -> Self {
+    pub fn stage(&self, changed: &BTreeSet<String>, parsed: &BTreeMap<String, CorpusItem>) -> Self {
         let mut next = self.clone();
         for path in changed {
             if let Some(item) = parsed.get(path) {
-                next
-                    .upserts
+                next.upserts
                     .insert(path.clone(), Arc::new(SearchRow::from_item(item)));
                 next.tombstones.remove(path);
             } else {
@@ -720,9 +711,14 @@ impl SearchGeneration {
             if !token.starts_with(term) {
                 break;
             }
-            paths.extend(posting.iter().filter(|path| {
-                !self.tombstones.contains(*path) && !self.upserts.contains_key(*path)
-            }).cloned());
+            paths.extend(
+                posting
+                    .iter()
+                    .filter(|path| {
+                        !self.tombstones.contains(*path) && !self.upserts.contains_key(*path)
+                    })
+                    .cloned(),
+            );
         }
         for (path, row) in &self.upserts {
             if row_has_term(row, term) {
@@ -887,11 +883,7 @@ impl ScopeGeneration {
         }
     }
 
-    pub fn stage(
-        &self,
-        changed: &BTreeSet<String>,
-        parsed: &BTreeMap<String, CorpusItem>,
-    ) -> Self {
+    pub fn stage(&self, changed: &BTreeSet<String>, parsed: &BTreeMap<String, CorpusItem>) -> Self {
         let mut next = self.clone();
         for path in changed {
             next.scope_upserts.remove(path);
@@ -1025,16 +1017,11 @@ impl SummaryGeneration {
         }
     }
 
-    pub fn stage(
-        &self,
-        changed: &BTreeSet<String>,
-        parsed: &BTreeMap<String, CorpusItem>,
-    ) -> Self {
+    pub fn stage(&self, changed: &BTreeSet<String>, parsed: &BTreeMap<String, CorpusItem>) -> Self {
         let mut next = self.clone();
         for path in changed {
             if let Some(item) = parsed.get(path) {
-                next
-                    .upserts
+                next.upserts
                     .insert(path.clone(), Arc::new(portfolio_row(item)));
                 next.tombstones.remove(path);
             } else {
@@ -1401,20 +1388,14 @@ mod tests {
     ) {
         let ordered: Vec<CorpusItem> = items.values().cloned().collect();
         let referee = crate::resolve::index_from_items(&ordered);
-        let identity = IdentityGeneration::from_items(
-            items.iter().map(|(path, item)| (path.as_str(), item)),
-        );
+        let identity =
+            IdentityGeneration::from_items(items.iter().map(|(path, item)| (path.as_str(), item)));
         let graph = GraphGeneration::from_items(
             items.iter().map(|(path, item)| (path.as_str(), item)),
             &identity,
         );
-        let expected = crate::resolve::search_index_filtered(
-            &referee,
-            query,
-            artifact_type,
-            tags,
-            live_only,
-        );
+        let expected =
+            crate::resolve::search_index_filtered(&referee, query, artifact_type, tags, live_only);
         let actual = search.search(query, artifact_type, tags, live_only, &graph);
         assert_eq!(
             crate::output::search_result_value(&actual, true),
@@ -1535,12 +1516,17 @@ mod tests {
     #[test]
     fn graph_overlay_re_resolves_unchanged_referrers_for_identity_changes() {
         let mut items = BTreeMap::from([
-            ("a.md".to_string(), related_item("a.md", "REQ-001", "RAC-222222222222")),
-            ("b.md".to_string(), item("b.md", "RAC-222222222222", "Accepted")),
+            (
+                "a.md".to_string(),
+                related_item("a.md", "REQ-001", "RAC-222222222222"),
+            ),
+            (
+                "b.md".to_string(),
+                item("b.md", "RAC-222222222222", "Accepted"),
+            ),
         ]);
-        let mut identity = IdentityGeneration::from_items(
-            items.iter().map(|(path, item)| (path.as_str(), item)),
-        );
+        let mut identity =
+            IdentityGeneration::from_items(items.iter().map(|(path, item)| (path.as_str(), item)));
         let mut graph = GraphGeneration::from_items(
             items.iter().map(|(path, item)| (path.as_str(), item)),
             &identity,
@@ -1591,13 +1577,21 @@ mod tests {
     #[test]
     fn graph_overlay_handles_source_edit_delete_and_ambiguity() {
         let mut items = BTreeMap::from([
-            ("a.md".to_string(), related_item("a.md", "REQ-001", "RAC-222222222222")),
-            ("b.md".to_string(), item("b.md", "RAC-222222222222", "Accepted")),
-            ("c.md".to_string(), item("c.md", "RAC-333333333333", "Accepted")),
+            (
+                "a.md".to_string(),
+                related_item("a.md", "REQ-001", "RAC-222222222222"),
+            ),
+            (
+                "b.md".to_string(),
+                item("b.md", "RAC-222222222222", "Accepted"),
+            ),
+            (
+                "c.md".to_string(),
+                item("c.md", "RAC-333333333333", "Accepted"),
+            ),
         ]);
-        let mut identity = IdentityGeneration::from_items(
-            items.iter().map(|(path, item)| (path.as_str(), item)),
-        );
+        let mut identity =
+            IdentityGeneration::from_items(items.iter().map(|(path, item)| (path.as_str(), item)));
         let mut graph = GraphGeneration::from_items(
             items.iter().map(|(path, item)| (path.as_str(), item)),
             &identity,
@@ -1643,21 +1637,15 @@ mod tests {
         let mut items = BTreeMap::from([
             (
                 "b.md".to_string(),
-                scoped_item(
-                    "b.md",
-                    "RAC-111111111111",
-                    "Accepted",
-                    Some("src/**"),
-                ),
+                scoped_item("b.md", "RAC-111111111111", "Accepted", Some("src/**")),
             ),
             (
                 "d.md".to_string(),
                 scoped_item("d.md", "RAC-222222222222", "Accepted", None),
             ),
         ]);
-        let mut scope = ScopeGeneration::from_items(
-            items.iter().map(|(path, item)| (path.as_str(), item)),
-        );
+        let mut scope =
+            ScopeGeneration::from_items(items.iter().map(|(path, item)| (path.as_str(), item)));
         assert_eq!(scope.live_paths(), vec!["b.md", "d.md"]);
         assert_eq!(scope.rows().len(), 1);
 
@@ -1667,21 +1655,11 @@ mod tests {
         let parsed = BTreeMap::from([
             (
                 "a.md".to_string(),
-                scoped_item(
-                    "a.md",
-                    "RAC-333333333333",
-                    "Accepted",
-                    Some("docs/**"),
-                ),
+                scoped_item("a.md", "RAC-333333333333", "Accepted", Some("docs/**")),
             ),
             (
                 "b.md".to_string(),
-                scoped_item(
-                    "b.md",
-                    "RAC-111111111111",
-                    "Superseded",
-                    Some("src/**"),
-                ),
+                scoped_item("b.md", "RAC-111111111111", "Superseded", Some("src/**")),
             ),
         ]);
         scope = scope.stage(&changed, &parsed);
@@ -1726,9 +1704,8 @@ mod tests {
                 tagged_item("d.md", "RAC-222222222222", "Accepted", "alpha"),
             ),
         ]);
-        let mut summary = SummaryGeneration::from_items(
-            items.iter().map(|(path, item)| (path.as_str(), item)),
-        );
+        let mut summary =
+            SummaryGeneration::from_items(items.iter().map(|(path, item)| (path.as_str(), item)));
         let fresh = |items: &BTreeMap<String, CorpusItem>| {
             crate::output::portfolio_summary_value(&crate::portfolio::portfolio_from_corpus(
                 directory,
@@ -1775,9 +1752,8 @@ mod tests {
                 tagged_item("b.md", "RAC-222222222222", "Superseded", "beta"),
             ),
         ]);
-        let mut search = SearchGeneration::from_items(
-            items.iter().map(|(path, item)| (path.as_str(), item)),
-        );
+        let mut search =
+            SearchGeneration::from_items(items.iter().map(|(path, item)| (path.as_str(), item)));
         for (query, artifact_type, tags, live_only) in [
             ("delta", None, vec![], false),
             ("RAC 111111111111", Some("decision"), vec![], false),
@@ -1785,23 +1761,12 @@ mod tests {
             ("delta", None, vec!["alpha".to_string()], false),
             ("zzzz-no-match", None, vec![], false),
         ] {
-            assert_search_matches_fresh(
-                &search,
-                &items,
-                query,
-                artifact_type,
-                &tags,
-                live_only,
-            );
+            assert_search_matches_fresh(&search, &items, query, artifact_type, &tags, live_only);
         }
 
         let shared_base = Arc::clone(&search.base);
         let shared_postings = Arc::clone(&search.base_postings);
-        let changed = BTreeSet::from([
-            "a.md".to_string(),
-            "b.md".to_string(),
-            "c.md".to_string(),
-        ]);
+        let changed = BTreeSet::from(["a.md".to_string(), "b.md".to_string(), "c.md".to_string()]);
         let parsed = BTreeMap::from([
             (
                 "b.md".to_string(),
@@ -1820,14 +1785,7 @@ mod tests {
         for query in ["delta", "RAC 333333333333", "delta delta"] {
             assert_search_matches_fresh(&search, &items, query, None, &[], false);
         }
-        assert_search_matches_fresh(
-            &search,
-            &items,
-            "delta",
-            None,
-            &["alpha".to_string()],
-            true,
-        );
+        assert_search_matches_fresh(&search, &items, "delta", None, &["alpha".to_string()], true);
         assert_eq!(search.base_len(), 2);
         assert_eq!(search.upsert_len(), 2);
         assert_eq!(search.tombstone_len(), 1);

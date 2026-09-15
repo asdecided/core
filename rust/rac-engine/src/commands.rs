@@ -81,19 +81,31 @@ pub struct DirectoryValidation {
 
 impl DirectoryValidation {
     pub fn checked(&self) -> usize {
-        self.files.iter().filter(|f| f.status != STATUS_SKIPPED).count()
+        self.files
+            .iter()
+            .filter(|f| f.status != STATUS_SKIPPED)
+            .count()
     }
 
     pub fn valid(&self) -> usize {
-        self.files.iter().filter(|f| f.status == STATUS_VALID).count()
+        self.files
+            .iter()
+            .filter(|f| f.status == STATUS_VALID)
+            .count()
     }
 
     pub fn invalid(&self) -> usize {
-        self.files.iter().filter(|f| f.status == STATUS_INVALID).count()
+        self.files
+            .iter()
+            .filter(|f| f.status == STATUS_INVALID)
+            .count()
     }
 
     pub fn skipped(&self) -> usize {
-        self.files.iter().filter(|f| f.status == STATUS_SKIPPED).count()
+        self.files
+            .iter()
+            .filter(|f| f.status == STATUS_SKIPPED)
+            .count()
     }
 
     pub fn ok(&self) -> bool {
@@ -168,10 +180,7 @@ pub fn validate_directory(directory: &str, recursive: bool) -> DirectoryValidati
         .filter(|item| item.origin.layer == crate::corpus::Layer::Local)
         .map(|item| OkfEntry {
             path: &item.path,
-            artifact_type: item
-                .spec
-                .map(|s| s.name.as_str())
-                .unwrap_or("unknown"),
+            artifact_type: item.spec.map(|s| s.name.as_str()).unwrap_or("unknown"),
             file_name: item.path.rsplit('/').next().unwrap_or(&item.path),
         })
         .collect();
@@ -243,7 +252,10 @@ pub(crate) fn validate_directory_from_items(
         .filter(|item| item.origin.layer == crate::corpus::Layer::Local)
         .map(|item| OkfEntry {
             path: &item.path,
-            artifact_type: item.spec.map(|spec| spec.name.as_str()).unwrap_or("unknown"),
+            artifact_type: item
+                .spec
+                .map(|spec| spec.name.as_str())
+                .unwrap_or("unknown"),
             file_name: item.path.rsplit('/').next().unwrap_or(&item.path),
         })
         .collect();
@@ -268,11 +280,9 @@ fn load_composed_or_exit_with_boundary(
     boundary: Option<&Path>,
 ) -> Result<Option<crate::composition::ComposedCorpus>, i32> {
     let loaded = match boundary {
-        Some(root) => crate::federated_corpus::load_composed_corpus_with_boundary(
-            directory,
-            recursive,
-            root,
-        ),
+        Some(root) => {
+            crate::federated_corpus::load_composed_corpus_with_boundary(directory, recursive, root)
+        }
         None => crate::federated_corpus::load_composed_corpus(directory, recursive),
     };
     match loaded {
@@ -364,8 +374,7 @@ pub fn validate_directory_incremental_in(
     let root_key = validate_root_key(directory);
     let config_hash = config_fingerprint(directory);
 
-    let prev_rows =
-        open_validation_store(&cache_dir, &root_key, &config_hash).unwrap_or_default();
+    let prev_rows = open_validation_store(&cache_dir, &root_key, &config_hash).unwrap_or_default();
     let prev_manifest: Vec<(String, FileState)> = prev_rows
         .iter()
         .map(|(rel, row)| {
@@ -394,8 +403,7 @@ pub fn validate_directory_incremental_in(
     let root_display = normalize_root(directory);
 
     let recompute_start = std::time::Instant::now();
-    let mut new_rows: Vec<(String, ValidationCacheRow)> =
-        Vec::with_capacity(new_manifest.len());
+    let mut new_rows: Vec<(String, ValidationCacheRow)> = Vec::with_capacity(new_manifest.len());
     for (rel, state) in &new_manifest {
         if !changed.contains(rel) {
             if let Some(prev) = prev_by_rel.get(rel.as_str()) {
@@ -658,10 +666,7 @@ pub fn cmd_validate(args: &ValidateArgs) -> i32 {
         if args.corpus.is_some() {
             return usage_error("--corpus applies to stdin ('-') or a single file");
         }
-        let composed = crate::federated_corpus::load_composed_corpus(
-            &args.file,
-            !args.top_level,
-        );
+        let composed = crate::federated_corpus::load_composed_corpus(&args.file, !args.top_level);
         // The cache reuses per-file results across runs (ADR-106),
         // byte-identical to the uncached path; on by default per ADR-112.
         let result = match composed {
@@ -739,13 +744,9 @@ pub fn cmd_validate(args: &ValidateArgs) -> i32 {
             py_path_str(&args.file)
         };
         let result = match load_composed_or_exit(corpus, true) {
-            Ok(Some(composed)) => validate_stdin_against_composed(
-                &artifact,
-                corpus,
-                &source_path,
-                true,
-                &composed,
-            ),
+            Ok(Some(composed)) => {
+                validate_stdin_against_composed(&artifact, corpus, &source_path, true, &composed)
+            }
             Ok(None) => validate_stdin_against_corpus(&artifact, corpus, &source_path, true),
             Err(code) => return code,
         };
@@ -854,9 +855,7 @@ fn read_markdown_input(target: &str, command: &str) -> Result<String, i32> {
             // strictly: invalid UTF-8 raises UnicodeDecodeError, which no
             // handler catches — an unhandled traceback, exit 1, empty stdout.
             Err(e) => {
-                eprintln!(
-                    "UnicodeDecodeError: 'utf-8' codec can't decode input: {e}"
-                );
+                eprintln!("UnicodeDecodeError: 'utf-8' codec can't decode input: {e}");
                 Err(EXIT_VALIDATION_FAILED)
             }
         },
@@ -896,15 +895,9 @@ pub fn cmd_inspect(args: &InspectArgs) -> i32 {
             !args.top_level,
         ) {
             Ok(Some(composed)) => {
-                let local = crate::federated_corpus::local_writable_projection(
-                    &args.file,
-                    &composed,
-                );
-                crate::inspect::inspect_directory_from_items(
-                    &args.file,
-                    !args.top_level,
-                    &local,
-                )
+                let local =
+                    crate::federated_corpus::local_writable_projection(&args.file, &composed);
+                crate::inspect::inspect_directory_from_items(&args.file, !args.top_level, &local)
             }
             Ok(None) => crate::inspect::inspect_directory(&args.file, !args.top_level),
             Err(error) => {
@@ -932,7 +925,9 @@ pub fn cmd_inspect(args: &InspectArgs) -> i32 {
             Ok(target) => target,
             Err(error) => return usage_error(&format!("cannot read {}: {error}", args.file)),
         };
-        let containing = Path::new(&args.file).parent().unwrap_or_else(|| Path::new("."));
+        let containing = Path::new(&args.file)
+            .parent()
+            .unwrap_or_else(|| Path::new("."));
         match crate::federated_corpus::load_graph_composed_corpus(
             &containing.to_string_lossy(),
             true,
@@ -1036,9 +1031,7 @@ pub fn cmd_relationships(args: &RelationshipsArgs) -> i32 {
     if args.validate {
         let report = if is_dir {
             match load_composed_or_exit(&args.path, !args.top_level) {
-                Ok(Some(composed)) => {
-                    composed.validate_relationships(&args.path, !args.top_level)
-                }
+                Ok(Some(composed)) => composed.validate_relationships(&args.path, !args.top_level),
                 Ok(None) => validate_relationships(&args.path, !args.top_level),
                 Err(code) => return code,
             }
@@ -1402,8 +1395,18 @@ pub fn cmd_herald(args: &HeraldArgs) -> i32 {
         return code;
     }
     let paths = match std::fs::read_to_string(&args.paths_file) {
-        Ok(text) => text.lines().map(str::trim).filter(|line| !line.is_empty()).map(str::to_string).collect::<Vec<_>>(),
-        Err(error) => return usage_error(&format!("could not read paths file {}: {error}", args.paths_file)),
+        Ok(text) => text
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .map(str::to_string)
+            .collect::<Vec<_>>(),
+        Err(error) => {
+            return usage_error(&format!(
+                "could not read paths file {}: {error}",
+                args.paths_file
+            ))
+        }
     };
     let report = match load_composed_or_exit(&args.directory, !args.top_level) {
         Ok(Some(composed)) => {
@@ -1414,9 +1417,16 @@ pub fn cmd_herald(args: &HeraldArgs) -> i32 {
     };
     let body = crate::herald::render(&report, &args.link_base, args.max_inline);
     if let Err(error) = std::fs::write(&args.out, body) {
-        return usage_error(&format!("could not write Herald output {}: {error}", args.out));
+        return usage_error(&format!(
+            "could not write Herald output {}: {error}",
+            args.out
+        ));
     }
-    let has_decisions = if report.has_decisions() { "true" } else { "false" };
+    let has_decisions = if report.has_decisions() {
+        "true"
+    } else {
+        "false"
+    };
     if let Some(path) = &args.github_output {
         use std::io::Write;
         let result = std::fs::OpenOptions::new()
@@ -1443,10 +1453,10 @@ pub struct WatchkeeperArgs {
     pub directory: Option<String>,
     pub base: String,
     pub head: Option<String>,
-    pub format: String, // human | json | github (choice-validated by the parser)
-    pub json: bool,     // alias that OVERRIDES --format to json
+    pub format: String,  // human | json | github (choice-validated by the parser)
+    pub json: bool,      // alias that OVERRIDES --format to json
     pub fail_on: String, // error | warning | none
-    pub annotate: bool, // github format's stderr annotations (--no-annotate clears)
+    pub annotate: bool,  // github format's stderr annotations (--no-annotate clears)
 }
 
 /// Review product knowledge changes between two repository states. Base and
@@ -1479,7 +1489,11 @@ pub fn cmd_watchkeeper(args: &WatchkeeperArgs) -> i32 {
         Ok(report) => report,
         Err(exc) => return usage_error(exc.message()),
     };
-    let output_format = if args.json { "json" } else { args.format.as_str() };
+    let output_format = if args.json {
+        "json"
+    } else {
+        args.format.as_str()
+    };
     if output_format == "json" {
         emit(output::render_watchkeeper_json(&report));
     } else if output_format == "github" {
@@ -1933,19 +1947,14 @@ fn materialize_export_revision(
     directory: &str,
     revision: &str,
 ) -> Result<HistoricalExportRevision, HistoricalExportError> {
-    let (repository_root, repository_path, relative) =
-        revision_repository_and_path(directory)?;
+    let (repository_root, repository_path, relative) = revision_repository_and_path(directory)?;
     let mut snapshot = crate::revisions::RevisionSnapshot::open(&repository_root, revision)?;
     materialize_ancestor_metadata(&mut snapshot, &relative)?;
     let projected_corpus = snapshot.root().join(&relative);
     let composition_root = historical_composition_root(snapshot.root(), &projected_corpus);
-    let exclusions = historical_parent_root_exclusions(
-        snapshot.root(),
-        &composition_root,
-        &relative,
-    );
-    let symlink_policy =
-        historical_corpus_symlink_policy(snapshot.root(), &composition_root);
+    let exclusions =
+        historical_parent_root_exclusions(snapshot.root(), &composition_root, &relative);
+    let symlink_policy = historical_corpus_symlink_policy(snapshot.root(), &composition_root);
     let corpus = snapshot
         .materialize_corpus_with_options(
             &relative,
@@ -2055,7 +2064,9 @@ pub(crate) fn cmd_export_at(args: &ExportArgs, at: Option<&str>) -> i32 {
     };
     let export_directory = historical
         .as_ref()
-        .map_or(args.directory.as_str(), |snapshot| snapshot.directory.as_str());
+        .map_or(args.directory.as_str(), |snapshot| {
+            snapshot.directory.as_str()
+        });
     let identity_directory = args.directory.as_str();
     let snapshot_boundary = historical
         .as_ref()
@@ -2162,9 +2173,7 @@ pub(crate) fn cmd_export_at(args: &ExportArgs, at: Option<&str>) -> i32 {
             .iter()
             .map(|path| path.to_string_lossy().into_owned())
             .collect();
-        if let Some(code) =
-            refuse_read_only_targets(destination_text.iter().map(String::as_str))
-        {
+        if let Some(code) = refuse_read_only_targets(destination_text.iter().map(String::as_str)) {
             return code;
         }
         for (rel, content) in &bundle {
@@ -2201,7 +2210,7 @@ pub(crate) fn cmd_export_at(args: &ExportArgs, at: Option<&str>) -> i32 {
             output::rac_version(),
             snapshot_boundary,
         )
-            .map_err(|error| error.message().to_string()),
+        .map_err(|error| error.message().to_string()),
     };
     let export = match export {
         Ok(export) => export,
@@ -2451,7 +2460,11 @@ pub fn cmd_resolve(args: &ResolveArgs) -> i32 {
         } else {
             "duplicate artifact ID"
         };
-        eprintln!("decided: {label}: {}\n\nFound in:\n{}", args.id, found.join("\n"));
+        eprintln!(
+            "decided: {label}: {}\n\nFound in:\n{}",
+            args.id,
+            found.join("\n")
+        );
     } else {
         eprintln!("decided: artifact not found: {}", args.id);
     }
@@ -2543,8 +2556,7 @@ pub fn annotate_composed_search_recency(
         .filter_map(|(index, artifact)| {
             let key = artifact.key.as_ref()?;
             let item = corpus.item(key)?;
-            (item.origin.layer == Layer::Local)
-                .then(|| (index, item.locator.path.clone()))
+            (item.origin.layer == Layer::Local).then(|| (index, item.locator.path.clone()))
         })
         .collect();
     if local.is_empty() {
@@ -2650,11 +2662,8 @@ pub fn annotate_graph_search_recency(
 /// reopened view or the fresh structures (ADR-080).
 fn find_from_store(args: &FindArgs) -> crate::resolve::SearchResult {
     use crate::derived_cache::{DerivedIndexCache, ReadModel};
-    let view = DerivedIndexCache::default().load_or_build(
-        &args.directory,
-        !args.top_level,
-        args.verify,
-    );
+    let view =
+        DerivedIndexCache::default().load_or_build(&args.directory, !args.top_level, args.verify);
     match view {
         ReadModel::View(reader) => {
             if args.decisions {
@@ -2693,9 +2702,7 @@ fn cmd_find_graph(args: &FindArgs, repository_root: &Path, corpus_relative: &str
     use crate::derived_cache::{GraphFederatedCacheTracker, ReadModel};
 
     let persistent_cache = crate::derived_cache::cache_enabled(args.cache);
-    let mut tracker = GraphFederatedCacheTracker::new(
-        crate::derived_cache::default_cache_dir(),
-    );
+    let mut tracker = GraphFederatedCacheTracker::new(crate::derived_cache::default_cache_dir());
     let read = match tracker.read_graph(
         repository_root,
         corpus_relative,
@@ -2751,7 +2758,10 @@ fn cmd_find_graph(args: &FindArgs, repository_root: &Path, corpus_relative: &str
     crate::timing::emit_since(
         "cli.response_serialize",
         render_started,
-        &[("matches", result.matches.len() as u64), ("bytes", rendered.len() as u64)],
+        &[
+            ("matches", result.matches.len() as u64),
+            ("bytes", rendered.len() as u64),
+        ],
     );
     emit(rendered);
     EXIT_OK
@@ -2837,7 +2847,10 @@ pub fn cmd_find(args: &FindArgs) -> i32 {
     crate::timing::emit_since(
         "cli.response_serialize",
         render_started,
-        &[("matches", result.matches.len() as u64), ("bytes", rendered.len() as u64)],
+        &[
+            ("matches", result.matches.len() as u64),
+            ("bytes", rendered.len() as u64),
+        ],
     );
     emit(rendered);
     // An empty result is a valid outcome, not an error.
@@ -2881,9 +2894,17 @@ pub fn cmd_diagnose(args: &DiagnoseArgs) -> i32 {
         let target_is_effective = composed
             .resolve(crate::pycompat::py_strip(&args.target))
             .ok()
-            .is_some_and(|target| effective.iter().any(|entry| entry.key.as_ref() == Some(&target.key)));
+            .is_some_and(|target| {
+                effective
+                    .iter()
+                    .any(|entry| entry.key.as_ref() == Some(&target.key))
+            });
         crate::resolve::diagnose_index(
-            if target_is_effective { &effective } else { &identity },
+            if target_is_effective {
+                &effective
+            } else {
+                &identity
+            },
             &args.query,
             &args.target,
             args.artifact_type.as_deref(),
@@ -3200,7 +3221,10 @@ pub fn cmd_eval(args: &EvalArgs) -> i32 {
             eprintln!("decided: cannot write {}: {e}", args.baseline);
             return EXIT_VALIDATION_FAILED;
         }
-        emit(format!("decided eval: baseline updated -> {}", args.baseline));
+        emit(format!(
+            "decided eval: baseline updated -> {}",
+            args.baseline
+        ));
         return EXIT_OK;
     }
     if args.check {
@@ -3438,19 +3462,19 @@ pub fn cmd_quickstart(args: &QuickstartArgs) -> i32 {
     if let Some(code) = refuse_read_only_target(&args.directory) {
         return code;
     }
-    let result =
-        match crate::scaffold::quickstart(&args.directory, &args.key, &args.artifact_type) {
-            Ok(result) => result,
-            Err(
-                e @ (ScaffoldError::TemplateNotFound(_)
-                | ScaffoldError::InvalidRepositoryKey(_)
-                | ScaffoldError::OutputDirectoryMissing(_)),
-            ) => return usage_error(e.message()),
-            Err(e) => {
-                eprintln!("decided: {}", e.message());
-                return EXIT_VALIDATION_FAILED;
-            }
-        };
+    let result = match crate::scaffold::quickstart(&args.directory, &args.key, &args.artifact_type)
+    {
+        Ok(result) => result,
+        Err(
+            e @ (ScaffoldError::TemplateNotFound(_)
+            | ScaffoldError::InvalidRepositoryKey(_)
+            | ScaffoldError::OutputDirectoryMissing(_)),
+        ) => return usage_error(e.message()),
+        Err(e) => {
+            eprintln!("decided: {}", e.message());
+            return EXIT_VALIDATION_FAILED;
+        }
+    };
     if args.json {
         emit(output::render_quickstart_json(&result));
     } else {
@@ -3483,18 +3507,15 @@ pub fn cmd_migrate(args: &MigrateArgs) -> i32 {
     if args.target == "layout" {
         return migrate_layout(args);
     }
-    let report = match crate::scaffold::migrate_metadata(
-        &args.directory,
-        args.dry_run,
-        !args.top_level,
-    ) {
-        Ok(report) => report,
-        Err(e @ ScaffoldError::MissingRepositoryConfig(_)) => return usage_error(e.message()),
-        Err(e) => {
-            eprintln!("decided: {}", e.message());
-            return EXIT_VALIDATION_FAILED;
-        }
-    };
+    let report =
+        match crate::scaffold::migrate_metadata(&args.directory, args.dry_run, !args.top_level) {
+            Ok(report) => report,
+            Err(e @ ScaffoldError::MissingRepositoryConfig(_)) => return usage_error(e.message()),
+            Err(e) => {
+                eprintln!("decided: {}", e.message());
+                return EXIT_VALIDATION_FAILED;
+            }
+        };
     if args.json {
         emit(output::render_migrate_json(&report));
     } else {
@@ -3511,10 +3532,7 @@ fn migrate_layout(args: &MigrateArgs) -> i32 {
         (root.join(".rac"), root.join(".decided")),
         (root.join("rac"), root.join("decisions")),
     ];
-    let planned: Vec<_> = moves
-        .iter()
-        .filter(|(from, _)| from.exists())
-        .collect();
+    let planned: Vec<_> = moves.iter().filter(|(from, _)| from.exists()).collect();
     for (_, to) in &planned {
         if to.exists() {
             return usage_error(&format!(
@@ -3538,9 +3556,7 @@ fn migrate_layout(args: &MigrateArgs) -> i32 {
     if args.json {
         let operations: Vec<_> = planned
             .iter()
-            .map(|(from, to)| {
-                serde_json::json!({"from": from, "to": to})
-            })
+            .map(|(from, to)| serde_json::json!({"from": from, "to": to}))
             .collect();
         emit(
             serde_json::to_string_pretty(&serde_json::json!({
@@ -3600,10 +3616,7 @@ pub fn cmd_rename(args: &RenameArgs) -> i32 {
         Err(code) => return code,
     };
     let plan = if let Some(corpus) = &composed {
-        let local = crate::federated_corpus::local_writable_projection(
-            &args.directory,
-            corpus,
-        );
+        let local = crate::federated_corpus::local_writable_projection(&args.directory, corpus);
         crate::rename::compute_rename_from_items(
             &args.directory,
             &args.old,
@@ -3922,12 +3935,8 @@ mod validation_provenance_tests {
     fn composed_validation_adds_machine_provenance_only() {
         let legacy = validation(None);
         let composed = validation(Some(
-            CorpusLayer::inherited(
-                "acme/standards",
-                "standards",
-                "sha256:0123456789abcdef",
-            )
-            .origin(),
+            CorpusLayer::inherited("acme/standards", "standards", "sha256:0123456789abcdef")
+                .origin(),
         ));
 
         assert_eq!(

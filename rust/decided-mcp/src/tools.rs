@@ -6,12 +6,10 @@
 
 use crate::graph;
 use crate::provenance;
-use rac_engine::budget::{
-    serialize, HINT_RELATED, MARKER_HINT, MARKER_OMITTED, MARKER_TRUNCATED,
-};
+use rac_engine::budget::{serialize, HINT_RELATED, MARKER_HINT, MARKER_OMITTED, MARKER_TRUNCATED};
+use rac_engine::freshness::TrackerModel;
 use rac_engine::output;
 use rac_engine::relationships::corpus_items;
-use rac_engine::freshness::TrackerModel;
 use rac_engine::resolve::{
     artifact_status, build_index, find_decisions, resolve_in_index, search_index_filtered,
     ResolvedArtifact, SearchResult, OUTCOME_RESOLVED,
@@ -96,7 +94,8 @@ fn attach_graph_provenance(
 }
 
 /// The additive empty-corpus guidance the server layers over the summary.
-const EMPTY_GUIDANCE: &str = "This repository has no AsDecided artifacts yet. The user can create the \
+const EMPTY_GUIDANCE: &str =
+    "This repository has no AsDecided artifacts yet. The user can create the \
 first one with `decided quickstart`, or with `decided init` then \
 `decided new <type> <path>`. Once artifacts exist, search_artifacts \
 and get_artifact will return them.";
@@ -366,26 +365,25 @@ pub fn search_artifacts(
         Some(TrackerModel::View(reader)) => {
             rac_engine::read_model::store_search(reader, query, artifact_type, tags, live_only)
         }
-        Some(TrackerModel::Snapshot(derived)) => {
-            search_index_filtered(&derived.index_entries, query, artifact_type, tags, live_only)
-        }
-        Some(TrackerModel::Delta(generation)) => generation.search.search(
+        Some(TrackerModel::Snapshot(derived)) => search_index_filtered(
+            &derived.index_entries,
             query,
             artifact_type,
             tags,
             live_only,
-            &generation.graph,
         ),
+        Some(TrackerModel::Delta(generation)) => {
+            generation
+                .search
+                .search(query, artifact_type, tags, live_only, &generation.graph)
+        }
         None => {
             let entries = build_index(root, true);
             search_index_filtered(&entries, query, artifact_type, tags, live_only)
         }
     };
     rac_engine::commands::annotate_search_recency(&mut result.matches, root);
-    serialize(
-        &search_result_payload(&result, false),
-        budget,
-    )
+    serialize(&search_result_payload(&result, false), budget)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -401,23 +399,15 @@ pub fn search_artifacts_composed(
 ) -> String {
     let mut result = match cached {
         Some(rac_engine::derived_cache::ReadModel::View(reader)) => {
-            rac_engine::read_model::store_search(
-                reader,
-                query,
-                artifact_type,
-                tags,
-                live_only,
-            )
+            rac_engine::read_model::store_search(reader, query, artifact_type, tags, live_only)
         }
-        Some(rac_engine::derived_cache::ReadModel::Fresh(derived)) => {
-            search_index_filtered(
-                &derived.index_entries,
-                query,
-                artifact_type,
-                tags,
-                live_only,
-            )
-        }
+        Some(rac_engine::derived_cache::ReadModel::Fresh(derived)) => search_index_filtered(
+            &derived.index_entries,
+            query,
+            artifact_type,
+            tags,
+            live_only,
+        ),
         None => search_index_filtered(
             &corpus.effective_index(),
             query,
@@ -442,13 +432,9 @@ pub fn search_artifacts_graph(
     budget: i64,
 ) -> String {
     let mut result = match model {
-        rac_engine::derived_cache::ReadModel::View(reader) => rac_engine::read_model::store_search(
-            reader,
-            query,
-            artifact_type,
-            tags,
-            live_only,
-        ),
+        rac_engine::derived_cache::ReadModel::View(reader) => {
+            rac_engine::read_model::store_search(reader, query, artifact_type, tags, live_only)
+        }
         rac_engine::derived_cache::ReadModel::Fresh(derived) => search_index_filtered(
             &derived.index_entries,
             query,
@@ -587,10 +573,7 @@ pub fn find_decisions_tool_graph(
         };
         let result = rac_engine::retrieve::decisions_for_path_with_rows(&rows, root, path);
         let mut payload = rac_engine::retrieve::scope_lookup_value_with_origin(&result, true);
-        if let Some(decisions) = payload
-            .get_mut("decisions")
-            .and_then(Value::as_array_mut)
-        {
+        if let Some(decisions) = payload.get_mut("decisions").and_then(Value::as_array_mut) {
             for (value, decision) in decisions.iter_mut().zip(&result.decisions) {
                 attach_graph_provenance(value, corpus, decision.key.as_ref());
             }
@@ -761,8 +744,8 @@ fn get_related_inner(
         );
         neighborhood_truncated = hood.truncated;
     }
-    let edge_overflow = (incoming_result.total - incoming_result.items.len())
-        + (outgoing.total - outgoing.kept());
+    let edge_overflow =
+        (incoming_result.total - incoming_result.items.len()) + (outgoing.total - outgoing.kept());
     if edge_overflow > 0 || neighborhood_truncated {
         payload.insert(MARKER_TRUNCATED.to_string(), json!(true));
         payload.insert(MARKER_OMITTED.to_string(), json!(edge_overflow as i64));
@@ -908,17 +891,12 @@ pub fn get_summary_composed(
     serialize(&payload, budget)
 }
 
-pub fn get_summary_graph(
-    model: &rac_engine::derived_cache::ReadModel,
-    budget: i64,
-) -> String {
+pub fn get_summary_graph(model: &rac_engine::derived_cache::ReadModel, budget: i64) -> String {
     let summary = match model {
         rac_engine::derived_cache::ReadModel::View(reader) => {
             reader.portfolio_summary().unwrap_or(Value::Null)
         }
-        rac_engine::derived_cache::ReadModel::Fresh(derived) => {
-            derived.portfolio_summary.clone()
-        }
+        rac_engine::derived_cache::ReadModel::Fresh(derived) => derived.portfolio_summary.clone(),
     };
     let mut payload = match summary {
         Value::Object(payload) => payload,
@@ -957,13 +935,7 @@ pub fn retrieve_grounding(
         Some(TrackerModel::Delta(generation)) => {
             let derived = generation.materialize_derived(root, true);
             rac_engine::retrieve::retrieve_grounding_from_derived(
-                root,
-                task,
-                scope_opt,
-                top_k,
-                effective,
-                live_only,
-                &derived,
+                root, task, scope_opt, top_k, effective, live_only, &derived,
             )
         }
         None => rac_engine::retrieve::retrieve_grounding(
@@ -984,13 +956,7 @@ pub fn retrieve_grounding_composed(
 ) -> String {
     let scope = if scope.is_empty() { None } else { Some(scope) };
     let payload = rac_engine::retrieve::retrieve_grounding_from_composed(
-        root,
-        task,
-        scope,
-        top_k,
-        effective,
-        live_only,
-        corpus,
+        root, task, scope, top_k, effective, live_only, corpus,
     );
     serialize(&payload, effective)
 }
@@ -1006,13 +972,7 @@ pub fn retrieve_grounding_graph(
 ) -> String {
     let scope = if scope.is_empty() { None } else { Some(scope) };
     let payload = rac_engine::retrieve::retrieve_grounding_from_graph(
-        root,
-        task,
-        scope,
-        top_k,
-        effective,
-        live_only,
-        corpus,
+        root, task, scope, top_k, effective, live_only, corpus,
     );
     serialize(&payload, effective)
 }

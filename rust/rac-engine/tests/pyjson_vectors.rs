@@ -16,7 +16,11 @@ fn dumps_matches_oracle() {
     let text = std::fs::read_to_string(path).expect("vector file readable");
     let v: Value = serde_json::from_str(&text).expect("vector file parses");
     let rows = v["rows"].as_array().expect("rows present");
-    assert!(rows.len() >= 50, "expected >=50 pyjson rows, got {}", rows.len());
+    assert!(
+        rows.len() >= 50,
+        "expected >=50 pyjson rows, got {}",
+        rows.len()
+    );
     for (i, row) in rows.iter().enumerate() {
         let doc = &row["doc"];
         let indent2 = row["indent2"].as_str().unwrap();

@@ -85,7 +85,10 @@ impl CaseResult {
         m.insert("returned".into(), str_list(&self.returned));
         m.insert("relevant".into(), str_list(&self.case.relevant));
         if !self.case.must_not_return.is_empty() {
-            m.insert("must_not_return".into(), str_list(&self.case.must_not_return));
+            m.insert(
+                "must_not_return".into(),
+                str_list(&self.case.must_not_return),
+            );
         }
         for (i, k) in K_VALUES.iter().enumerate() {
             m.insert(format!("p_at_{k}"), py_float(round6(self.precision[i])));
@@ -198,7 +201,9 @@ pub fn load_query_set(path: &str) -> EvalResult<Vec<QueryCase>> {
 
 fn parse_case(raw: &Value, path: &str, index: usize) -> EvalResult<QueryCase> {
     let Value::Object(map) = raw else {
-        return usage(format!("malformed query set: {path}: case {index} is not an object"));
+        return usage(format!(
+            "malformed query set: {path}: case {index} is not an object"
+        ));
     };
     let require = |field: &str| -> EvalResult<&Value> {
         map.get(field).ok_or_else(|| {
@@ -229,7 +234,10 @@ fn parse_case(raw: &Value, path: &str, index: usize) -> EvalResult<QueryCase> {
             "malformed query set: {path}: case {id_repr} 'relevant' must be a non-empty list"
         ));
     }
-    let must_not = map.get("must_not_return").cloned().unwrap_or(Value::Array(Vec::new()));
+    let must_not = map
+        .get("must_not_return")
+        .cloned()
+        .unwrap_or(Value::Array(Vec::new()));
     let Value::Array(must_not) = must_not else {
         return usage(format!(
             "malformed query set: {path}: case {id_repr} 'must_not_return' must be a list"
@@ -260,7 +268,9 @@ pub fn load_baseline(path: &str) -> EvalResult<Value> {
     let data = load_json(path, "baseline")?;
     match &data {
         Value::Object(map) if map.contains_key("overall") => Ok(data),
-        _ => usage(format!("malformed baseline: {path}: expected a metrics object")),
+        _ => usage(format!(
+            "malformed baseline: {path}: expected a metrics object"
+        )),
     }
 }
 
@@ -271,7 +281,9 @@ pub fn load_config(path: &str) -> EvalResult<Value> {
         Value::Object(map) if map.contains_key("floors") && map.contains_key("tolerance") => {
             Ok(data)
         }
-        _ => usage(format!("malformed config: {path}: expected 'floors' and 'tolerance'")),
+        _ => usage(format!(
+            "malformed config: {path}: expected 'floors' and 'tolerance'"
+        )),
     }
 }
 
@@ -346,9 +358,15 @@ fn related_returned(root: &str, case: &QueryCase) -> EvalResult<Vec<String>> {
         ));
     };
     let relationships = relationships_from_corpus(&corpus);
-    let identity_by_path: HashMap<&str, &str> =
-        index.iter().map(|e| (e.path.as_str(), e.id.as_str())).collect();
-    Ok(incoming_ids(&relationships, &identity_by_path, &artifact.path))
+    let identity_by_path: HashMap<&str, &str> = index
+        .iter()
+        .map(|e| (e.path.as_str(), e.id.as_str()))
+        .collect();
+    Ok(incoming_ids(
+        &relationships,
+        &identity_by_path,
+        &artifact.path,
+    ))
 }
 
 fn related_returned_composed(
@@ -420,7 +438,10 @@ fn score_case(returned: Vec<String>, case: QueryCase) -> CaseResult {
     let mut recall = [0.0f64; 3];
     for (i, &k) in K_VALUES.iter().enumerate() {
         let top_k = &returned[..k.min(returned.len())];
-        let hits = top_k.iter().filter(|rid| relevant.contains(rid.as_str())).count();
+        let hits = top_k
+            .iter()
+            .filter(|rid| relevant.contains(rid.as_str()))
+            .count();
         precision[i] = hits as f64 / k as f64;
         recall[i] = hits as f64 / case.relevant.len() as f64;
     }
@@ -555,7 +576,10 @@ pub fn run_eval(root: &str, queries_path: &str) -> EvalResult<Scorecard> {
         "by_category".into(),
         grouped_metrics(&results, |r| r.case.category.as_str()),
     );
-    metrics.insert("by_tool".into(), grouped_metrics(&results, |r| r.case.tool.as_str()));
+    metrics.insert(
+        "by_tool".into(),
+        grouped_metrics(&results, |r| r.case.tool.as_str()),
+    );
 
     let mut metadata = Map::new();
     metadata.insert(
@@ -618,7 +642,11 @@ impl GateFailure {
                 py_format_fixed(self.current, 0)
             );
         }
-        let label = if self.rule == RULE_FLOOR { "floor" } else { "baseline" };
+        let label = if self.rule == RULE_FLOOR {
+            "floor"
+        } else {
+            "baseline"
+        };
         format!(
             "FAIL [{}] {}: {} {}, current {}",
             self.rule,
@@ -642,11 +670,7 @@ fn gated_pairs(config: &Value) -> Vec<(String, String, String)> {
     let mut pairs = Vec::new();
     let floors = &config["floors"];
     for metric in ["p_at_1", "r_at_5"] {
-        if floors
-            .get("overall")
-            .and_then(|o| o.get(metric))
-            .is_some()
-        {
+        if floors.get("overall").and_then(|o| o.get(metric)).is_some() {
             pairs.push(("overall".to_string(), String::new(), metric.to_string()));
         }
     }
@@ -692,10 +716,7 @@ fn floor_value(floors: &Value, scope: &str, name: &str, metric: &str) -> Option<
 /// (missing-metric floor / floor / regression).
 pub fn evaluate_gate(current: &Value, baseline: &Value, config: &Value) -> Vec<GateFailure> {
     let mut failures: Vec<GateFailure> = Vec::new();
-    let tolerance = config
-        .get("tolerance")
-        .and_then(as_float)
-        .unwrap_or(0.0);
+    let tolerance = config.get("tolerance").and_then(as_float).unwrap_or(0.0);
     let floors = &config["floors"];
 
     // (a) Hard-negative violations — always gated.
@@ -825,10 +846,7 @@ mod tests {
             must_not_return: vec!["X".into()],
             artifact_type: None,
         };
-        let result = score_case(
-            vec!["A".into(), "X".into(), "B".into()],
-            case,
-        );
+        let result = score_case(vec!["A".into(), "X".into(), "B".into()], case);
         assert_eq!(result.precision, [1.0, 2.0 / 3.0, 2.0 / 5.0]);
         assert_eq!(result.recall, [0.5, 1.0, 1.0]);
         assert_eq!(result.violations, vec!["X".to_string()]);
@@ -946,7 +964,11 @@ fn render_group(group: &Value, lines: &mut Vec<String>) {
         lines.push("  (none)".to_string());
         return;
     }
-    let width = map.keys().map(|name| name.chars().count()).max().unwrap_or(0);
+    let width = map
+        .keys()
+        .map(|name| name.chars().count())
+        .max()
+        .unwrap_or(0);
     lines.push(format!("  {}    P@1     R@5", " ".repeat(width)));
     for (name, cell) in map {
         let pad = width.saturating_sub(name.chars().count());

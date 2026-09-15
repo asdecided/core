@@ -97,12 +97,7 @@ pub fn build_derived_index_from_items(
     }
     let index_entries: Vec<IndexEntry> = items
         .iter()
-        .map(|item| {
-            entry_from_item(
-                item,
-                inbound.get(&item.artifact_path).copied().unwrap_or(0),
-            )
-        })
+        .map(|item| entry_from_item(item, inbound.get(&item.artifact_path).copied().unwrap_or(0)))
         .collect();
     let field_tokens: Vec<FieldTokens> = index_entries.iter().map(field_tokens_of).collect();
     let identity_entries: Vec<IndexEntry> = index_entries
@@ -192,7 +187,9 @@ pub(crate) fn build_derived_index_from_composed(
     let live_decision_paths: Vec<String> = items
         .iter()
         .filter(|item| {
-            item.spec.map(|spec| spec.name == DECISION_TYPE).unwrap_or(false)
+            item.spec
+                .map(|spec| spec.name == DECISION_TYPE)
+                .unwrap_or(false)
                 && is_live_decision(&item.artifact)
         })
         .map(|item| item.path.clone())
@@ -200,7 +197,9 @@ pub(crate) fn build_derived_index_from_composed(
     let live_decision_keys: Vec<ArtifactKey> = items
         .iter()
         .filter(|item| {
-            item.spec.map(|spec| spec.name == DECISION_TYPE).unwrap_or(false)
+            item.spec
+                .map(|spec| spec.name == DECISION_TYPE)
+                .unwrap_or(false)
                 && is_live_decision(&item.artifact)
         })
         .map(|item| item.key.clone())
@@ -268,7 +267,9 @@ pub(crate) fn build_derived_index_from_graph(
     let live_decision_paths: Vec<String> = items
         .iter()
         .filter(|item| {
-            item.spec.map(|spec| spec.name == DECISION_TYPE).unwrap_or(false)
+            item.spec
+                .map(|spec| spec.name == DECISION_TYPE)
+                .unwrap_or(false)
                 && is_live_decision(&item.artifact)
         })
         .map(|item| item.path.clone())
@@ -276,16 +277,17 @@ pub(crate) fn build_derived_index_from_graph(
     let live_decision_keys: Vec<ArtifactKey> = items
         .iter()
         .filter(|item| {
-            item.spec.map(|spec| spec.name == DECISION_TYPE).unwrap_or(false)
+            item.spec
+                .map(|spec| spec.name == DECISION_TYPE)
+                .unwrap_or(false)
                 && is_live_decision(&item.artifact)
         })
         .map(|item| item.key.clone())
         .collect();
     let relationships = corpus.composition.relationships();
     let relationship_summary = corpus.composition.relationship_summary();
-    let overrides = crate::validate::overrides_from_config_bytes(
-        &corpus.federation.root_config_bytes,
-    );
+    let overrides =
+        crate::validate::overrides_from_config_bytes(&corpus.federation.root_config_bytes);
     let portfolio = crate::portfolio::portfolio_from_corpus_with_analysis(
         &corpus.federation.root_corpus_path,
         &items,

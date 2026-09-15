@@ -161,8 +161,16 @@ pub fn load_enforcement_policy(start_dir: &str) -> Result<EnforcementPolicy, Mal
             })
         }
     };
-    let blocking = parse_code_list(&config_path, yaml_get(section, "blocking"), "enforcement.blocking")?;
-    let advisory = parse_code_list(&config_path, yaml_get(section, "advisory"), "enforcement.advisory")?;
+    let blocking = parse_code_list(
+        &config_path,
+        yaml_get(section, "blocking"),
+        "enforcement.blocking",
+    )?;
+    let advisory = parse_code_list(
+        &config_path,
+        yaml_get(section, "advisory"),
+        "enforcement.advisory",
+    )?;
     let off_value = yaml_get(section, "off").or_else(|| {
         section
             .iter()

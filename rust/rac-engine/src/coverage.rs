@@ -136,10 +136,9 @@ fn analyze_coverage_from_items(
         .map(|(_, artifact_path, _, _, _)| (artifact_path, HashSet::new()))
         .collect();
     for rel in relationships {
-        let (Some(source), Some(resolved)) = (
-            rel.source_artifact.as_ref(),
-            rel.resolved_artifact.as_ref(),
-        ) else {
+        let (Some(source), Some(resolved)) =
+            (rel.source_artifact.as_ref(), rel.resolved_artifact.as_ref())
+        else {
             continue;
         };
         if resolved == source {

@@ -8,8 +8,7 @@
 use std::collections::HashMap;
 
 use crate::compare::{
-    ArtifactChange, RepoState, RepositoryComparison, CHANGE_ADDED, CHANGE_MODIFIED,
-    CHANGE_REMOVED,
+    ArtifactChange, RepoState, RepositoryComparison, CHANGE_ADDED, CHANGE_MODIFIED, CHANGE_REMOVED,
 };
 use crate::diff::diff as diff_products;
 use crate::parse::Artifact;

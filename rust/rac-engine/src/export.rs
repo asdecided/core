@@ -29,10 +29,8 @@ const ERROR_MISSING_PIN: &str = "federated-export-missing-pin";
 const ERROR_MISSING_PROVENANCE: &str = "federated-export-missing-provenance";
 const ERROR_MISSING_CHILD_SOURCE: &str = "federated-export-missing-child-source";
 
-const VIEWER_SCHEMA: &str =
-    include_str!("../assets/schemas/export-viewer-v1.schema.json");
-const DOCUMENTS_SCHEMA: &str =
-    include_str!("../assets/schemas/export-documents-v1.schema.json");
+const VIEWER_SCHEMA: &str = include_str!("../assets/schemas/export-viewer-v1.schema.json");
+const DOCUMENTS_SCHEMA: &str = include_str!("../assets/schemas/export-documents-v1.schema.json");
 const GRAPH_SCHEMA: &str = include_str!("../assets/schemas/export-graph-v1.schema.json");
 
 /// Released display name; unlike source identity, this remains tied to the
@@ -385,9 +383,7 @@ fn composed_child_source(corpus: &ComposedCorpus) -> Result<String, FederatedExp
     })
 }
 
-fn item_by_artifact_path(
-    corpus: &ComposedCorpus,
-) -> BTreeMap<ArtifactPath, &CorpusItem> {
+fn item_by_artifact_path(corpus: &ComposedCorpus) -> BTreeMap<ArtifactPath, &CorpusItem> {
     let mut items = BTreeMap::new();
     for item in corpus.catalog() {
         items.entry(item.artifact_path.clone()).or_insert(item);
@@ -639,9 +635,10 @@ pub fn build_corpus_export_from_composed_for(
                 continue;
             }
             let (_, graph_provenance) = record_provenance(corpus, source)?;
-            let effective_key = relationship.effective_terminal.as_ref().map(|terminal| {
-                graph.terminal_redirects().get(terminal).unwrap_or(terminal)
-            });
+            let effective_key = relationship
+                .effective_terminal
+                .as_ref()
+                .map(|terminal| graph.terminal_redirects().get(terminal).unwrap_or(terminal));
             let effective_terminal = effective_key.map(ExportIdentity::from);
             relationships.push(ExportRelationship {
                 from: source.key.canonical_id.clone(),
@@ -790,11 +787,7 @@ pub fn build_okf_export_from_composed(
             effective_terminal: None,
         });
     }
-    relationships.sort_by(|left, right| {
-        left.from
-            .cmp(&right.from)
-            .then(left.to.cmp(&right.to))
-    });
+    relationships.sort_by(|left, right| left.from.cmp(&right.from).then(left.to.cmp(&right.to)));
 
     CorpusExport {
         corpus_name: corpus_name(directory),
@@ -1089,9 +1082,10 @@ pub fn build_graph_export_from_composed_for(
             }
             let (_, graph_provenance) = record_provenance(corpus, source)?;
             let kind = edge_spec(&relationship.relationship);
-            let effective_key = relationship.effective_terminal.as_ref().map(|terminal| {
-                graph.terminal_redirects().get(terminal).unwrap_or(terminal)
-            });
+            let effective_key = relationship
+                .effective_terminal
+                .as_ref()
+                .map(|terminal| graph.terminal_redirects().get(terminal).unwrap_or(terminal));
             let effective_terminal = effective_key.map(ExportIdentity::from);
             edges.push(GraphEdge {
                 source: source.key.canonical_id.clone(),

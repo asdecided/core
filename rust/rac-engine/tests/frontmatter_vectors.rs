@@ -179,11 +179,7 @@ fn split_matches_oracle() {
     for case in cases {
         let text = case["text"].as_str().unwrap();
         let s = split_frontmatter(text);
-        assert_eq!(
-            s.raw.as_deref(),
-            case["raw"].as_str(),
-            "raw for {text:?}"
-        );
+        assert_eq!(s.raw.as_deref(), case["raw"].as_str(), "raw for {text:?}");
         assert_eq!(s.body, case["body"].as_str().unwrap(), "body for {text:?}");
         assert_eq!(
             s.line_offset as u64,
@@ -401,12 +397,13 @@ fn files_and_env_cap_match_oracle() {
         // beyond i128 (saturating parse still lands in the crash zone)
         ("199999999999999999999999999999999999999999", overflow),
         // huge negatives are non-positive: default cap, no crash
-        (
-            "-99999999999999999999",
-            FileCap::Cap(1 << 20),
-        ),
+        ("-99999999999999999999", FileCap::Cap(1 << 20)),
     ] {
-        assert_eq!(file_cap_from(Some(value)), expected, "file_cap_from({value:?})");
+        assert_eq!(
+            file_cap_from(Some(value)),
+            expected,
+            "file_cap_from({value:?})"
+        );
     }
 
     fs::remove_dir_all(&root).ok();

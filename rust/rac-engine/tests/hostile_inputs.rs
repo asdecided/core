@@ -144,8 +144,12 @@ fn new_mints_an_id_over_the_full_catalog() {
         .join("rac/decisions/minted.md")
         .to_string_lossy()
         .into_owned();
-    let created = create_artifact("decision", &out)
-        .unwrap_or_else(|e| panic!("create_artifact failed on the hostile catalog: {}", e.message()));
+    let created = create_artifact("decision", &out).unwrap_or_else(|e| {
+        panic!(
+            "create_artifact failed on the hostile catalog: {}",
+            e.message()
+        )
+    });
     assert_eq!(created.artifact_type, "decision");
     let written = std::fs::read_to_string(&out).unwrap();
     assert!(written.starts_with("---\nschema_version: 1\nid: RAC-"));
@@ -171,8 +175,7 @@ fn read_cap_crash_zones_stay_graceful() {
     // 2^63 - 35 must parse every fixture without preallocating anything.
     let big_cap: u128 = (i64::MAX as u128) - 35;
     for path in hostile_fixtures() {
-        let product =
-            rac_engine::markdown::parse_file_with_cap(&path.to_string_lossy(), big_cap);
+        let product = rac_engine::markdown::parse_file_with_cap(&path.to_string_lossy(), big_cap);
         assert_eq!(
             product.source_path,
             path.to_string_lossy(),

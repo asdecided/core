@@ -145,8 +145,7 @@ fn inspect_refuses_direct_inherited_paths_before_a_parent_config_can_hide_the_gr
         );
         assert!(output.stdout.is_empty());
         assert!(
-            String::from_utf8_lossy(&output.stderr)
-                .contains("limited to root-local artifacts"),
+            String::from_utf8_lossy(&output.stderr).contains("limited to root-local artifacts"),
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
@@ -258,16 +257,12 @@ fn concrete_multi_file_targets_refuse_symlink_routes_before_any_write() {
     )
     .expect("link OKF generated file");
     assert_read_only_failure(
-        &run(
-            &repo,
-            &["export", "decisions", "--okf", "--out", "okf-out"],
-        ),
+        &run(&repo, &["export", "decisions", "--okf", "--out", "okf-out"]),
         "OKF bundle symlink target",
     );
 
     fs::create_dir_all(repo.path("local-skill/.claude")).expect("create skill output root");
-    symlink(&parent, repo.path("local-skill/.claude/skills"))
-        .expect("link skill destination tree");
+    symlink(&parent, repo.path("local-skill/.claude/skills")).expect("link skill destination tree");
     assert_read_only_failure(
         &run(
             &repo,

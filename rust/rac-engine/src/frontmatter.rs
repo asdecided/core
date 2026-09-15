@@ -563,11 +563,11 @@ fn datetime_eq(a: &Yaml, b: &Yaml) -> bool {
     {
         match (tz, tz2) {
             (None, None) => {
-                (year, month, day, hour, minute, second, micro)
-                    == (y2, m2, d2, h2, mi2, s2, us2)
+                (year, month, day, hour, minute, second, micro) == (y2, m2, d2, h2, mi2, s2, us2)
             }
             (Some(o1), Some(o2)) => {
-                let u1 = utc_micros(*year, *month, *day, *hour, *minute, *second, *micro) - o1 * 1_000_000;
+                let u1 = utc_micros(*year, *month, *day, *hour, *minute, *second, *micro)
+                    - o1 * 1_000_000;
                 let u2 = utc_micros(*y2, *m2, *d2, *h2, *mi2, *s2, *us2) - o2 * 1_000_000;
                 u1 == u2
             }
@@ -817,8 +817,24 @@ const TAG_VALUE: &str = "tag:yaml.org,2002:value";
 fn match_bool(v: &str) -> bool {
     matches!(
         v,
-        "yes" | "Yes" | "YES" | "no" | "No" | "NO" | "true" | "True" | "TRUE" | "false"
-            | "False" | "FALSE" | "on" | "On" | "ON" | "off" | "Off" | "OFF"
+        "yes"
+            | "Yes"
+            | "YES"
+            | "no"
+            | "No"
+            | "NO"
+            | "true"
+            | "True"
+            | "TRUE"
+            | "false"
+            | "False"
+            | "FALSE"
+            | "on"
+            | "On"
+            | "ON"
+            | "off"
+            | "Off"
+            | "OFF"
     )
 }
 
@@ -841,8 +857,7 @@ fn strip_signed_exponent(b: &[u8]) -> Option<&[u8]> {
         return Some(b);
     }
     if b[0] == b'e' || b[0] == b'E' {
-        if b.len() >= 3 && (b[1] == b'-' || b[1] == b'+') && b[2..].iter().all(u8::is_ascii_digit)
-        {
+        if b.len() >= 3 && (b[1] == b'-' || b[1] == b'+') && b[2..].iter().all(u8::is_ascii_digit) {
             Some(&b[..0])
         } else {
             None
@@ -944,11 +959,16 @@ fn match_int(v: &str) -> bool {
         return false;
     }
     // 0b[0-1_]+
-    if t.len() > 2 && t.starts_with(b"0b") && all_in(&t[2..], |c| c == b'0' || c == b'1' || c == b'_') {
+    if t.len() > 2
+        && t.starts_with(b"0b")
+        && all_in(&t[2..], |c| c == b'0' || c == b'1' || c == b'_')
+    {
         return true;
     }
     // 0x[0-9a-fA-F_]+
-    if t.len() > 2 && t.starts_with(b"0x") && all_in(&t[2..], |c| c.is_ascii_hexdigit() || c == b'_')
+    if t.len() > 2
+        && t.starts_with(b"0x")
+        && all_in(&t[2..], |c| c.is_ascii_hexdigit() || c == b'_')
     {
         return true;
     }
@@ -1407,7 +1427,9 @@ impl Scanner {
                 self.tokens_taken += 1;
                 Ok(t)
             }
-            None => Err(YErr::Internal("IndexError: get past stream end".to_string())),
+            None => Err(YErr::Internal(
+                "IndexError: get past stream end".to_string(),
+            )),
         }
     }
 
@@ -2149,8 +2171,7 @@ impl Scanner {
                 let inc = ch.to_digit(10).unwrap() as i64;
                 if inc == 0 {
                     return Err(YErr::Marked(
-                        "expected indentation indicator in the range 1-9, but found 0"
-                            .to_string(),
+                        "expected indentation indicator in the range 1-9, but found 0".to_string(),
                     ));
                 }
                 increment = Some(inc);
@@ -2390,8 +2411,7 @@ impl Scanner {
                 let stop = is_z_ws_break(ch)
                     || (ch == ':'
                         && (is_z_ws_break(self.peek(length + 1))
-                            || (self.flow_level != 0
-                                && ",[]{}".contains(self.peek(length + 1)))))
+                            || (self.flow_level != 0 && ",[]{}".contains(self.peek(length + 1)))))
                     || (self.flow_level != 0 && ",?[]{}".contains(ch));
                 if stop {
                     break;
@@ -2648,12 +2668,10 @@ impl Parser {
             St::IndentlessSequenceEntry => {
                 if self.sc.check_token(&[TK::BlockEntry])? {
                     self.sc.get_token()?;
-                    if !self.sc.check_token(&[
-                        TK::BlockEntry,
-                        TK::Key,
-                        TK::Value,
-                        TK::BlockEnd,
-                    ])? {
+                    if !self
+                        .sc
+                        .check_token(&[TK::BlockEntry, TK::Key, TK::Value, TK::BlockEnd])?
+                    {
                         self.states.push(St::IndentlessSequenceEntry);
                         return self.parse_node(true, false);
                     }
@@ -2932,15 +2950,14 @@ impl Parser {
         }
         if self.sc.check_token(&[TK::Scalar])? {
             let tok = self.sc.get_token()?;
-            let implicit_pair = if (tok.plain && resolved_tag.is_none())
-                || resolved_tag.as_deref() == Some("!")
-            {
-                (true, false)
-            } else if resolved_tag.is_none() {
-                (false, true)
-            } else {
-                (false, false)
-            };
+            let implicit_pair =
+                if (tok.plain && resolved_tag.is_none()) || resolved_tag.as_deref() == Some("!") {
+                    (true, false)
+                } else if resolved_tag.is_none() {
+                    (false, true)
+                } else {
+                    (false, false)
+                };
             self.state = Some(self.states.pop().ok_or_else(state_underflow)?);
             return Ok(Ev::Scalar {
                 tag: resolved_tag,
@@ -3015,9 +3032,18 @@ fn state_underflow() -> YErr {
 
 #[derive(Clone, Debug)]
 enum Node {
-    Scalar { tag: String, value: String },
-    Seq { tag: String, items: Vec<Node> },
-    Map { tag: String, pairs: Vec<(Node, Node)> },
+    Scalar {
+        tag: String,
+        value: String,
+    },
+    Seq {
+        tag: String,
+        items: Vec<Node>,
+    },
+    Map {
+        tag: String,
+        pairs: Vec<(Node, Node)>,
+    },
 }
 
 impl Node {
@@ -3200,10 +3226,7 @@ fn construct_yaml_bool(node: &Node) -> Result<Yaml, YErr> {
         "yes" | "true" | "on" => Ok(Yaml::Bool(true)),
         "no" | "false" | "off" => Ok(Yaml::Bool(false)),
         // Oracle: KeyError out of bool_values (uncaught crash).
-        other => Err(YErr::Internal(format!(
-            "KeyError: {}",
-            py_repr_str(other)
-        ))),
+        other => Err(YErr::Internal(format!("KeyError: {}", py_repr_str(other)))),
     }
 }
 
@@ -3434,9 +3457,7 @@ fn construct_yaml_binary(node: &Node) -> Result<Yaml, YErr> {
     }
     match decode_base64_lenient(value.as_bytes()) {
         Ok(bytes) => Ok(Yaml::Bytes(bytes)),
-        Err(msg) => Err(YErr::Marked(format!(
-            "failed to decode base64 data: {msg}"
-        ))),
+        Err(msg) => Err(YErr::Marked(format!("failed to decode base64 data: {msg}"))),
     }
 }
 
@@ -4084,7 +4105,10 @@ fn validate_schema_version(
     };
     // Python: isinstance(v, int) and not isinstance(v, bool) — bignums pass.
     let (supported, sv) = match value {
-        Yaml::Int(v) => (SUPPORTED_SCHEMA_VERSIONS.contains(v), SchemaVersion::Int(*v)),
+        Yaml::Int(v) => (
+            SUPPORTED_SCHEMA_VERSIONS.contains(v),
+            SchemaVersion::Int(*v),
+        ),
         Yaml::BigInt(b) => (false, SchemaVersion::Big(b.clone())),
         _ => {
             issues.push(Issue::error(
@@ -4142,10 +4166,7 @@ fn validate_id(pairs: &[(Yaml, Yaml)], issues: &mut Vec<Issue>) -> Option<String
     Some(normalize_id(s))
 }
 
-fn validate_type(
-    pairs: &[(Yaml, Yaml)],
-    issues: &mut Vec<Issue>,
-) -> Result<Option<String>, YErr> {
+fn validate_type(pairs: &[(Yaml, Yaml)], issues: &mut Vec<Issue>) -> Result<Option<String>, YErr> {
     let Some(value) = map_get(pairs, "type") else {
         return Ok(None);
     };
@@ -4313,7 +4334,9 @@ pub fn oversize_file_issue(cap: u64) -> Issue {
     Issue {
         severity: "error",
         code: "artifact-oversize".to_string(),
-        message: format!("artifact exceeds the {cap}-byte file cap (set DECIDED_MAX_FILE_BYTES to raise it)"),
+        message: format!(
+            "artifact exceeds the {cap}-byte file cap (set DECIDED_MAX_FILE_BYTES to raise it)"
+        ),
         line: Some(1),
     }
 }
@@ -4324,7 +4347,9 @@ pub fn oversize_parse_issue(cap: u64) -> Issue {
     Issue {
         severity: "error",
         code: "artifact-oversize".to_string(),
-        message: format!("artifact exceeds the {cap}-byte parse cap (set DECIDED_MAX_FILE_BYTES to raise it)"),
+        message: format!(
+            "artifact exceeds the {cap}-byte parse cap (set DECIDED_MAX_FILE_BYTES to raise it)"
+        ),
         line: Some(1),
     }
 }

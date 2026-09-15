@@ -168,7 +168,10 @@ fn explicit_item_projections_add_index_and_stats_provenance() {
     let items = rac_engine::relationships::corpus_items(&directory, true);
 
     let legacy_index = rac_engine::index::build_repository_index(&directory, true);
-    assert!(legacy_index.artifacts.iter().all(|row| row.origin.is_none()));
+    assert!(legacy_index
+        .artifacts
+        .iter()
+        .all(|row| row.origin.is_none()));
     assert!(!rac_engine::output::render_index_json(&legacy_index).contains("provenance"));
     let projected_index =
         rac_engine::index::build_repository_index_from_items(&directory, &items, true);
@@ -183,7 +186,10 @@ fn explicit_item_projections_add_index_and_stats_provenance() {
     assert!(legacy_stats.features.iter().all(|row| row.origin.is_none()));
     assert!(!rac_engine::output::render_stats_json(&legacy_stats).contains("provenance"));
     let projected_stats = rac_engine::stats::collect_stats_from_items(&directory, &items);
-    let feature = projected_stats.features.first().expect("requirement feature");
+    let feature = projected_stats
+        .features
+        .first()
+        .expect("requirement feature");
     let matching_item = items
         .iter()
         .find(|item| item.path == feature.path)

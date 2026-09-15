@@ -304,9 +304,7 @@ fn edge_key(edge: &GenerationEdge) -> (&str, &str, &str, &str, &str, &str) {
     )
 }
 
-fn mapping_key(
-    mapping: &GenerationMapping,
-) -> (usize, &str, &str, &str, &str, &str, &str, &str) {
+fn mapping_key(mapping: &GenerationMapping) -> (usize, &str, &str, &str, &str, &str, &str, &str) {
     (
         mapping.owner_rank,
         &mapping.owner_source,

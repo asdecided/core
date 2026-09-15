@@ -46,7 +46,10 @@ pub fn store_search(
     if terms.is_empty() {
         return empty();
     }
-    let tag_filter: Vec<String> = tags.iter().map(|t| crate::pycompat::py_casefold(t)).collect();
+    let tag_filter: Vec<String> = tags
+        .iter()
+        .map(|t| crate::pycompat::py_casefold(t))
+        .collect();
 
     // AND matching requires every distinct term somewhere in the document,
     // so only the intersection of their cross-field postings can match. Keep
@@ -188,8 +191,11 @@ pub fn store_search(
 /// source-aware live-decision keys — `ReadModelView.find_decisions`.
 pub fn store_find_decisions(reader: &MmapIndexReader, topic: &str) -> SearchResult {
     let mut result = store_search(reader, topic, Some("decision"), &[], false);
-    let live_keys: std::collections::HashSet<_> =
-        reader.live_decision_keys().unwrap_or_default().into_iter().collect();
+    let live_keys: std::collections::HashSet<_> = reader
+        .live_decision_keys()
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
     result
         .matches
         .retain(|m| m.key.as_ref().is_some_and(|key| live_keys.contains(key)));
@@ -203,8 +209,7 @@ pub fn store_resolve(
     artifact_id: &str,
 ) -> crate::resolve::ResolutionResult {
     use crate::resolve::{OUTCOME_DUPLICATE, OUTCOME_NOT_FOUND, OUTCOME_RESOLVED};
-    let wanted =
-        crate::pycompat::py_casefold(crate::pycompat::py_strip(artifact_id));
+    let wanted = crate::pycompat::py_casefold(crate::pycompat::py_strip(artifact_id));
     let docids = reader.alias_docids(&wanted).unwrap_or_default();
     if docids.is_empty() {
         return crate::resolve::ResolutionResult {
@@ -250,9 +255,7 @@ pub fn store_resolve(
 
 /// Every identity row of the mapped base, in docid (walk) order — the
 /// materialised projection `get_related`'s graph helpers read.
-pub fn store_identity_entries(
-    reader: &MmapIndexReader,
-) -> Vec<crate::resolve::IndexEntry> {
+pub fn store_identity_entries(reader: &MmapIndexReader) -> Vec<crate::resolve::IndexEntry> {
     (0..reader.identity_count().unwrap_or(0))
         .filter_map(|docid| reader.identity_entry(docid).ok())
         .collect()

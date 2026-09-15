@@ -289,7 +289,9 @@ impl<'a> IndexedSegment<'a> {
         }
         let table_at = 4 + 8 * index as usize;
         let offset = u64::from_le_bytes(
-            self.view[table_at..table_at + 8].try_into().expect("8 bytes"),
+            self.view[table_at..table_at + 8]
+                .try_into()
+                .expect("8 bytes"),
         );
         let start = self.data_start.checked_add(offset as usize);
         match start {

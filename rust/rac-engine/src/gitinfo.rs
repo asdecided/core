@@ -29,7 +29,11 @@ pub const DEFAULT_STALE_AFTER_DAYS: i64 = 180;
 /// on exit code 0, or `None` for a non-zero exit or a missing binary
 /// (`FileNotFoundError` in the oracle).
 fn run_git(args: &[&str], cwd: &Path) -> Option<String> {
-    let output = Command::new("git").args(args).current_dir(cwd).output().ok()?;
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .ok()?;
     if !output.status.success() {
         return None;
     }
@@ -62,7 +66,9 @@ pub fn repository_root(directory: &Path) -> Option<PathBuf> {
 /// passed through unchanged.
 pub fn pathspec(repo_root: &Path, path: &Path) -> String {
     let abspath = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    let root = repo_root.canonicalize().unwrap_or_else(|_| repo_root.to_path_buf());
+    let root = repo_root
+        .canonicalize()
+        .unwrap_or_else(|_| repo_root.to_path_buf());
     match abspath.strip_prefix(&root) {
         Ok(rel) => rel.to_string_lossy().into_owned(),
         Err(_) => abspath.to_string_lossy().into_owned(),

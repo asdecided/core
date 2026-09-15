@@ -10,13 +10,7 @@ fn assert_schema_subset(schema: &serde_json::Value) {
         assert!(
             matches!(
                 kind,
-                "null"
-                    | "boolean"
-                    | "object"
-                    | "array"
-                    | "number"
-                    | "string"
-                    | "integer"
+                "null" | "boolean" | "object" | "array" | "number" | "string" | "integer"
             ),
             "valid JSON Schema type: {kind}"
         );
@@ -86,12 +80,10 @@ fn current_client_discovers_native_server_without_initialize() {
         response.pointer("/result/cacheScope"),
         Some(&json!("public"))
     );
-    assert!(
-        response
-            .pointer("/result/ttlMs")
-            .and_then(|value| value.as_u64())
-            .is_some()
-    );
+    assert!(response
+        .pointer("/result/ttlMs")
+        .and_then(|value| value.as_u64())
+        .is_some());
 }
 
 #[test]
@@ -112,12 +104,10 @@ fn current_lists_include_required_cache_hints() {
     let frames = run_stdio("current-cache", &requests);
     for frame in frames {
         let response = parse(&frame);
-        assert!(
-            response
-                .pointer("/result/ttlMs")
-                .and_then(|value| value.as_u64())
-                .is_some()
-        );
+        assert!(response
+            .pointer("/result/ttlMs")
+            .and_then(|value| value.as_u64())
+            .is_some());
         assert!(matches!(
             response
                 .pointer("/result/cacheScope")
@@ -149,8 +139,14 @@ fn current_unknown_method_and_version_return_conforming_errors() {
         "current-errors",
         &[unknown.to_string(), unsupported.to_string()],
     );
-    assert_eq!(parse(&frames[0]).pointer("/error/code"), Some(&json!(-32601)));
-    assert_eq!(parse(&frames[1]).pointer("/error/code"), Some(&json!(-32022)));
+    assert_eq!(
+        parse(&frames[0]).pointer("/error/code"),
+        Some(&json!(-32601))
+    );
+    assert_eq!(
+        parse(&frames[1]).pointer("/error/code"),
+        Some(&json!(-32022))
+    );
 }
 
 #[test]
@@ -187,7 +183,10 @@ fn current_requests_require_client_capabilities_metadata() {
         }
     });
     let frames = run_stdio("current-metadata", &[request.to_string()]);
-    assert_eq!(parse(&frames[0]).pointer("/error/code"), Some(&json!(-32602)));
+    assert_eq!(
+        parse(&frames[0]).pointer("/error/code"),
+        Some(&json!(-32602))
+    );
 }
 
 #[test]
@@ -208,8 +207,14 @@ fn current_initialize_and_invalid_envelopes_use_current_validation() {
         "current-envelope",
         &[initialize.to_string(), invalid.to_string()],
     );
-    assert_eq!(parse(&frames[0]).pointer("/error/code"), Some(&json!(-32601)));
-    assert_eq!(parse(&frames[1]).pointer("/error/code"), Some(&json!(-32600)));
+    assert_eq!(
+        parse(&frames[0]).pointer("/error/code"),
+        Some(&json!(-32601))
+    );
+    assert_eq!(
+        parse(&frames[1]).pointer("/error/code"),
+        Some(&json!(-32600))
+    );
     assert_eq!(parse(&frames[1]).pointer("/id"), Some(&json!(null)));
 }
 

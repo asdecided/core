@@ -332,7 +332,10 @@ fn invalid_parent_artifact_returns_a_stable_sourced_error() {
     let origin = error.validation_origin.as_ref().unwrap();
     assert_eq!(origin.source, "acme/invalid");
     assert_eq!(origin.layer, Layer::Inherited);
-    assert!(origin.pin.as_deref().is_some_and(|pin| pin.starts_with("sha256-v2:")));
+    assert!(origin
+        .pin
+        .as_deref()
+        .is_some_and(|pin| pin.starts_with("sha256-v2:")));
     assert_eq!(
         error.source_route.as_deref().unwrap(),
         &["acme/root", "acme/invalid"]

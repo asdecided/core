@@ -66,7 +66,11 @@ fn specs_match_oracle_registry() {
     for (g, w) in got.iter().zip(want_specs) {
         let name = w["name"].as_str().unwrap();
         assert_eq!(g.name, name, "name");
-        assert_eq!(g.display, w["display"].as_str().unwrap(), "display of {name}");
+        assert_eq!(
+            g.display,
+            w["display"].as_str().unwrap(),
+            "display of {name}"
+        );
         assert_eq!(g.required, str_vec(&w["required"]), "required of {name}");
         assert_eq!(
             g.recommended,
@@ -74,7 +78,11 @@ fn specs_match_oracle_registry() {
             "recommended of {name}"
         );
         assert_eq!(g.optional, str_vec(&w["optional"]), "optional of {name}");
-        assert_eq!(g.metadata, pair_list_map(&w["metadata"]), "metadata of {name}");
+        assert_eq!(
+            g.metadata,
+            pair_list_map(&w["metadata"]),
+            "metadata of {name}"
+        );
         assert_eq!(
             g.retired_status,
             str_vec(&w["retired_status"]),
@@ -85,8 +93,16 @@ fn specs_match_oracle_registry() {
             pair_str_map(&w["descriptions"]),
             "descriptions of {name}"
         );
-        assert_eq!(g.guidance, pair_list_map(&w["guidance"]), "guidance of {name}");
-        assert_eq!(g.synonyms, pair_str_map(&w["synonyms"]), "synonyms of {name}");
+        assert_eq!(
+            g.guidance,
+            pair_list_map(&w["guidance"]),
+            "guidance of {name}"
+        );
+        assert_eq!(
+            g.synonyms,
+            pair_str_map(&w["synonyms"]),
+            "synonyms of {name}"
+        );
         assert_eq!(
             g.id_field,
             w["id_field"].as_str().map(str::to_string),
@@ -151,8 +167,10 @@ fn relationship_descriptions_present_and_ordered() {
         assert!(!text.is_empty(), "description for {key} non-empty");
     }
     // A couple of anchors from the contract.
-    let map: std::collections::HashMap<_, _> =
-        descs.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+    let map: std::collections::HashMap<_, _> = descs
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect();
     assert_eq!(
         map.get("related requirements").copied(),
         Some("Requirement artifacts this artifact references")

@@ -180,10 +180,7 @@ pub(crate) fn entry_from_item(item: &CorpusItem, inbound: i64) -> IndexEntry {
 /// `inbound_counts_from_corpus`: `{ArtifactKey -> count}` for resolved,
 /// unique, non-self edges. External edges (ADR-087) never resolve.
 fn inbound_counts(items: &[CorpusItem]) -> HashMap<ArtifactKey, i64> {
-    let rows: Vec<_> = items
-        .iter()
-        .map(validation_row_from_item)
-        .collect();
+    let rows: Vec<_> = items.iter().map(validation_row_from_item).collect();
     let index = resolution_index_from_rows(&rows);
     let mut counts: HashMap<ArtifactKey, i64> = HashMap::new();
     for row in &rows {
@@ -607,10 +604,7 @@ fn corpus_stats(field_tokens: &[FieldTokens], terms: &[String]) -> CorpusStats {
 /// vector surface (`gen_vectors_resolve.py` pins `n`/`df`/`avglen`).
 pub fn stats_for(entries: &[IndexEntry], query: &str) -> CorpusStats {
     let terms = tokenize(query);
-    let field_tokens: Vec<FieldTokens> = entries
-        .iter()
-        .map(|e| tokenize_entry(e).fields)
-        .collect();
+    let field_tokens: Vec<FieldTokens> = entries.iter().map(|e| tokenize_entry(e).fields).collect();
     corpus_stats(&field_tokens, &terms)
 }
 
@@ -667,11 +661,7 @@ fn stable_entry_order(
 /// `_competition_ranks`: 1-based ranks aligned with `scores`; ties (EXACT
 /// f64 equality) share a rank. Federated indexes use `(source, relative_path)`
 /// while single-source indexes retain the released display-path ordering.
-fn competition_ranks(
-    scores: &[f64],
-    entries: &[&IndexEntry],
-    federated: bool,
-) -> Vec<i64> {
+fn competition_ranks(scores: &[f64], entries: &[&IndexEntry], federated: bool) -> Vec<i64> {
     let mut ordered: Vec<usize> = (0..scores.len()).collect();
     ordered.sort_by(|&a, &b| {
         scores[b]
@@ -803,17 +793,16 @@ pub fn diagnose_index(
         .collect();
 
     let tag_filter: Vec<String> = tags.iter().map(|tag| py_casefold(tag)).collect();
-    let filtered_reason = if artifact_type
-        .is_some_and(|wanted| wanted != entry.artifact_type.as_str())
-    {
-        Some("filtered_by_type")
-    } else if !tag_filter.is_empty() && !entry_has_tags(entry, &tag_filter) {
-        Some("filtered_by_tags")
-    } else if live_only && entry_is_retired(entry) {
-        Some("filtered_by_liveness")
-    } else {
-        None
-    };
+    let filtered_reason =
+        if artifact_type.is_some_and(|wanted| wanted != entry.artifact_type.as_str()) {
+            Some("filtered_by_type")
+        } else if !tag_filter.is_empty() && !entry_has_tags(entry, &tag_filter) {
+            Some("filtered_by_tags")
+        } else if live_only && entry_is_retired(entry) {
+            Some("filtered_by_liveness")
+        } else {
+            None
+        };
 
     let ranked = search_index_filtered(entries, query, artifact_type, tags, live_only);
     let rank_index = ranked
@@ -1303,11 +1292,12 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["RAC-STRONG000001", "RAC-WEAKHUB0001"]
         );
-        let hub = result.matches[1].evidence.as_ref().expect("search evidence");
+        let hub = result.matches[1]
+            .evidence
+            .as_ref()
+            .expect("search evidence");
         assert_eq!(hub.graph_gate, "clamped");
-        assert!(
-            hub.bm25_raw < result.matches[0].evidence.as_ref().unwrap().bm25_raw * 0.85
-        );
+        assert!(hub.bm25_raw < result.matches[0].evidence.as_ref().unwrap().bm25_raw * 0.85);
     }
 
     #[test]

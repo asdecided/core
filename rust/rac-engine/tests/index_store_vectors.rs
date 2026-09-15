@@ -10,8 +10,8 @@ use rac_engine::derived::{build_derived_index, SCHEMA_VERSION};
 use rac_engine::index_store::{
     corpus_content_hash, decode_validation_store, encode_freshness_manifest,
     encode_validation_store, manifest_root_key, open_freshness_manifest, open_store,
-    scoring_fingerprint, store_dir, write_freshness_manifest, write_store, CachedIssue,
-    FileState, MmapIndexReader, ValidationCacheRow,
+    scoring_fingerprint, store_dir, write_freshness_manifest, write_store, CachedIssue, FileState,
+    MmapIndexReader, ValidationCacheRow,
 };
 
 fn repo_root() -> PathBuf {
@@ -29,10 +29,8 @@ fn vectors() -> serde_json::Value {
 }
 
 fn scratch_dir(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "rac-index-store-test-{tag}-{}",
-        std::process::id()
-    ));
+    let dir =
+        std::env::temp_dir().join(format!("rac-index-store-test-{tag}-{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).expect("scratch dir");
     dir
@@ -55,7 +53,10 @@ fn fingerprint_matches_oracle() {
         vectors()["scoring_fingerprint"].as_str().unwrap(),
         scoring_fingerprint()
     );
-    assert_eq!(vectors()["bundle_version"].as_str().unwrap(), SCHEMA_VERSION);
+    assert_eq!(
+        vectors()["bundle_version"].as_str().unwrap(),
+        SCHEMA_VERSION
+    );
 }
 
 /// One test drives every corpus golden: the store bytes embed the corpus
@@ -77,7 +78,12 @@ fn v2_store_is_deterministic_and_retains_unchanged_segment_vectors() {
 
         let derived = build_derived_index(directory, true);
         let cache_dir = scratch_dir(&format!("golden-{name}"));
-        assert!(write_store(&cache_dir, expected_hash, SCHEMA_VERSION, &derived));
+        assert!(write_store(
+            &cache_dir,
+            expected_hash,
+            SCHEMA_VERSION,
+            &derived
+        ));
         let seg_dir = store_dir(&cache_dir, expected_hash);
 
         let mut seen: Vec<String> = Vec::new();
@@ -95,8 +101,8 @@ fn v2_store_is_deterministic_and_retains_unchanged_segment_vectors() {
                 "layers.seg",
                 "redirects.seg",
             ]
-                .into_iter()
-                .map(str::to_string),
+            .into_iter()
+            .map(str::to_string),
         );
         expected_names.sort();
         assert_eq!(seen, expected_names, "segment file set for {name}");
@@ -145,7 +151,13 @@ fn v2_store_is_deterministic_and_retains_unchanged_segment_vectors() {
         // (PORT-CONTRACT.d/10 §0a) — the native engine pins walk semantics
         // on both paths instead.
         let reader = open_store(&cache_dir, expected_hash, SCHEMA_VERSION).expect("reopen");
-        for query in ["widget", "cache policy", "widget widget", "café", "sync sync sync"] {
+        for query in [
+            "widget",
+            "cache policy",
+            "widget widget",
+            "café",
+            "sync sync sync",
+        ] {
             let cold = rac_engine::resolve::search_index_filtered(
                 &derived.index_entries,
                 query,
@@ -234,7 +246,10 @@ fn reader_reproduces_fresh_build(
         assert_eq!(source.key, entry.key.clone().unwrap());
         assert_eq!(source.path, entry.artifact_path.clone().unwrap());
         assert!(reader.docids_for_key(&source.key).unwrap().contains(&docid));
-        assert_eq!(reader.docid_for_artifact_path(&source.path).unwrap(), Some(docid));
+        assert_eq!(
+            reader.docid_for_artifact_path(&source.path).unwrap(),
+            Some(docid)
+        );
     }
     assert_eq!(reader.layers().unwrap(), derived.layers);
     assert_eq!(
@@ -273,7 +288,10 @@ fn reader_reproduces_fresh_build(
         assert_eq!(a.path, b.path);
         assert_eq!(a.scope_entries, b.scope_entries);
     }
-    assert_eq!(reader.portfolio_summary().unwrap(), derived.portfolio_summary);
+    assert_eq!(
+        reader.portfolio_summary().unwrap(),
+        derived.portfolio_summary
+    );
     assert_eq!(reader.docid_for_path("no/such/path.md").unwrap(), None);
     assert_eq!(
         reader
@@ -341,7 +359,12 @@ fn corruption_gates(cache_dir: &Path, corpus_hash: &str, seg_dir: &Path) {
     };
     // Rewriting with a mismatching (empty) bundle is fine for the probe —
     // content addressing only demands the final dir opens under the gates.
-    assert!(write_store(cache_dir, corpus_hash, SCHEMA_VERSION, &derived));
+    assert!(write_store(
+        cache_dir,
+        corpus_hash,
+        SCHEMA_VERSION,
+        &derived
+    ));
     assert!(open_store(cache_dir, corpus_hash, SCHEMA_VERSION).is_some());
 }
 
@@ -383,7 +406,9 @@ fn vseg_bytes_match_oracle() {
 
     // Round-trip, plus the config-mismatch miss.
     let payload = rac_engine::index_format::segment_payload(&encoded).unwrap();
-    let decoded = decode_validation_store(payload, config_hash).unwrap().unwrap();
+    let decoded = decode_validation_store(payload, config_hash)
+        .unwrap()
+        .unwrap();
     assert_eq!(decoded, rows);
     assert!(decode_validation_store(payload, "other-config")
         .unwrap()

@@ -11,8 +11,8 @@ use std::path::PathBuf;
 
 use crate::classify::classify;
 use crate::corpus::{
-    compatible_local_layer, ArtifactKey, ArtifactOrigin, ArtifactPath,
-    PhysicalArtifactLocator, PhysicalCorpusLocator,
+    compatible_local_layer, ArtifactKey, ArtifactOrigin, ArtifactPath, PhysicalArtifactLocator,
+    PhysicalCorpusLocator,
 };
 use crate::identity::{artifact_identifier, artifact_identifiers, strip_list_marker};
 use crate::parse::{parse_file, Artifact};
@@ -210,7 +210,10 @@ fn collect_relationships(
 ) -> Vec<(String, Vec<String>)> {
     let mut out = Vec::new();
     for section in &spec.optional {
-        if !RELATIONSHIP_SECTIONS.iter().any(|(name, _)| name == section) {
+        if !RELATIONSHIP_SECTIONS
+            .iter()
+            .any(|(name, _)| name == section)
+        {
             continue;
         }
         if !include_supersedes && section == "supersedes" {
@@ -1152,7 +1155,10 @@ pub fn build_relationship_report_from_composed(
                 let Ok(item) = corpus.resolve(reference) else {
                     continue;
                 };
-                let type_name = item.spec.map(|spec| spec.name.as_str()).unwrap_or("unknown");
+                let type_name = item
+                    .spec
+                    .map(|spec| spec.name.as_str())
+                    .unwrap_or("unknown");
                 let display = item
                     .artifact
                     .product
@@ -1247,10 +1253,7 @@ impl CorpusItem {
             artifact,
             spec,
             origin,
-            PhysicalArtifactLocator::new(
-                PhysicalCorpusLocator::local(corpus_root),
-                file,
-            ),
+            PhysicalArtifactLocator::new(PhysicalCorpusLocator::local(corpus_root), file),
         )
     }
 }
@@ -1286,10 +1289,7 @@ pub fn corpus_items(directory: &str, recursive: bool) -> Vec<CorpusItem> {
 }
 
 fn rows_from_items(items: &[CorpusItem]) -> Vec<ValidationRow> {
-    items
-        .iter()
-        .map(validation_row_from_item)
-        .collect()
+    items.iter().map(validation_row_from_item).collect()
 }
 
 pub fn validate_relationships(directory: &str, recursive: bool) -> RelationshipValidation {
@@ -1362,10 +1362,7 @@ pub struct Relationship {
 
 /// `resolve_relationships(rows, index)` — the single resolve loop. Rows in
 /// order, sections in each row's schema order, refs in declaration order.
-pub fn resolve_relationships(
-    rows: &[ValidationRow],
-    index: &ResolutionIndex,
-) -> Vec<Relationship> {
+pub fn resolve_relationships(rows: &[ValidationRow], index: &ResolutionIndex) -> Vec<Relationship> {
     let mut out = Vec::new();
     for row in rows {
         for (section, refs) in &row.edges {
@@ -1385,21 +1382,21 @@ pub fn resolve_relationships(
                 }
                 let (resolved, resolved_artifact, issue) =
                     match classify_reference(index, reference, &row.key) {
-                    ReferenceResolution::Resolved(target) => (
-                        Some(target.path.clone()),
-                        Some(target.artifact_path.clone()),
-                        None,
-                    ),
-                    ReferenceResolution::NotFound => {
-                        (None, None, Some(ISSUE_TARGET_NOT_FOUND.to_string()))
-                    }
-                    ReferenceResolution::Ambiguous => {
-                        (None, None, Some(ISSUE_TARGET_AMBIGUOUS.to_string()))
-                    }
-                    ReferenceResolution::SelfRef => {
-                        (None, None, Some(ISSUE_SELF_REFERENCE.to_string()))
-                    }
-                };
+                        ReferenceResolution::Resolved(target) => (
+                            Some(target.path.clone()),
+                            Some(target.artifact_path.clone()),
+                            None,
+                        ),
+                        ReferenceResolution::NotFound => {
+                            (None, None, Some(ISSUE_TARGET_NOT_FOUND.to_string()))
+                        }
+                        ReferenceResolution::Ambiguous => {
+                            (None, None, Some(ISSUE_TARGET_AMBIGUOUS.to_string()))
+                        }
+                        ReferenceResolution::SelfRef => {
+                            (None, None, Some(ISSUE_SELF_REFERENCE.to_string()))
+                        }
+                    };
                 out.push(Relationship {
                     source_artifact: Some(row.artifact_path.clone()),
                     source_path: row.path.clone(),
