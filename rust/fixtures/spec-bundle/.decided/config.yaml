@@ -1,0 +1,11 @@
+repository_key: SPB
+corpus:
+  source: asdecided/fixtures-spec-bundle
+
+# ADR-083 (revised): a pinned spec bundle extends the artifact-type registry.
+# The digest pins the exact bundle bytes; edit the bundle, then re-pin.
+artifact_types:
+  version: 1
+  bundle:
+    path: .decided/artifact-specs.json
+    digest: sha256:a5afec8fe029d6e6a9a041c8d636c8ecd13ec6b291be0c933ffdbdc72310fac4
