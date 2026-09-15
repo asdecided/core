@@ -97,9 +97,9 @@ Three facts fix the shape now.
    forms, backslashes, empty segments, `.` or `..`, no symlinks or reparse
    points). `digest` is `sha256:` over the file's raw bytes, the same pin
    style the federation manifest uses for a materialised parent. The engine
-   reads the bundle once per invocation (once per serving generation in
-   `decided-mcp`) from the nearest governing config — never from the
-   environment, the home directory, or an installed package. With no
+   reads the pin once per invocation (on every tool call in `decided-mcp`, so
+   a re-pin lands on the next request) from the nearest governing config —
+   never from the environment, the home directory, or an installed package. With no
    `artifact_types` section, every command's behaviour, output, exit code, and
    cache key is unchanged (REQ-001). The bundle's own `_meta` and
    `relationship_descriptions` keys are ignored: the first is provenance, the
@@ -128,17 +128,22 @@ Three facts fix the shape now.
    name has not already been admitted (first wins). A rejected element is
    skipped and reported as one warning-severity finding, code
    `artifact-spec-skipped`, naming the bundle, the element, and the reason
-   (including the name it collided with). A bundle that is missing, exceeds
-   the size bound, fails to parse, or whose bytes do not match the pinned
-   digest is skipped whole with one `artifact-spec-bundle-skipped` warning,
-   and the engine runs on the built-in registry. Warnings surface through
+   (including the name it collided with). Warnings surface through
    `decided validate` and `decided doctor` as ordinary findings — the engine's
    own deterministic catalog, replacing the original's Python `warnings`
    channel — and never as free text on stderr; no command crashes and no read
-   command changes its exit code because of a bad bundle (REQ-002). A skipped
-   bundle is not silent in practice: every artifact whose frontmatter names
-   the now-unregistered type fails `invalid-metadata-field`, so the corpus
-   gate still goes red through the existing path.
+   command changes its exit code because of a skipped element (REQ-002).
+
+   The bundle as a whole is held to the federation pin's standard: a
+   malformed `artifact_types` stanza, a path that is not a contained regular
+   file, a bundle over the size bound, unreadable or unparseable bytes, or
+   bytes that do not hash to the pinned digest is a **hard error**, never a
+   warning. `decided validate` renders it as one error row for the bundle
+   (`artifact-spec-bundle-digest-mismatch` and its siblings, the shape a
+   `corpus-manifest` failure already takes) and exits 1; every other command,
+   and every MCP tool call, refuses with `decided: <code>: <detail>` and exit
+   1. A pin the engine cannot honour must stop the run — loading an unpinned
+   bundle and warning would make the pin advisory.
 
 3. **Custom types get generic structural validation only.** *(Carried
    forward.)* A loaded type participates in classification, validation,
