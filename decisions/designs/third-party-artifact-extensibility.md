@@ -67,8 +67,11 @@ rests on converting **static access into registry access**.
   warnings: Vec<Issue> }` — built-ins first in embedded order, then admitted
   bundle elements in bundle order; `warnings` carries every skip.
 - `Registry::builtin()` — the embedded five and nothing else.
-- `Registry::with_bundle(config: &GoverningConfig) -> Registry` — built-ins
-  plus the pinned bundle's admitted elements (sections 2 and 3).
+- `load_bundle(repository_root, &BundlePin) -> Result<Registry, SpecBundleError>`
+  — built-ins plus the pinned bundle's admitted elements (sections 2 and 3);
+  `sync_registry(start_dir)` reads the governing config, installs the
+  built-ins when no stanza is present, and reloads only when the pin differs
+  from the active one.
 - Methods `specs()`, `spec_for(name)`, `available_schemas()`,
   `is_builtin(name)`, `warnings()`. The embedded parse helpers (`build_spec`,
   `str_list`, `list_map`, `str_map`) are reused verbatim for bundle elements,
@@ -76,13 +79,14 @@ rests on converting **static access into registry access**.
 - `ArtifactSpec` gains one appended optional field, `okf_type: Option<String>`
   (section 6); built-ins leave it `None`.
 
-Installation: a process-wide slot `static ACTIVE: RwLock<&'static Registry>`
-initialised to a leaked `Registry::builtin()`. `spec::install(Registry)` leaks
-the value and swaps the slot; the existing free functions become thin readers
-of it, so their `&'static` return signatures and every consumer compile
-unchanged. The CLI installs at most once per process, at command entry after
-governing-config discovery; `decided-mcp` installs once per serving generation
-(section 7). The leak is bounded to one small registry per config change and
+Installation: a process-wide slot `static ACTIVE: RwLock<Option<&'static
+Registry>>`, `None` meaning the embedded registry. A loaded registry is leaked
+and swapped in; the existing free functions become thin readers of it, so
+their `&'static` return signatures and every consumer compile unchanged. Each
+CLI command that takes a corpus, file, or output path calls `sync_registry`
+at entry (`schema` and `templates` from the working directory);
+`decided-mcp` calls it on every tool call so a re-pin lands on the next
+request (section 7). The leak is bounded to one small registry per config change and
 accepted in v1; threading an explicit `&Registry` through the read-model
 constructors is the recorded follow-up. Commands that locate no corpus run on
 the built-in registry.
@@ -110,10 +114,15 @@ is it parsed with the same `serde_json` (`preserve_order`) path as the
 embedded bytes; the top-level `artifact_specs` array is taken and `_meta` and
 `relationship_descriptions` are ignored.
 
-Any failure before parsing — section malformed, path invalid, file missing or
-over bound, digest mismatch, JSON invalid — skips the whole bundle with one
-`artifact-spec-bundle-skipped` warning naming the path and the reason, and the
-registry is the built-in five.
+Any failure before admission — stanza malformed, path invalid, file missing,
+symlinked, or over bound, digest invalid or mismatched, JSON invalid or not in
+the registry shape — is a hard error (`SpecBundleError`, stable codes
+`artifact-spec-bundle-config-invalid`, `-path-invalid`, `-missing`,
+`-symlink-traversal`, `-limit-exceeded`, `-unreadable`, `-digest-invalid`,
+`-digest-mismatch`, `-parse-failed`). `decided validate <dir>` renders it as
+one error row for the bundle path and exits 1; every other command prints
+`decided: <code>: <detail>` and exits 1; an MCP tool call returns an error
+result. The registry is never partially loaded.
 
 ### 3. Admission and warnings
 
@@ -196,15 +205,17 @@ optional appended element field before the engine reads it.
 The "governing config bytes" notion widens to a **governing config set**: the
 config file plus, when pinned, the bundle file. Concretely:
 
-- `commands::config_fingerprint` hashes the set, so the validation store
-  misses on a re-pin.
-- The derived-cache generation key frames the bundle path and bytes after the
-  child-config frame under new tags; `watched_files` gains the bundle path so
-  the stat-manifest rung (ADR-112) notices an edit.
-- `decided-mcp` captures the set with the generation (ADR-105, ADR-148),
-  builds `Registry::with_bundle` from the captured bytes, and installs it
-  before that generation's read model is constructed; the built-in registry
-  is installed for a corpus with no pin.
+- The validation store is keyed by the config bytes already, and a re-pin is
+  a config change, so it misses on a re-pin with no further change.
+- `corpus_hash_from_complete_manifest` appends the pinned digest to the
+  preimage when a bundle is active, so the derived store and the serving
+  generation are keyed to the registry; with no bundle the preimage is
+  byte-identical to before.
+- `decided-mcp` re-reads the pin on every tool call and reloads the registry
+  when it changed; the bundle digest is folded into the corpus hash that keys
+  the derived store and the freshness tracker's generation, so a re-pin
+  rebuilds the read model on the next request. The built-in registry is
+  installed for a corpus with no pin.
 - The federation digest preimage (ADR-134, ADR-145) is unchanged: the
   effective registry is the invoking corpus's own bundle, so a parent's
   bundle does not influence the child's read model and needs no pin.
