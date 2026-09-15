@@ -382,11 +382,16 @@ Show registered artifact schemas and starter templates.
 - **Exit codes:** `0` success · `2` unknown schema name or flag misuse
 
 ```bash
-decided schema --list                  # the five artifact types
+decided schema --list                  # the five artifact types (plus any pinned bundle types)
 decided schema requirement             # required / recommended / optional sections
 decided schema decision --template     # starter Markdown for a decision
 decided schema roadmap --json          # machine-readable schema
 ```
+
+A repository that pins a spec bundle in `.decided/config.yaml` (see
+[Custom artifact types](validation.md#custom-artifact-types-spec-bundles))
+lists its declared types after the built-ins; `schema <type> --template` and
+`decided new <type>` render them from the bundle's starter bodies.
 
 ---
 

@@ -8,6 +8,17 @@ details, release history over commit history.
 
 ### Added
 
+- Added corpus-declared artifact types through a pinned spec bundle (ADR-083,
+  revised): `.decided/config.yaml` pins one JSON file in the shape of
+  `artifact-specs.json` by path and `sha256:` digest, and its elements join the
+  registry after the five built-ins in file order. Custom types classify,
+  validate structurally, scaffold with `decided new <type>`, appear in
+  `schema --list`, `stats`, `find`, exports, and every MCP tool, and export to
+  OKF under an `okf_type` field that defaults to the type's display name. An
+  element that collides with a built-in or fails the contract is skipped with
+  an `artifact-spec-skipped` warning; a bundle whose bytes do not match the pin
+  is a hard error (`artifact-spec-bundle-digest-mismatch`), as a federation pin
+  failure is. Repositories without the stanza are byte-for-byte unchanged.
 - Added deterministic point-in-time JSON exports with `decided export --at
   <revision>` for the viewer, documents, and graph projections. Historical
   exports materialise the bounded configured corpus and federation closure so
