@@ -25,7 +25,7 @@ inference to the engine (ADR-002, ADR-066).
 - External memory and RAG layers ground against RAC's validated graph
   through stable, one-way export projections, instead of re-inferring it.
 - Extensibility is proven in sequence: the built-in family factory first,
-  then the ADR-083 entry-point plugin registry, so third parties can model
+  then the ADR-083 pinned spec-bundle registry, so third parties can model
   their own knowledge families without forking the engine.
 - The harness funnel widens at zero engine cost through verified
   integration recipes and a measured, regression-checked agent-facing
@@ -75,10 +75,11 @@ ranking, the sequence, and the constraints that reviews must hold.
     published plugin API commitment. Graduated out of `future/` to its
     own scoped roadmap; each instantiated family lands its own ADR at
     implementation.
-  - Third-party artifact types (ADR-083): the entry-point registry —
-    inert constant-to-function seam first, discovery and generic
-    validation second, the hardcoded OKF type map closed in the same
-    acceptance; the public invitation stays behind GATE-2.
+  - Third-party artifact types (ADR-083, revised for the native engine):
+    the pinned spec-bundle registry — inert registry seam first, bundle
+    loading and generic validation second, the hardcoded OKF type map
+    closed by the per-type `okf_type` mapping in the same acceptance; the
+    public invitation stays behind GATE-2.
 - Deferred until their stated triggers:
   - Team-scale serving (`lore-at-team-scale`): its 50+ developer trigger
     has been met by an organisation-scale rollout, and the item has
