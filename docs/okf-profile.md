@@ -66,10 +66,16 @@ tags: ["interoperability"]
 | `roadmap` | `Roadmap` |
 | `prompt` | `Prompt` |
 | `design` | `Design` |
+| a spec-bundle type (ADR-083) | its `okf_type`, defaulting to its `display` |
 
-Unknown documents remain outside the derived export. OKF consumers must tolerate
-unknown types, but that permissive read rule does not expand AsDecided's
-authoritative artifact registry.
+The five built-in rows are fixed and a bundle cannot override them. A type a
+repository declares through a pinned spec bundle is exported under the
+`okf_type` its element declares (defaulting to the element's `display`) and
+gets its own section in `index.md` after the five fixed ones. Unknown documents
+remain outside the derived export. OKF consumers must tolerate unknown types;
+that permissive read rule does not expand the built-in registry — a pinned
+bundle extends a repository's registry explicitly, and the export reports the
+declared type rather than guessing.
 
 ### Lifecycle mapping
 
