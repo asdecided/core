@@ -353,6 +353,28 @@ pub fn render_validate_dir_human(result: &DirectoryValidation) -> String {
         lines.push(String::new());
     }
 
+    // Skipped spec-bundle elements (ADR-083): warnings, never a failure, and
+    // present only for a corpus that pins a bundle.
+    if let Some(bundle) = result.bundle {
+        if !bundle.warnings.is_empty() {
+            lines.push(format!("WARN  {}  (artifact spec bundle)", bundle.pin.path));
+            for warning in &bundle.warnings {
+                let label = match &warning.name {
+                    Some(name) => format!("element {name}"),
+                    None => format!("element #{}", warning.index),
+                };
+                push_issue_lines(
+                    &mut lines,
+                    "warning",
+                    warning.code,
+                    &label,
+                    &warning.message,
+                );
+            }
+            lines.push(String::new());
+        }
+    }
+
     if let Some(okf) = &result.okf {
         if !okf.findings.is_empty() {
             for finding in &okf.findings {
@@ -456,6 +478,27 @@ pub fn render_validate_dir_json(result: &DirectoryValidation) -> String {
     payload.insert("summary".into(), Value::Object(summary));
     payload.insert("valid".into(), json!(result.ok()));
     payload.insert("files".into(), Value::Array(files));
+    if let Some(bundle) = result.bundle {
+        let warnings: Vec<Value> = bundle
+            .warnings
+            .iter()
+            .map(|w| {
+                let mut m = Map::new();
+                m.insert("code".into(), json!(w.code));
+                m.insert("index".into(), json!(w.index));
+                m.insert("name".into(), json!(w.name));
+                m.insert("message".into(), json!(w.message));
+                m.insert("severity".into(), json!("warning"));
+                Value::Object(m)
+            })
+            .collect();
+        let mut b = Map::new();
+        b.insert("path".into(), json!(bundle.pin.path));
+        b.insert("digest".into(), json!(bundle.pin.digest));
+        b.insert("admitted".into(), json!(bundle.admitted));
+        b.insert("warnings".into(), Value::Array(warnings));
+        payload.insert("artifact_spec_bundle".into(), Value::Object(b));
+    }
     if let Some(okf) = &result.okf {
         let findings: Vec<Value> = okf
             .findings
@@ -1781,6 +1824,17 @@ pub fn render_stats_json(s: &PortfolioStats) -> String {
             .collect();
         family("designs", s.design_count(), s.valid_designs(), invalid);
     }
+    // Bundle-declared families (ADR-083): one additive key per declared
+    // type, present only when the corpus pins a bundle and holds such rows.
+    for (type_name, rows) in &s.declared {
+        let invalid: Vec<(&str, &[String], Option<&crate::corpus::ArtifactOrigin>)> = rows
+            .iter()
+            .filter(|r| !r.valid)
+            .map(|r| (r.path.as_str(), r.error_codes.as_slice(), r.origin.as_ref()))
+            .collect();
+        let valid = rows.iter().filter(|r| r.valid).count();
+        family(type_name, rows.len(), valid, invalid);
+    }
 
     if !s.unrecognized.is_empty() {
         let mut m = Map::new();
@@ -2001,6 +2055,23 @@ pub fn render_stats_human(s: &PortfolioStats) -> String {
             s.valid_designs(),
             "Invalid Designs",
             &s.invalid_designs(),
+        );
+    }
+    for (type_name, rows) in &s.declared {
+        let display = spec_for(type_name)
+            .map(|spec| spec.display.clone())
+            .unwrap_or_else(|| type_name.clone());
+        let heading = crate::spec::plural_display(&display);
+        let rule = "=".repeat(heading.chars().count());
+        let invalid: Vec<&crate::stats::ValidityStat> = rows.iter().filter(|r| !r.valid).collect();
+        let valid = rows.len() - invalid.len();
+        family(
+            &heading,
+            &rule,
+            rows.len(),
+            valid,
+            &format!("Invalid {heading}"),
+            &invalid,
         );
     }
 

@@ -182,13 +182,21 @@ const TEMPLATE_BYTES: [&str; 5] = [
 /// `load_template(artifact_type)` — the canonical body, or
 /// `TemplateNotFound` for an unregistered type. `TemplateResourceMissing`
 /// (a broken Python installation) has no Rust equivalent: embedded
-/// resources cannot be absent from a linked binary.
-pub fn load_template(artifact_type: &str) -> Result<&'static str, ScaffoldError> {
-    available_schemas()
+/// resources cannot be absent from a linked binary. A bundle-declared type
+/// has no template resource at all (ADR-083 decision 5): its body is
+/// rendered from the spec's starter bodies by the same generator
+/// `decided schema --template` uses.
+pub fn load_template(artifact_type: &str) -> Result<String, ScaffoldError> {
+    if let Some(i) = crate::spec::builtin_specs()
         .iter()
-        .position(|name| *name == artifact_type)
-        .map(|i| TEMPLATE_BYTES[i])
-        .ok_or_else(|| template_not_found(artifact_type))
+        .position(|spec| spec.name == artifact_type)
+    {
+        return Ok(TEMPLATE_BYTES[i].to_string());
+    }
+    match crate::spec::spec_for(artifact_type) {
+        Some(spec) => Ok(crate::output::render_schema_template(spec)),
+        None => Err(template_not_found(artifact_type)),
+    }
 }
 
 /// `render_frontmatter(artifact_id, artifact_type)` — canonical generated

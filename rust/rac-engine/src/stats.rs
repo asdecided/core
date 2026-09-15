@@ -64,6 +64,9 @@ pub struct PortfolioStats {
     pub unrecognized: Vec<UnrecognizedStat>,
     /// `{canonical space section -> presence count}`, canonical order.
     pub relationship_counts: Vec<(String, usize)>,
+    /// Bundle-declared types (ADR-083) in registry order: `(type, rows)`.
+    /// Empty — and rendered as nothing — for a corpus with no pinned bundle.
+    pub declared: Vec<(String, Vec<ValidityStat>)>,
 }
 
 impl PortfolioStats {
@@ -342,6 +345,7 @@ fn collect_stats_from_projection(
         designs: Vec::new(),
         unrecognized: Vec::new(),
         relationship_counts: Vec::new(),
+        declared: Vec::new(),
     };
     // Presence counts accumulated by canonical space section (first-seen order),
     // re-ordered canonically at the end.
@@ -414,6 +418,20 @@ fn collect_stats_from_projection(
                     origin,
                 });
             }
+            declared if !crate::spec::is_builtin(declared) && spec.is_some() => {
+                let codes = error_codes(artifact, type_name);
+                let row = ValidityStat {
+                    path: path.clone(),
+                    name,
+                    valid: codes.is_empty(),
+                    error_codes: codes,
+                    origin,
+                };
+                match stats.declared.iter_mut().find(|(t, _)| t == declared) {
+                    Some((_, rows)) => rows.push(row),
+                    None => stats.declared.push((declared.to_string(), vec![row])),
+                }
+            }
             _ => {
                 let codes = error_codes(artifact, type_name);
                 stats.features.push(FeatureStat {
@@ -429,6 +447,15 @@ fn collect_stats_from_projection(
             }
         }
     }
+
+    // Declared families in registry order, whatever order the walk met them.
+    let registry_order: Vec<&str> = crate::spec::specs()
+        .iter()
+        .map(|s| s.name.as_str())
+        .collect();
+    stats
+        .declared
+        .sort_by_key(|(t, _)| registry_order.iter().position(|n| n == t));
 
     // Canonical relationship-count order.
     for (space_name, _) in RELATIONSHIP_SECTIONS.iter() {
