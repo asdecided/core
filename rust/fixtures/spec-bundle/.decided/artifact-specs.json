@@ -1,0 +1,127 @@
+{
+  "_meta": {
+    "role": "Example spec bundle for the spec-bundle fixture corpus (ADR-083). One JSON file in the shape of artifact-specs.json, pinned by digest in .decided/config.yaml.",
+    "note": "The third element collides with the built-in 'decision' type on purpose: the engine must skip it with a warning and keep the built-in."
+  },
+  "artifact_specs": [
+    {
+      "name": "runbook",
+      "display": "Runbook",
+      "required": [
+        "purpose",
+        "steps"
+      ],
+      "recommended": [
+        "rollback",
+        "verification"
+      ],
+      "optional": [
+        "related decisions",
+        "related requirements",
+        "related tickets"
+      ],
+      "metadata": {
+        "status": [
+          "Draft",
+          "Active",
+          "Retired"
+        ]
+      },
+      "retired_status": [
+        "Retired"
+      ],
+      "descriptions": {
+        "purpose": "What this runbook achieves and when to run it",
+        "steps": "The ordered operator steps",
+        "rollback": "How to undo the change if a step fails",
+        "verification": "How to confirm the outcome",
+        "related decisions": "Decision artifacts this runbook references",
+        "related requirements": "Requirement artifacts this runbook references",
+        "related tickets": "External tickets this runbook traces to"
+      },
+      "guidance": {
+        "purpose": [
+          "What outcome does this runbook produce?",
+          "When should it be run?"
+        ],
+        "steps": [
+          "List each step in order.",
+          "Name the system each step touches."
+        ],
+        "rollback": [
+          "What undoes each step?"
+        ],
+        "verification": [
+          "What observable state confirms success?"
+        ]
+      },
+      "synonyms": {
+        "procedure": "steps",
+        "runbook steps": "steps"
+      },
+      "id_field": null,
+      "starter_bodies": {
+        "purpose": "TODO: describe what this runbook achieves.",
+        "steps": "TODO: list the ordered steps.",
+        "rollback": "TODO: describe how to roll back.",
+        "verification": "TODO: describe how to verify the result."
+      },
+      "okf_type": "Runbook"
+    },
+    {
+      "name": "policy",
+      "display": "Policy",
+      "required": [
+        "statement",
+        "scope"
+      ],
+      "recommended": [
+        "exceptions"
+      ],
+      "optional": [
+        "related decisions",
+        "related requirements"
+      ],
+      "metadata": {
+        "status": [
+          "Proposed",
+          "Accepted",
+          "Superseded"
+        ]
+      },
+      "retired_status": [
+        "Superseded"
+      ],
+      "descriptions": {
+        "statement": "The rule this policy imposes",
+        "scope": "Who and what the policy applies to",
+        "exceptions": "Recorded exceptions and who may grant them"
+      },
+      "guidance": {
+        "statement": [
+          "State the rule in one normative sentence."
+        ],
+        "scope": [
+          "Which teams, systems, or data does it cover?"
+        ],
+        "exceptions": [
+          "Who can grant an exception, and how is it recorded?"
+        ]
+      },
+      "synonyms": {},
+      "id_field": null,
+      "starter_bodies": {
+        "statement": "TODO: state the rule.",
+        "scope": "TODO: describe the scope.",
+        "exceptions": "TODO: describe exceptions."
+      }
+    },
+    {
+      "name": "decision",
+      "display": "Shadowed Decision",
+      "required": [
+        "context"
+      ]
+    }
+  ]
+}
