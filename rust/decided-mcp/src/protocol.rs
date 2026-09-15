@@ -15,8 +15,7 @@ pub const LEGACY_PROTOCOL_VERSIONS: [&str; 4] = [
     LATEST_LEGACY_PROTOCOL_VERSION,
 ];
 pub const PROTOCOL_VERSION_META_KEY: &str = "io.modelcontextprotocol/protocolVersion";
-pub const CLIENT_CAPABILITIES_META_KEY: &str =
-    "io.modelcontextprotocol/clientCapabilities";
+pub const CLIENT_CAPABILITIES_META_KEY: &str = "io.modelcontextprotocol/clientCapabilities";
 
 const SERVER_NAME: &str = "decided-mcp";
 const DAY_MS: u64 = 86_400_000;
@@ -83,10 +82,7 @@ pub fn era_for_stdio(method: &str, message: &Value) -> Result<Era, String> {
     match requested_version(message) {
         Some(CURRENT_PROTOCOL_VERSION) => Ok(Era::Current),
         Some(version) if LEGACY_PROTOCOL_VERSIONS.contains(&version) => Ok(Era::Legacy),
-        Some(version) => Err(unsupported_protocol_frame(
-            message.get("id"),
-            Some(version),
-        )),
+        Some(version) => Err(unsupported_protocol_frame(message.get("id"), Some(version))),
         None if method == "server/discover" => Ok(Era::Current),
         None => Ok(Era::Legacy),
     }
@@ -218,19 +214,13 @@ pub fn unsupported_protocol_frame(id: Option<&Value>, requested: Option<&str>) -
 }
 
 pub fn validate_current_metadata(message: &Value, id_json: &str) -> Result<(), String> {
-    let Some(meta) = message
-        .pointer("/params/_meta")
-        .and_then(Value::as_object)
-    else {
+    let Some(meta) = message.pointer("/params/_meta").and_then(Value::as_object) else {
         return Err(invalid_params_frame(
             id_json,
             "Current protocol requests require params._meta",
         ));
     };
-    if meta
-        .get(PROTOCOL_VERSION_META_KEY)
-        .and_then(Value::as_str)
-        != Some(CURRENT_PROTOCOL_VERSION)
+    if meta.get(PROTOCOL_VERSION_META_KEY).and_then(Value::as_str) != Some(CURRENT_PROTOCOL_VERSION)
     {
         return Err(invalid_params_frame(
             id_json,
@@ -252,11 +242,7 @@ pub fn validate_current_metadata(message: &Value, id_json: &str) -> Result<(), S
 pub fn current_method_supported(method: &str) -> bool {
     matches!(
         method,
-        "server/discover"
-            | "tools/list"
-            | "prompts/list"
-            | "resources/list"
-            | "tools/call"
+        "server/discover" | "tools/list" | "prompts/list" | "resources/list" | "tools/call"
     )
 }
 
@@ -276,7 +262,12 @@ fn error_frame(id_json: &str, code: i64, message: &str, data: Value) -> String {
 }
 
 fn invalid_params_frame(id_json: &str, detail: &str) -> String {
-    error_frame(id_json, -32602, "Invalid params", json!({ "detail": detail }))
+    error_frame(
+        id_json,
+        -32602,
+        "Invalid params",
+        json!({ "detail": detail }),
+    )
 }
 
 pub fn invalid_request_frame(id_json: &str) -> String {
@@ -336,22 +327,20 @@ mod tests {
     #[test]
     fn cache_hints_do_not_mutate_legacy_input() {
         let legacy = r#"{"tools":[]}"#;
-        let frame: Value =
-            serde_json::from_str(&current_tools_list_frame("1", legacy)).unwrap();
+        let frame: Value = serde_json::from_str(&current_tools_list_frame("1", legacy)).unwrap();
         assert_eq!(frame.pointer("/result/ttlMs"), Some(&json!(DAY_MS)));
-        assert_eq!(
-            frame.pointer("/result/cacheScope"),
-            Some(&json!("public"))
-        );
+        assert_eq!(frame.pointer("/result/cacheScope"), Some(&json!("public")));
         assert_eq!(legacy, r#"{"tools":[]}"#);
     }
 
     #[test]
     fn unsupported_version_lists_both_eras() {
         let request = json!({"id": 7});
-        let frame: Value =
-            serde_json::from_str(&unsupported_protocol_frame(request.get("id"), Some("2099-01-01")))
-                .unwrap();
+        let frame: Value = serde_json::from_str(&unsupported_protocol_frame(
+            request.get("id"),
+            Some("2099-01-01"),
+        ))
+        .unwrap();
         assert_eq!(frame.pointer("/error/code"), Some(&json!(-32022)));
         assert_eq!(
             frame.pointer("/error/data/supported/0"),

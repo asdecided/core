@@ -4,21 +4,20 @@
 //! `<prog>: error: <msg>` stderr line. Usage/help BODY text is out of scope
 //! (decision 9) — stdout stays byte-identical (empty on errors).
 
+use crate::commands::cmd_watchkeeper;
 use crate::commands::{
     cmd_corpus_digest, cmd_corpus_explain, cmd_corpus_status, cmd_coverage, cmd_decisions_for,
-    cmd_diagnose, cmd_diff, cmd_doctor,
-    cmd_eval, cmd_export_at, cmd_find, cmd_gate, cmd_herald, cmd_hook, cmd_improve, cmd_index,
-    cmd_init, cmd_inspect, cmd_mcp_stats, cmd_migrate, cmd_new, cmd_portfolio, cmd_quickstart,
-    cmd_relationships, cmd_rename, cmd_resolve, cmd_retrieve, cmd_review, cmd_schema, cmd_sentry,
-    cmd_skill, cmd_stats, cmd_telemetry, cmd_templates, cmd_usage, cmd_validate,
-    CorpusDigestArgs, CorpusExplainArgs, CorpusStatusArgs, CoverageArgs, DecisionsForArgs,
-    DiagnoseArgs, DiffArgs, DoctorArgs, EvalArgs, ExportArgs, FindArgs, GateArgs, HeraldArgs,
-    HookArgs, ImproveArgs, IndexArgs, InitArgs, InspectArgs, McpStatsArgs, MigrateArgs, NewArgs,
-    PortfolioArgs, QuickstartArgs, RelationshipsArgs, RenameArgs, ResolveArgs, RetrieveArgs,
-    ReviewArgs, SchemaArgs, SentryArgs, SkillArgs, StatsArgs, TelemetryArgs, TemplatesArgs,
-    UsageArgs, ValidateArgs, WatchkeeperArgs,
+    cmd_diagnose, cmd_diff, cmd_doctor, cmd_eval, cmd_export_at, cmd_find, cmd_gate, cmd_herald,
+    cmd_hook, cmd_improve, cmd_index, cmd_init, cmd_inspect, cmd_mcp_stats, cmd_migrate, cmd_new,
+    cmd_portfolio, cmd_quickstart, cmd_relationships, cmd_rename, cmd_resolve, cmd_retrieve,
+    cmd_review, cmd_schema, cmd_sentry, cmd_skill, cmd_stats, cmd_telemetry, cmd_templates,
+    cmd_usage, cmd_validate, CorpusDigestArgs, CorpusExplainArgs, CorpusStatusArgs, CoverageArgs,
+    DecisionsForArgs, DiagnoseArgs, DiffArgs, DoctorArgs, EvalArgs, ExportArgs, FindArgs, GateArgs,
+    HeraldArgs, HookArgs, ImproveArgs, IndexArgs, InitArgs, InspectArgs, McpStatsArgs, MigrateArgs,
+    NewArgs, PortfolioArgs, QuickstartArgs, RelationshipsArgs, RenameArgs, ResolveArgs,
+    RetrieveArgs, ReviewArgs, SchemaArgs, SentryArgs, SkillArgs, StatsArgs, TelemetryArgs,
+    TemplatesArgs, UsageArgs, ValidateArgs, WatchkeeperArgs,
 };
-use crate::commands::cmd_watchkeeper;
 use crate::output::rac_version;
 
 /// Root subcommand table, in argparse declaration order (the order the
@@ -75,8 +74,7 @@ fn print_stdout(text: &str) {
 /// errors, `--version`/`-h` actions) never record a usage event, while
 /// dispatched commands record `ok`/`error` from the exit code. Every
 /// parse-level early return in this module raises this flag.
-static PARSE_LEVEL_EXIT: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
+static PARSE_LEVEL_EXIT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 fn skip_usage_record() {
     PARSE_LEVEL_EXIT.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -124,11 +122,7 @@ pub fn run(args: &[String]) -> u8 {
             } else {
                 crate::usage::OUTCOME_ERROR
             };
-            crate::usage::record_command(
-                command,
-                outcome,
-                start.elapsed().as_millis() as i64,
-            );
+            crate::usage::record_command(command, outcome, start.elapsed().as_millis() as i64);
         }
     }
     code
@@ -161,8 +155,7 @@ fn run_dispatch(args: &[String]) -> u8 {
     if !matches!(
         first.as_str(),
         "retrieve" | "sentry" | "herald" | "diagnose" | "corpus"
-    )
-        && !SUBCOMMANDS.contains(&first.as_str())
+    ) && !SUBCOMMANDS.contains(&first.as_str())
     {
         return argparse_error("decided", &invalid_choice_message(first));
     }
@@ -186,8 +179,17 @@ fn run_dispatch(args: &[String]) -> u8 {
     // prints the version.
     let order_aware = matches!(
         first.as_str(),
-        "mcp-stats" | "telemetry" | "usage" | "skill" | "hook" | "eval" | "init" | "quickstart"
-            | "migrate" | "watchkeeper" | "corpus"
+        "mcp-stats"
+            | "telemetry"
+            | "usage"
+            | "skill"
+            | "hook"
+            | "eval"
+            | "init"
+            | "quickstart"
+            | "migrate"
+            | "watchkeeper"
+            | "corpus"
     );
     if !order_aware {
         if rest.iter().any(|a| a.as_str() == "--version") {
@@ -195,7 +197,10 @@ fn run_dispatch(args: &[String]) -> u8 {
             print_stdout(&version_line());
             return 0;
         }
-        if rest.iter().any(|a| a.as_str() == "-h" || a.as_str() == "--help") {
+        if rest
+            .iter()
+            .any(|a| a.as_str() == "-h" || a.as_str() == "--help")
+        {
             skip_usage_record();
             print_stdout(&format!("usage: decided {first} ..."));
             return 0;
@@ -353,7 +358,9 @@ fn run_corpus_digest(rest: &[&String]) -> u8 {
                     Ok(value) => {
                         return argparse_error(
                             prog,
-                            &format!("argument --version: invalid choice: '{value}' (choose from '2')"),
+                            &format!(
+                                "argument --version: invalid choice: '{value}' (choose from '2')"
+                            ),
                         )
                     }
                     Err(code) => return code,
@@ -1869,7 +1876,7 @@ fn run_find(rest: &[&String]) -> u8 {
             "--explain" => explain = true,
             "--top-level" => top_level = true,
             "--live" => live = true, // the live-only facet (ADR-113)
-            "--recursive" => {} // affirmation of the default
+            "--recursive" => {}      // affirmation of the default
             "--cache" => cache = true,
             "--no-cache" => cache = false,
             "--verify" => verify = true,
@@ -2046,9 +2053,7 @@ fn py_parse_int(value: &str) -> Option<i64> {
         if !b.is_ascii_digit() {
             return None;
         }
-        out = out
-            .saturating_mul(10)
-            .saturating_add(i64::from(b - b'0'));
+        out = out.saturating_mul(10).saturating_add(i64::from(b - b'0'));
     }
     Some(if neg { -out } else { out })
 }
@@ -2074,9 +2079,7 @@ fn run_retrieve(rest: &[&String]) -> u8 {
     let parse_int_flag = |raw: Option<&&String>| -> Result<i64, IntErr> {
         match raw {
             Some(v)
-                if !v.starts_with('-')
-                    || v.as_str() == "-"
-                    || looks_like_negative_number(v) =>
+                if !v.starts_with('-') || v.as_str() == "-" || looks_like_negative_number(v) =>
             {
                 py_parse_int(v).ok_or_else(|| IntErr::Invalid(v.to_string()))
             }
@@ -2088,10 +2091,9 @@ fn run_retrieve(rest: &[&String]) -> u8 {
             IntErr::Missing => {
                 argparse_error(prog, &format!("argument {flag}: expected one argument"))
             }
-            IntErr::Invalid(v) => argparse_error(
-                prog,
-                &format!("argument {flag}: invalid int value: '{v}'"),
-            ),
+            IntErr::Invalid(v) => {
+                argparse_error(prog, &format!("argument {flag}: invalid int value: '{v}'"))
+            }
         }
     };
 
@@ -2314,8 +2316,8 @@ fn run_export(rest: &[&String]) -> u8 {
     // Track the last write-mode flag seen for argparse mutex diagnostics.
     let mut last_mode: Option<&'static str> = None;
     let set_mode = |flag: &'static str,
-                        slot: &mut bool,
-                        last_mode: &mut Option<&'static str>|
+                    slot: &mut bool,
+                    last_mode: &mut Option<&'static str>|
      -> Result<(), FlagError> {
         if let Some(prev) = *last_mode {
             if prev != flag {
@@ -2366,9 +2368,7 @@ fn run_export(rest: &[&String]) -> u8 {
                 }
             }
             "--schema" => {
-                if let Err(FlagError(c)) =
-                    set_mode("--schema", &mut schema_mode, &mut last_mode)
-                {
+                if let Err(FlagError(c)) = set_mode("--schema", &mut schema_mode, &mut last_mode) {
                     return c;
                 }
                 i += 1;
@@ -2386,9 +2386,7 @@ fn run_export(rest: &[&String]) -> u8 {
                 }
             }
             other if other.starts_with("--schema=") => {
-                if let Err(FlagError(c)) =
-                    set_mode("--schema", &mut schema_mode, &mut last_mode)
-                {
+                if let Err(FlagError(c)) = set_mode("--schema", &mut schema_mode, &mut last_mode) {
                     return c;
                 }
                 let value = &other["--schema=".len()..];
@@ -2634,7 +2632,10 @@ fn run_init(rest: &[&String]) -> u8 {
     let mut positional_only = false;
 
     let ticketing_choice = |v: &str| -> Option<u8> {
-        if matches!(v, "jira" | "github" | "linear" | "azure-devops" | "servicenow" | "none") {
+        if matches!(
+            v,
+            "jira" | "github" | "linear" | "azure-devops" | "servicenow" | "none"
+        ) {
             None
         } else {
             Some(argparse_error(
@@ -2859,7 +2860,10 @@ fn run_rename(rest: &[&String]) -> u8 {
         missing.push("directory");
         return argparse_error(
             prog,
-            &format!("the following arguments are required: {}", missing.join(", ")),
+            &format!(
+                "the following arguments are required: {}",
+                missing.join(", ")
+            ),
         );
     };
     if !extras.is_empty() {

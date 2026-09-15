@@ -2,10 +2,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use rac_engine::derived::SCHEMA_VERSION;
 use rac_engine::derived_cache::{
     FederatedCacheError, FederatedCacheRefresh, GraphFederatedCacheTracker, ReadModel,
 };
-use rac_engine::derived::SCHEMA_VERSION;
 use rac_engine::federation::{calculate_parent_digest_v2, ParentCorpusErrorCode};
 use rac_engine::index_store::{graph_store_dir, open_graph_store, GRAPH_STORE_LAYOUT_VERSION};
 
@@ -195,11 +195,7 @@ fn framing_valid_answer_corruption_is_removed_rebuilt_and_reopened() {
 
     let store = graph_store_dir(&cache, &generation).unwrap();
     let entries = store.join("entries.seg");
-    replace_once_same_length(
-        &entries,
-        b"AAA-KWJ4VMKVSS66",
-        b"ZAA-KWJ4VMKVSS66",
-    );
+    replace_once_same_length(&entries, b"AAA-KWJ4VMKVSS66", b"ZAA-KWJ4VMKVSS66");
     assert!(
         open_graph_store(&cache, &generation, SCHEMA_VERSION, &metadata).is_some(),
         "same-length answer mutation should preserve segment framing and graph metadata"

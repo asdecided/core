@@ -13,7 +13,9 @@ use crate::intent::{
     CONSTRAINT_WEAKENED, SEVERITY_WARNING, SPECIFICITY_REGRESSION, SUCCESS_MEASURES_REMOVED,
 };
 use crate::pycompat::{py_abspath, py_relpath};
-use crate::revisions::{materialize_revision, repository_root, MaterializedRevision, RevisionError};
+use crate::revisions::{
+    materialize_revision, repository_root, MaterializedRevision, RevisionError,
+};
 
 // Recommendation reason codes (part of the JSON contract, ADR-007).
 pub const REASON_VALIDATION_REGRESSION: &str = "validation_regression";
@@ -71,9 +73,7 @@ impl WatchkeeperReport {
     }
 
     pub fn has_warnings(&self) -> bool {
-        self.findings
-            .iter()
-            .any(|f| f.severity == SEVERITY_WARNING)
+        self.findings.iter().any(|f| f.severity == SEVERITY_WARNING)
     }
 }
 

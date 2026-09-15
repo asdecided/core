@@ -136,7 +136,10 @@ pub fn install_skills(
         .collect();
     if !existing.is_empty() {
         let message = if existing.len() == 1 {
-            format!("{} already exists; decided skill install never overwrites", existing[0])
+            format!(
+                "{} already exists; decided skill install never overwrites",
+                existing[0]
+            )
         } else {
             let listing: Vec<String> = existing.iter().map(|p| format!("  - {p}")).collect();
             format!(
@@ -156,8 +159,7 @@ pub fn install_skills(
             std::fs::create_dir_all(parent)
                 .map_err(|e| SkillInstallError::Io(format!("{e}: {}", parent.display())))?;
         }
-        std::fs::write(path, content)
-            .map_err(|e| SkillInstallError::Io(format!("{e}: {dest}")))?;
+        std::fs::write(path, content).map_err(|e| SkillInstallError::Io(format!("{e}: {dest}")))?;
         installed.push(InstalledSkill {
             skill: (*name).to_string(),
             path: dest.clone(),
@@ -174,7 +176,12 @@ mod tests {
     fn registry_order_and_names() {
         assert_eq!(
             available_skills(),
-            vec!["decided-artifacts", "decided-review", "decided-import", "decided-capture"]
+            vec![
+                "decided-artifacts",
+                "decided-review",
+                "decided-import",
+                "decided-capture"
+            ]
         );
     }
 }

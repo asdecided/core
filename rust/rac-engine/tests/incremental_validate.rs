@@ -53,7 +53,10 @@ fn s5_stat_preserving_rewrite_is_the_accepted_miss_and_verify_catches_it() {
     // The stat rung reuses the stale row: the fixed file still reports
     // invalid — S5 is the ACCEPTED miss, pinned as-is.
     let stale = validate_directory_incremental_in(&dir, true, false, Some(&cache));
-    assert_eq!(stale.files[0].status, "invalid", "S5 must be the accepted miss");
+    assert_eq!(
+        stale.files[0].status, "invalid",
+        "S5 must be the accepted miss"
+    );
 
     // The verify floor content-confirms every file and sees the fix.
     let verified = validate_directory_incremental_in(&dir, true, true, Some(&cache));

@@ -87,9 +87,7 @@ pub fn py_parse_int(raw: &str) -> Option<i128> {
             continue;
         }
         let d = nd_digit_value(c)?;
-        value = value
-            .saturating_mul(10)
-            .saturating_add(d as i128);
+        value = value.saturating_mul(10).saturating_add(d as i128);
         last_was_digit = true;
         any_digit = true;
     }
@@ -1685,12 +1683,68 @@ fn rule_reference(state: &mut State, start_line: usize, _end_line: usize, silent
 // --- html_block rule --------------------------------------------------------
 
 const HTML_BLOCK_NAMES: &[&str] = &[
-    "address", "article", "aside", "base", "basefont", "blockquote", "body", "caption", "center",
-    "col", "colgroup", "dd", "details", "dialog", "dir", "div", "dl", "dt", "fieldset",
-    "figcaption", "figure", "footer", "form", "frame", "frameset", "h1", "h2", "h3", "h4", "h5",
-    "h6", "head", "header", "hr", "html", "iframe", "legend", "li", "link", "main", "menu",
-    "menuitem", "nav", "noframes", "ol", "optgroup", "option", "p", "param", "search", "section",
-    "summary", "table", "tbody", "td", "tfoot", "th", "thead", "title", "tr", "track", "ul",
+    "address",
+    "article",
+    "aside",
+    "base",
+    "basefont",
+    "blockquote",
+    "body",
+    "caption",
+    "center",
+    "col",
+    "colgroup",
+    "dd",
+    "details",
+    "dialog",
+    "dir",
+    "div",
+    "dl",
+    "dt",
+    "fieldset",
+    "figcaption",
+    "figure",
+    "footer",
+    "form",
+    "frame",
+    "frameset",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "head",
+    "header",
+    "hr",
+    "html",
+    "iframe",
+    "legend",
+    "li",
+    "link",
+    "main",
+    "menu",
+    "menuitem",
+    "nav",
+    "noframes",
+    "ol",
+    "optgroup",
+    "option",
+    "p",
+    "param",
+    "search",
+    "section",
+    "summary",
+    "table",
+    "tbody",
+    "td",
+    "tfoot",
+    "th",
+    "thead",
+    "title",
+    "tr",
+    "track",
+    "ul",
 ];
 
 /// Case-insensitive char match against an ASCII-lowercase pattern char,
@@ -2236,9 +2290,7 @@ impl Walk {
             }
         }
         match self.section {
-            Sect::Problem => self
-                .problem_lines
-                .extend(lines.into_iter().map(|(t, _)| t)),
+            Sect::Problem => self.problem_lines.extend(lines.into_iter().map(|(t, _)| t)),
             Sect::Requirements => self.requirement_lines.extend(lines),
             Sect::SuccessMetrics => self.metric_lines.extend(lines.into_iter().map(|(t, _)| t)),
             Sect::Risks => self.risk_lines.extend(lines.into_iter().map(|(t, _)| t)),

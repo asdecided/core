@@ -215,14 +215,7 @@ impl Server {
         version: &str,
         origin: Option<&str>,
     ) -> (String, Value) {
-        self.post_with_version_origin_headers(
-            body,
-            method_header,
-            name,
-            version,
-            origin,
-            &[],
-        )
+        self.post_with_version_origin_headers(body, method_header, name, version, origin, &[])
     }
 
     fn post_with_principal_headers(
@@ -351,12 +344,7 @@ fn current_http_rejects_legacy_header_with_current_body_metadata() {
         "method": "tools/list",
         "params": {"_meta": current_meta()}
     });
-    let (status, response) = server.post_with_version(
-        &request,
-        "tools/list",
-        None,
-        "2025-11-25",
-    );
+    let (status, response) = server.post_with_version(&request, "tools/list", None, "2025-11-25");
     assert_eq!(status, "HTTP/1.1 400 Bad Request");
     assert_eq!(response.pointer("/error/code"), Some(&json!(-32020)));
 }
@@ -450,7 +438,11 @@ fn http_caps_large_artifact_payload_to_configured_budget() {
         .pointer("/result/content/0/text")
         .and_then(Value::as_str)
         .expect("tool text");
-    assert!(text.chars().count() <= 512, "{} characters", text.chars().count());
+    assert!(
+        text.chars().count() <= 512,
+        "{} characters",
+        text.chars().count()
+    );
     let payload: Value = serde_json::from_str(text).expect("serialized payload");
     assert_eq!(payload["truncated"], json!(true));
     assert!(payload["omitted"].as_i64().unwrap_or(0) > 0);
@@ -661,13 +653,20 @@ fn stale_parent_failure_is_audited_once_before_http_error_response() {
         .contains("parent-corpus-digest-mismatch"));
 
     let events = server.audit_events();
-    assert_eq!(events.len(), before + 1, "failure records exactly one event");
+    assert_eq!(
+        events.len(),
+        before + 1,
+        "failure records exactly one event"
+    );
     let failure = events.last().unwrap();
     assert_eq!(failure["tool"], json!("search_artifacts"));
-    assert_eq!(failure["query"], json!({
-        "query": "parent audit policy",
-        "type": null
-    }));
+    assert_eq!(
+        failure["query"],
+        json!({
+            "query": "parent audit policy",
+            "type": null
+        })
+    );
     assert_eq!(failure["outcome"], json!("error"));
     assert_eq!(failure["returned"], json!([]));
     assert_eq!(failure["principal"], json!("alice@example.com"));

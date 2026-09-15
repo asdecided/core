@@ -13,8 +13,8 @@
 //!   `sub/c.md` sorts before `sub-x.md`. We sort by the tuple of relative
 //!   components, each compared by Unicode scalar (== UTF-8 byte order).
 
-use std::path::{Path, PathBuf};
 use rayon::prelude::*;
+use std::path::{Path, PathBuf};
 
 /// One discovered markdown file.
 #[derive(Debug, Clone)]

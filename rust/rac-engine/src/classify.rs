@@ -100,7 +100,11 @@ pub fn score_artifacts(artifact: &Artifact) -> Vec<TypeScore> {
             .collect();
         let points = matched_required.len() as f64 + 0.5 * matched_recommended.len() as f64;
         let ceiling = spec.required.len() as f64 + 0.5 * spec.recommended.len() as f64;
-        let fit = if ceiling != 0.0 { points / ceiling } else { 0.0 };
+        let fit = if ceiling != 0.0 {
+            points / ceiling
+        } else {
+            0.0
+        };
         scores.push(TypeScore {
             name: spec.name.clone(),
             matched_required,

@@ -267,10 +267,7 @@ fn read_layer(reader: &mut Reader<'_>) -> Result<CorpusLayer, IndexFormatError> 
     })
 }
 
-fn write_identity_entry(
-    writer: &mut Writer,
-    entry: &IndexEntry,
-) -> Result<(), IndexFormatError> {
+fn write_identity_entry(writer: &mut Writer, entry: &IndexEntry) -> Result<(), IndexFormatError> {
     writer.text(&entry.id)?;
     writer.text(&entry.artifact_type)?;
     writer.opt_text(entry.title.as_deref())?;
@@ -437,7 +434,10 @@ fn encode_segments(
         })
         .collect::<Result<_, IndexFormatError>>()?;
     drop(postings_lists);
-    out.push((SEG_POSTINGS, encode_segment(&write_indexed(&postings_rows)?)));
+    out.push((
+        SEG_POSTINGS,
+        encode_segment(&write_indexed(&postings_rows)?),
+    ));
     drop(postings_rows);
 
     let termdict_rows: Vec<Vec<u8>> = termdict
@@ -448,7 +448,10 @@ fn encode_segments(
             Ok(w.payload())
         })
         .collect::<Result<_, IndexFormatError>>()?;
-    out.push((SEG_TERMDICT, encode_segment(&write_indexed(&termdict_rows)?)));
+    out.push((
+        SEG_TERMDICT,
+        encode_segment(&write_indexed(&termdict_rows)?),
+    ));
     drop(termdict_rows);
 
     // The central identity projection, not the searchable effective rows,
@@ -474,7 +477,10 @@ fn encode_segments(
         })
         .collect::<Result<_, IndexFormatError>>()?;
     drop(alias_docids);
-    out.push((SEG_ALIASMAP, encode_segment(&write_indexed(&aliasmap_rows)?)));
+    out.push((
+        SEG_ALIASMAP,
+        encode_segment(&write_indexed(&aliasmap_rows)?),
+    ));
     drop(aliasmap_rows);
 
     // Path map: rows sorted by path STRING (docids index walk order).
@@ -783,8 +789,9 @@ fn write_store_in_layout(
         // format. Probe readability with the full open; replace when bad.
         let opened = MmapIndexReader::open(&final_dir, corpus_hash, bundle_version).ok();
         let model_valid = opened.is_some()
-            && graph_metadata
-                .is_none_or(|expected| graph_metadata_matches_mapped(expected, opened.as_ref().unwrap()));
+            && graph_metadata.is_none_or(|expected| {
+                graph_metadata_matches_mapped(expected, opened.as_ref().unwrap())
+            });
         let graph_valid = graph_metadata.is_none_or(|expected| {
             encode_graph_metadata(expected)
                 .ok()
@@ -886,7 +893,10 @@ pub struct MmapIndexReader {
 }
 
 fn seg_index(name: &str) -> usize {
-    ALL_SEGMENTS.iter().position(|s| *s == name).expect("known segment")
+    ALL_SEGMENTS
+        .iter()
+        .position(|s| *s == name)
+        .expect("known segment")
 }
 
 impl MmapIndexReader {
@@ -1448,10 +1458,7 @@ fn canonical_graph_metadata(metadata: &GraphStoreMetadata) -> GraphStoreMetadata
     canonical
 }
 
-fn graph_mapping_order(
-    left: &GenerationMapping,
-    right: &GenerationMapping,
-) -> std::cmp::Ordering {
+fn graph_mapping_order(left: &GenerationMapping, right: &GenerationMapping) -> std::cmp::Ordering {
     (
         left.owner_rank,
         &left.owner_source,
@@ -1567,13 +1574,14 @@ fn graph_metadata_matches_derived(metadata: &GraphStoreMetadata, derived: &Deriv
         .iter()
         .filter_map(|entry| entry.key.clone())
         .collect();
-    graph_rows_match_model(metadata, &identity_keys, &derived.resolution.canonical_redirects)
+    graph_rows_match_model(
+        metadata,
+        &identity_keys,
+        &derived.resolution.canonical_redirects,
+    )
 }
 
-fn graph_metadata_matches_mapped(
-    metadata: &GraphStoreMetadata,
-    model: &MmapIndexReader,
-) -> bool {
+fn graph_metadata_matches_mapped(metadata: &GraphStoreMetadata, model: &MmapIndexReader) -> bool {
     if validate_graph_metadata_shape(metadata).is_err() {
         return false;
     }
@@ -1842,7 +1850,11 @@ pub fn decode_validation_store(
                 severity,
                 code,
                 message,
-                line: if has_line != 0 { Some(line_value) } else { None },
+                line: if has_line != 0 {
+                    Some(line_value)
+                } else {
+                    None
+                },
             });
         }
         rows.push((
@@ -1906,7 +1918,9 @@ pub struct FileState {
 }
 
 pub fn manifest_store_root(cache_dir: &Path) -> PathBuf {
-    cache_dir.join(MANIFEST_DIRNAME).join(MANIFEST_LAYOUT_VERSION)
+    cache_dir
+        .join(MANIFEST_DIRNAME)
+        .join(MANIFEST_LAYOUT_VERSION)
 }
 
 /// `Path(directory).resolve()` — absolutise against the cwd and normalise,
@@ -2224,12 +2238,7 @@ mod graph_layout_tests {
             &derived,
             &metadata,
         ));
-        assert!(open_store(
-            &cache,
-            &metadata.generation,
-            crate::derived::SCHEMA_VERSION
-        )
-        .is_none());
+        assert!(open_store(&cache, &metadata.generation, crate::derived::SCHEMA_VERSION).is_none());
         assert!(open_graph_store(
             &cache,
             &metadata.generation,

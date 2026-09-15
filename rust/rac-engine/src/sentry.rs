@@ -85,7 +85,10 @@ fn finding_identity(
     include_origin: bool,
 ) -> (Option<String>, Option<crate::corpus::ArtifactOrigin>) {
     if include_origin {
-        (Some(item.key.canonical_id.clone()), Some(item.origin.clone()))
+        (
+            Some(item.key.canonical_id.clone()),
+            Some(item.origin.clone()),
+        )
     } else {
         (None, None)
     }
@@ -365,11 +368,7 @@ fn parse_document(
 /// not require a repository tree and therefore fail the ordinary corpus gate
 /// even when code enforcement was not requested.
 pub fn validate_artifact(artifact: &Artifact) -> Vec<Issue> {
-    let item = CorpusItem::compatible_local_file(
-        "",
-        artifact.clone(),
-        spec_for("decision"),
-    );
+    let item = CorpusItem::compatible_local_file("", artifact.clone(), spec_for("decision"));
     match parse_document(&item, false) {
         Err(finding) => vec![Issue::new("error", finding.code, finding.message, None)],
         _ => Vec::new(),

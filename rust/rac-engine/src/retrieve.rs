@@ -243,8 +243,10 @@ fn class_matches(negated: bool, items: &[ClassItem], c: char) -> bool {
 
 /// Python `re` `\s` over str patterns.
 fn py_re_space(c: char) -> bool {
-    matches!(c, ' ' | '\t' | '\n' | '\r' | '\x0b' | '\x0c' | '\u{1c}'..='\u{1f}' | '\u{85}')
-        || crate::pycompat::py_is_space(c)
+    matches!(
+        c,
+        ' ' | '\t' | '\n' | '\r' | '\x0b' | '\x0c' | '\u{1c}'..='\u{1f}' | '\u{85}'
+    ) || crate::pycompat::py_is_space(c)
 }
 
 /// Backtracking matcher — boolean-equivalent to `re.match(regex + r"\Z", s)`.
@@ -276,10 +278,11 @@ fn glob_match_at(toks: &[GlobTok], s: &[char]) -> bool {
             }
             i > 0 && i < s.len() && glob_match_at(toks, &s[i + 1..])
         }
-        GlobTok::Class { negated, items } => s
-            .first()
-            .is_some_and(|&c| class_matches(*negated, items, c))
-            && glob_match_at(rest, &s[1..]),
+        GlobTok::Class { negated, items } => {
+            s.first()
+                .is_some_and(|&c| class_matches(*negated, items, c))
+                && glob_match_at(rest, &s[1..])
+        }
     }
 }
 
@@ -294,9 +297,7 @@ fn entry_covers(entry: &str, query: &str) -> bool {
         }
         _ => match normalized_scope_path(entry) {
             None => false,
-            Some(normalized) => {
-                query == normalized || query.starts_with(&format!("{normalized}/"))
-            }
+            Some(normalized) => query == normalized || query.starts_with(&format!("{normalized}/")),
         },
     }
 }
@@ -425,7 +426,12 @@ fn governing_decisions(rows: &[ScopeRow], directory: &str, path: &str) -> Vec<Go
     }
     let mut sources: Vec<&str> = matches
         .iter()
-        .filter_map(|decision| decision.origin.as_ref().map(|origin| origin.source.as_str()))
+        .filter_map(|decision| {
+            decision
+                .origin
+                .as_ref()
+                .map(|origin| origin.source.as_str())
+        })
         .collect();
     sources.sort_unstable();
     sources.dedup();
@@ -488,10 +494,7 @@ pub fn scope_lookup_value(result: &ScopeLookupResult) -> Value {
 
 /// Federated scope payload. Origin is opt-in so a repository without a
 /// manifest retains the released JSON shape byte for byte.
-pub fn scope_lookup_value_with_origin(
-    result: &ScopeLookupResult,
-    include_origin: bool,
-) -> Value {
+pub fn scope_lookup_value_with_origin(result: &ScopeLookupResult, include_origin: bool) -> Value {
     let mut payload = Map::new();
     payload.insert("schema_version".to_string(), json!("1"));
     payload.insert("query".to_string(), json!(result.query));
@@ -526,10 +529,7 @@ pub fn scope_lookup_value_with_composed(
     corpus: &crate::composition::ComposedCorpus,
 ) -> Value {
     let mut payload = scope_lookup_value_with_origin(result, true);
-    if let Some(decisions) = payload
-        .get_mut("decisions")
-        .and_then(Value::as_array_mut)
-    {
+    if let Some(decisions) = payload.get_mut("decisions").and_then(Value::as_array_mut) {
         for (value, decision) in decisions.iter_mut().zip(&result.decisions) {
             let Some(provenance) = decision
                 .key
@@ -716,9 +716,7 @@ fn add_composed_item(
         }
     }
     if let Some(evidence) = evidence {
-        provenance
-            .entry("evidence".to_string())
-            .or_insert(evidence);
+        provenance.entry("evidence".to_string()).or_insert(evidence);
     }
 }
 
@@ -764,10 +762,7 @@ fn composed_live_successors(
         }
         if is_retired(successor) {
             result.extend(composed_live_successors(
-                successor,
-                successors,
-                is_retired,
-                visited,
+                successor, successors, is_retired, visited,
             ));
         } else {
             result.push(successor.clone());
@@ -906,9 +901,7 @@ pub fn retrieve_grounding_from_composed(
     live_only: bool,
     corpus: &crate::composition::ComposedCorpus,
 ) -> Value {
-    retrieve_grounding_from_source(
-        directory, task, scope, top_k, budget, live_only, corpus,
-    )
+    retrieve_grounding_from_source(directory, task, scope, top_k, budget, live_only, corpus)
 }
 
 /// Grounding over the request-current verified graph closure. This shares the
@@ -923,9 +916,7 @@ pub fn retrieve_grounding_from_graph(
     live_only: bool,
     corpus: &crate::graph_federated_corpus::VerifiedGraphCorpus,
 ) -> Value {
-    retrieve_grounding_from_source(
-        directory, task, scope, top_k, budget, live_only, corpus,
-    )
+    retrieve_grounding_from_source(directory, task, scope, top_k, budget, live_only, corpus)
 }
 
 trait GroundingSource {
@@ -1258,10 +1249,7 @@ pub fn retrieve_grounding_from_store(
     )
 }
 
-fn cached_status(
-    cache: &std::cell::RefCell<HashMap<String, String>>,
-    path: &str,
-) -> String {
+fn cached_status(cache: &std::cell::RefCell<HashMap<String, String>>, path: &str) -> String {
     if let Some(status) = cache.borrow().get(path) {
         return status.clone();
     }
@@ -1352,11 +1340,9 @@ where
     };
     for m in &keyword.matches {
         if live_only && is_retired(&m.path) {
-            let mut visited: std::collections::HashSet<String> =
-                std::collections::HashSet::new();
+            let mut visited: std::collections::HashSet<String> = std::collections::HashSet::new();
             visited.insert(m.path.clone());
-            for successor_path in live_successors(&m.path, &by_target, &is_retired, &mut visited)
-            {
+            for successor_path in live_successors(&m.path, &by_target, &is_retired, &mut visited) {
                 let Some(successor) = entry_for_path(&successor_path) else {
                     continue;
                 };

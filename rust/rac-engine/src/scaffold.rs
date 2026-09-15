@@ -106,9 +106,8 @@ fn id_generation_exhausted() -> ScaffoldError {
 }
 
 fn local_items(directory: &str, recursive: bool) -> Result<Vec<CorpusItem>, ScaffoldError> {
-    crate::federated_corpus::local_writable_items(directory, recursive).map_err(|error| {
-        ScaffoldError::MalformedRepositoryConfig(error.to_string())
-    })
+    crate::federated_corpus::local_writable_items(directory, recursive)
+        .map_err(|error| ScaffoldError::MalformedRepositoryConfig(error.to_string()))
 }
 
 // ---------------------------------------------------------------------------
@@ -209,7 +208,8 @@ fn valid_repository_key(key: &str) -> bool {
     let b = core.as_bytes();
     (2..=10).contains(&b.len())
         && b[0].is_ascii_uppercase()
-        && b.iter().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
+        && b.iter()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
 }
 
 /// A configured corpus source is a stable, lower-case, slash-namespaced
@@ -469,8 +469,14 @@ fn malformed_client_config(config_path: &str, reason: &str) -> ScaffoldError {
 /// insertion-ordered like the oracle's dict literal.
 fn org_server_entry(url: &str) -> serde_json::Value {
     let mut entry = serde_json::Map::new();
-    entry.insert("type".to_string(), serde_json::Value::String("http".to_string()));
-    entry.insert("url".to_string(), serde_json::Value::String(url.to_string()));
+    entry.insert(
+        "type".to_string(),
+        serde_json::Value::String("http".to_string()),
+    );
+    entry.insert(
+        "url".to_string(),
+        serde_json::Value::String(url.to_string()),
+    );
     serde_json::Value::Object(entry)
 }
 
@@ -491,9 +497,9 @@ fn write_org_endpoint(directory: &str, url: &str) -> Result<Vec<String>, Scaffol
                 .map_err(|_| malformed_client_config(&path, "not valid JSON"))?;
             let mut data: serde_json::Value = serde_json::from_str(&text)
                 .map_err(|_| malformed_client_config(&path, "not valid JSON"))?;
-            let obj = data.as_object_mut().ok_or_else(|| {
-                malformed_client_config(&path, "top level must be a JSON object")
-            })?;
+            let obj = data
+                .as_object_mut()
+                .ok_or_else(|| malformed_client_config(&path, "top level must be a JSON object"))?;
             let servers = obj
                 .entry("mcpServers")
                 .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
@@ -504,14 +510,20 @@ fn write_org_endpoint(directory: &str, url: &str) -> Result<Vec<String>, Scaffol
                 continue; // already wired to this endpoint: idempotent no-op
             }
             servers.insert(ORG_SERVER_KEY.to_string(), entry.clone());
-            planned.push((path, format!("{}\n", crate::pyjson::dumps_indent2_no_ascii(&data))));
+            planned.push((
+                path,
+                format!("{}\n", crate::pyjson::dumps_indent2_no_ascii(&data)),
+            ));
         } else {
             let mut servers = serde_json::Map::new();
             servers.insert(ORG_SERVER_KEY.to_string(), entry.clone());
             let mut payload = serde_json::Map::new();
             payload.insert("mcpServers".to_string(), serde_json::Value::Object(servers));
             let payload = serde_json::Value::Object(payload);
-            planned.push((path, format!("{}\n", crate::pyjson::dumps_indent2_no_ascii(&payload))));
+            planned.push((
+                path,
+                format!("{}\n", crate::pyjson::dumps_indent2_no_ascii(&payload)),
+            ));
         }
     }
     let mut written = Vec::new();
@@ -858,14 +870,12 @@ pub fn migrate_metadata(
         let artifact_id = assign_id(&config.repository_key, &mut issued)?;
         if !dry_run {
             // Prepend the envelope only; the body bytes are untouched.
-            let original = std::fs::read(&item.path).map_err(|e| {
-                malformed_config(&item.path, &format!("invalid YAML: {e}"))
-            })?;
+            let original = std::fs::read(&item.path)
+                .map_err(|e| malformed_config(&item.path, &format!("invalid YAML: {e}")))?;
             let mut data = render_frontmatter(&artifact_id, &spec.name).into_bytes();
             data.extend_from_slice(&original);
-            std::fs::write(&item.path, data).map_err(|e| {
-                malformed_config(&item.path, &format!("invalid YAML: {e}"))
-            })?;
+            std::fs::write(&item.path, data)
+                .map_err(|e| malformed_config(&item.path, &format!("invalid YAML: {e}")))?;
         }
         files.push(FileMigration {
             path: item.path.clone(),
@@ -929,8 +939,8 @@ mod tests {
     #[test]
     fn new_survives_hostile_markdown_in_the_walk() {
         let base = std::env::var("CARGO_TARGET_TMPDIR").unwrap_or_else(|_| "/tmp".into());
-        let root = std::path::Path::new(&base)
-            .join(format!("scaffold_hostile_{}", std::process::id()));
+        let root =
+            std::path::Path::new(&base).join(format!("scaffold_hostile_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("decisions/decisions")).unwrap();
         std::fs::create_dir_all(root.join(".decided")).unwrap();
@@ -940,14 +950,20 @@ mod tests {
             "{}/../fuzz/pinned/oracle-crashes/unhashable-key/repro.md",
             env!("CARGO_MANIFEST_DIR")
         );
-        let hostile_bytes = std::fs::read(&hostile)
-            .unwrap_or_else(|e| panic!("cannot read {hostile}: {e}"));
+        let hostile_bytes =
+            std::fs::read(&hostile).unwrap_or_else(|e| panic!("cannot read {hostile}: {e}"));
         std::fs::write(root.join("decisions/decisions/case.md"), hostile_bytes).unwrap();
 
-        let out = root.join("decisions/decisions/new.md").to_string_lossy().into_owned();
+        let out = root
+            .join("decisions/decisions/new.md")
+            .to_string_lossy()
+            .into_owned();
         let created = match create_artifact("decision", &out) {
             Ok(created) => created,
-            Err(e) => panic!("create_artifact failed on a hostile corpus: {}", e.message()),
+            Err(e) => panic!(
+                "create_artifact failed on a hostile corpus: {}",
+                e.message()
+            ),
         };
         assert_eq!(created.artifact_type, "decision");
         let written = std::fs::read_to_string(&out).unwrap();

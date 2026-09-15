@@ -20,7 +20,9 @@ use rac_engine::graph_composition::{
 };
 use rac_engine::output::{render_documents_jsonl, render_export_json, render_graph_json};
 use rac_engine::parse::parse_text;
-use rac_engine::portal::{render_export_html, render_federated_export_html, FEDERATED_SHELL, SHELL};
+use rac_engine::portal::{
+    render_export_html, render_federated_export_html, FEDERATED_SHELL, SHELL,
+};
 use rac_engine::relationships::{corpus_items, CorpusItem};
 use rac_engine::spec::spec_for;
 use serde_json::Value;
@@ -296,10 +298,7 @@ fn graph_corpus(
         })
         .unzip();
     let graph = GraphComposition::compose(GraphCompositionInput::new(
-        "acme/app",
-        nodes,
-        items,
-        overrides,
+        "acme/app", nodes, items, overrides,
     ))
     .unwrap();
     ComposedCorpus::from_graph(graph, contents, Vec::new())
@@ -364,20 +363,8 @@ fn diamond_chain_corpus() -> ComposedCorpus {
         ],
         vec![
             graph_mapping(left, shared, "POLICY", "LEFT-POLICY", "LEFT-ADR"),
-            graph_mapping(
-                "acme/app",
-                left,
-                "LEFT-POLICY",
-                "ROOT-POLICY",
-                "ROOT-ADR",
-            ),
-            graph_mapping(
-                "acme/app",
-                shared,
-                "POLICY",
-                "ROOT-POLICY",
-                "ROOT-ADR",
-            ),
+            graph_mapping("acme/app", left, "LEFT-POLICY", "ROOT-POLICY", "ROOT-ADR"),
+            graph_mapping("acme/app", shared, "POLICY", "ROOT-POLICY", "ROOT-ADR"),
         ],
     )
 }
@@ -595,7 +582,13 @@ fn graph_exports_retain_reconciled_diamond_chain_and_endpoint_history() {
         .find(|artifact| artifact.id == "POLICY")
         .unwrap();
     assert_eq!(
-        history.graph_provenance.as_ref().unwrap().origin.pin.as_deref(),
+        history
+            .graph_provenance
+            .as_ref()
+            .unwrap()
+            .origin
+            .pin
+            .as_deref(),
         Some(GRAPH_PIN)
     );
 
@@ -670,7 +663,10 @@ fn graph_exports_retain_reconciled_diamond_chain_and_endpoint_history() {
         .find(|document| document["id"] == "ROOT-POLICY")
         .unwrap();
     assert_eq!(
-        rendered_document["metadata"]["provenance"]["overrides"].as_array().unwrap().len(),
+        rendered_document["metadata"]["provenance"]["overrides"]
+            .as_array()
+            .unwrap()
+            .len(),
         3
     );
 
@@ -683,7 +679,12 @@ fn graph_exports_retain_reconciled_diamond_chain_and_endpoint_history() {
         .unwrap();
     assert_eq!(edge.authored_token.as_deref(), Some("POLICY"));
     assert_eq!(
-        edge.graph_provenance.as_ref().unwrap().origin.pin.as_deref(),
+        edge.graph_provenance
+            .as_ref()
+            .unwrap()
+            .origin
+            .pin
+            .as_deref(),
         Some(GRAPH_PIN)
     );
     assert_eq!(
@@ -762,13 +763,7 @@ fn graph_portal_keeps_three_equal_ids_independently_addressable() {
             graph_item(shared, "shared.md", "SAME", "requirement", ""),
             graph_item(left, "left.md", "SAME", "requirement", ""),
             graph_item(right, "right.md", "SAME", "requirement", ""),
-            graph_item(
-                "acme/app",
-                "replacement.md",
-                "ROOT-SAME",
-                "requirement",
-                "",
-            ),
+            graph_item("acme/app", "replacement.md", "ROOT-SAME", "requirement", ""),
             graph_item("acme/app", "rationale.md", "ROOT-ADR", "decision", ""),
             graph_item(
                 "acme/app",
@@ -830,9 +825,7 @@ fn graph_portal_keeps_three_equal_ids_independently_addressable() {
     assert!(FEDERATED_SHELL.contains("#/artifact/${encodeURIComponent(J)}"));
     assert!(FEDERATED_SHELL.contains("T.state===\"replacement\"&&b(T.parent.id,$)"));
     assert!(!FEDERATED_SHELL.contains("T.state!==\"overridden\""));
-    assert!(html.contains(
-        "T.state!==\"overridden\"&&b((T.target??T.parent).id,$)"
-    ));
+    assert!(html.contains("T.state!==\"overridden\"&&b((T.target??T.parent).id,$)"));
 
     fs::remove_dir_all(root).unwrap();
 }

@@ -142,9 +142,7 @@ fn py_str_json(v: &Value) -> String {
         Value::Object(map) => {
             let inner: Vec<String> = map
                 .iter()
-                .map(|(k, v)| {
-                    format!("{}: {}", crate::pycompat::py_repr_str(k), py_repr_json(v))
-                })
+                .map(|(k, v)| format!("{}: {}", crate::pycompat::py_repr_str(k), py_repr_json(v)))
                 .collect();
             format!("{{{}}}", inner.join(", "))
         }
@@ -174,19 +172,10 @@ pub fn load_consent() -> Consent {
     };
     Consent {
         share_usage: map.get("share_usage").map(py_truthy).unwrap_or(false),
-        install_id: map
-            .get("install_id")
-            .map(py_str_json)
-            .unwrap_or_default(),
+        install_id: map.get("install_id").map(py_str_json).unwrap_or_default(),
         salt: map.get("salt").map(py_str_json).unwrap_or_default(),
-        consented_at: map
-            .get("consented_at")
-            .map(py_str_json)
-            .unwrap_or_default(),
-        enterprise_locked: map
-            .get("enterprise_locked")
-            .map(py_truthy)
-            .unwrap_or(false),
+        consented_at: map.get("consented_at").map(py_str_json).unwrap_or_default(),
+        enterprise_locked: map.get("enterprise_locked").map(py_truthy).unwrap_or(false),
     }
 }
 
@@ -195,7 +184,10 @@ pub fn load_consent() -> Consent {
 pub fn save_consent(consent: &Consent) {
     let mut m = Map::new();
     m.insert("share_usage".into(), Value::Bool(consent.share_usage));
-    m.insert("install_id".into(), Value::String(consent.install_id.clone()));
+    m.insert(
+        "install_id".into(),
+        Value::String(consent.install_id.clone()),
+    );
     m.insert("salt".into(), Value::String(consent.salt.clone()));
     m.insert(
         "consented_at".into(),
@@ -318,7 +310,9 @@ pub(crate) fn token_hex(nbytes: usize) -> String {
         }
         let mut state = seed.finish();
         for chunk in buf.chunks_mut(8) {
-            state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             for (i, b) in chunk.iter_mut().enumerate() {
                 *b = (state >> (8 * i)) as u8;
             }

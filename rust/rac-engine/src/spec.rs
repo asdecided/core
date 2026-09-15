@@ -135,7 +135,11 @@ fn str_map(v: &Value) -> Vec<(String, String)> {
 /// Ordered `{key -> [string]}` map from a JSON object.
 fn list_map(v: &Value) -> Vec<(String, Vec<String>)> {
     v.as_object()
-        .map(|o| o.iter().map(|(k, val)| (k.clone(), str_list(val))).collect())
+        .map(|o| {
+            o.iter()
+                .map(|(k, val)| (k.clone(), str_list(val)))
+                .collect()
+        })
         .unwrap_or_default()
 }
 

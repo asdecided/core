@@ -249,10 +249,7 @@ fn relationship_findings_from_result(
         .issues
         .iter()
         .map(|issue| {
-            let known = matches!(
-                relationship_severity(&issue.code),
-                "error" | "warning"
-            );
+            let known = matches!(relationship_severity(&issue.code), "error" | "warning");
             let severity = if known {
                 if relationship_severity(&issue.code) == "error" {
                     SEVERITY_ERROR
@@ -309,19 +306,14 @@ fn degree_findings_with_relationships(
     hub_threshold: i64,
 ) -> Vec<DoctorFinding> {
     let known: Vec<&CorpusItem> = items.iter().filter(|i| i.spec.is_some()).collect();
-    let mut inbound: std::collections::HashMap<&crate::corpus::ArtifactPath, i64> = known
-        .iter()
-        .map(|item| (&item.artifact_path, 0))
-        .collect();
-    let mut outbound: std::collections::HashMap<&crate::corpus::ArtifactPath, i64> = known
-        .iter()
-        .map(|item| (&item.artifact_path, 0))
-        .collect();
+    let mut inbound: std::collections::HashMap<&crate::corpus::ArtifactPath, i64> =
+        known.iter().map(|item| (&item.artifact_path, 0)).collect();
+    let mut outbound: std::collections::HashMap<&crate::corpus::ArtifactPath, i64> =
+        known.iter().map(|item| (&item.artifact_path, 0)).collect();
     for rel in relationships {
-        let (Some(source), Some(resolved)) = (
-            rel.source_artifact.as_ref(),
-            rel.resolved_artifact.as_ref(),
-        ) else {
+        let (Some(source), Some(resolved)) =
+            (rel.source_artifact.as_ref(), rel.resolved_artifact.as_ref())
+        else {
             continue; // only resolved (unique, non-self) edges
         };
         if let Some(count) = inbound.get_mut(resolved) {
@@ -429,13 +421,7 @@ fn trail_boundary(chars: &[char], end: usize) -> bool {
 /// All `end` positions where one of `words` matches at `i` under the given
 /// boundary requirements. Alternation for existence: every alternative that
 /// fits is a candidate continuation point.
-fn word_alt_ends(
-    chars: &[char],
-    i: usize,
-    words: &[&str],
-    lead: bool,
-    trail: bool,
-) -> Vec<usize> {
+fn word_alt_ends(chars: &[char], i: usize, words: &[&str], lead: bool, trail: bool) -> Vec<usize> {
     if lead && !lead_boundary(chars, i) {
         return Vec::new();
     }
@@ -477,7 +463,14 @@ fn ws_run(chars: &[char], i: usize) -> Vec<usize> {
 fn p_instruction_override(chars: &[char]) -> bool {
     const G1: [&str; 5] = ["ignore", "disregard", "forget", "override", "bypass"];
     const G2: [&str; 8] = [
-        "previous", "prior", "above", "earlier", "preceding", "all", "the system", "your",
+        "previous",
+        "prior",
+        "above",
+        "earlier",
+        "preceding",
+        "all",
+        "the system",
+        "your",
     ];
     const G3: [&str; 8] = [
         "instruction",
@@ -822,19 +815,18 @@ fn detect_unlinked_references_with_index(
     relationships: &[Relationship],
 ) -> Vec<UnlinkedReference> {
     let sources: Vec<IndexEntry> = index_from_items(items);
-    let by_key: std::collections::HashMap<&crate::corpus::ArtifactKey, &IndexEntry> = identity_index
-        .iter()
-        .filter_map(|entry| entry.key.as_ref().map(|key| (key, entry)))
-        .collect();
+    let by_key: std::collections::HashMap<&crate::corpus::ArtifactKey, &IndexEntry> =
+        identity_index
+            .iter()
+            .filter_map(|entry| entry.key.as_ref().map(|key| (key, entry)))
+            .collect();
 
     let mut declared: std::collections::HashMap<
         crate::corpus::ArtifactPath,
         std::collections::HashSet<crate::corpus::ArtifactPath>,
     > = std::collections::HashMap::new();
     for rel in relationships {
-        if let (Some(source), Some(resolved)) =
-            (&rel.source_artifact, &rel.resolved_artifact)
-        {
+        if let (Some(source), Some(resolved)) = (&rel.source_artifact, &rel.resolved_artifact) {
             declared
                 .entry(source.clone())
                 .or_default()

@@ -56,7 +56,11 @@ fn corpus_digest_version_two_is_explicit_and_keeps_v1_as_the_default() {
         "--corpus",
         "decisions",
     ]);
-    assert!(v1.status.success(), "{}", String::from_utf8_lossy(&v1.stderr));
+    assert!(
+        v1.status.success(),
+        "{}",
+        String::from_utf8_lossy(&v1.stderr)
+    );
     assert!(String::from_utf8_lossy(&v1.stdout).starts_with("sha256:"));
 
     let v2 = run(&[
@@ -69,7 +73,11 @@ fn corpus_digest_version_two_is_explicit_and_keeps_v1_as_the_default() {
         "--corpus",
         "decisions",
     ]);
-    assert!(v2.status.success(), "{}", String::from_utf8_lossy(&v2.stderr));
+    assert!(
+        v2.status.success(),
+        "{}",
+        String::from_utf8_lossy(&v2.stderr)
+    );
     assert!(String::from_utf8_lossy(&v2.stdout).starts_with("sha256-v2:"));
 
     fs::remove_dir_all(root).unwrap();
@@ -225,9 +233,8 @@ fn init_parent_corpus_preserves_an_existing_non_default_key() {
         "--json",
     ]);
     assert_eq!(explicit_conflict.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&explicit_conflict.stderr).contains(
-        "repository already initialized with key 'APP'"
-    ));
+    assert!(String::from_utf8_lossy(&explicit_conflict.stderr)
+        .contains("repository already initialized with key 'APP'"));
 
     fs::remove_dir_all(root).expect("remove existing-key scratch repository");
 }
@@ -280,10 +287,8 @@ fn resolve_accepts_a_literal_hyphen_id_and_reaches_resolution() {
 fn diagnose_requires_a_named_target() {
     let output = run(&["diagnose", "storage"]);
     assert_eq!(output.status.code(), Some(2));
-    assert!(
-        String::from_utf8_lossy(&output.stderr)
-            .contains("the following arguments are required: target")
-    );
+    assert!(String::from_utf8_lossy(&output.stderr)
+        .contains("the following arguments are required: target"));
 }
 
 #[test]
@@ -389,8 +394,9 @@ fn export_local_only_rejects_non_composed_modes() {
         let output = run(&args);
         assert_eq!(output.status.code(), Some(2));
         assert!(
-            String::from_utf8_lossy(&output.stderr)
-                .contains("--local-only is available only for viewer, documents, and graph exports"),
+            String::from_utf8_lossy(&output.stderr).contains(
+                "--local-only is available only for viewer, documents, and graph exports"
+            ),
             "stderr={}",
             String::from_utf8_lossy(&output.stderr)
         );
@@ -457,7 +463,10 @@ fn corpus_digest_prints_the_canonical_read_only_pin() {
         b"sha256:899d5cdfa52b90a157b018dceb20f4f2901e0d56c91b089c12286c0b8b7b3325\n"
     );
     assert!(output.stderr.is_empty());
-    assert_eq!(fs::read(root.join(".decided/config.yaml")).unwrap(), before_config);
+    assert_eq!(
+        fs::read(root.join(".decided/config.yaml")).unwrap(),
+        before_config
+    );
     assert_eq!(fs::read(root.join("decisions/a.md")).unwrap(), before_a);
 
     fs::remove_dir_all(root).expect("remove CLI digest corpus");
@@ -485,9 +494,7 @@ fn corpus_digest_bounds_config_and_rejects_escaping_corpus_paths() {
         "decisions",
     ]);
     assert_eq!(missing.status.code(), Some(1));
-    assert!(
-        String::from_utf8_lossy(&missing.stderr).contains("parent-corpus-config-missing")
-    );
+    assert!(String::from_utf8_lossy(&missing.stderr).contains("parent-corpus-config-missing"));
 
     let escaping = run(&[
         "corpus",
@@ -498,9 +505,7 @@ fn corpus_digest_bounds_config_and_rejects_escaping_corpus_paths() {
         "../decisions",
     ]);
     assert_eq!(escaping.status.code(), Some(1));
-    assert!(
-        String::from_utf8_lossy(&escaping.stderr).contains("parent-corpus-path-escape")
-    );
+    assert!(String::from_utf8_lossy(&escaping.stderr).contains("parent-corpus-path-escape"));
 
     fs::remove_dir_all(root).expect("remove CLI digest corpus");
 }

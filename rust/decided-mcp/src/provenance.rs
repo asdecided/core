@@ -146,4 +146,3 @@ pub fn artifact_provenance(directory: &str, path: &str) -> Map<String, Value> {
     }
     m
 }
-

@@ -51,7 +51,10 @@ pub struct OutgoingReferences {
 
 impl OutgoingReferences {
     pub fn kept(&self) -> usize {
-        self.by_section.iter().map(|(_, targets)| targets.len()).sum()
+        self.by_section
+            .iter()
+            .map(|(_, targets)| targets.len())
+            .sum()
     }
 
     pub fn to_value(&self) -> Value {
@@ -135,7 +138,10 @@ impl GraphView {
 
     pub fn fresh(root: &str) -> Self {
         let corpus = corpus_items(root, true);
-        Self::new(index_from_items(&corpus), relationships_from_corpus(&corpus))
+        Self::new(
+            index_from_items(&corpus),
+            relationships_from_corpus(&corpus),
+        )
     }
 
     pub fn from_composed(corpus: &rac_engine::composition::ComposedCorpus) -> Self {
@@ -277,11 +283,7 @@ impl GraphView {
         rac_engine::resolve::resolve_in_index(&self.entries, artifact_id)
     }
 
-    pub fn outgoing(
-        &self,
-        artifact: &ResolvedArtifact,
-        historical: bool,
-    ) -> OutgoingReferences {
+    pub fn outgoing(&self, artifact: &ResolvedArtifact, historical: bool) -> OutgoingReferences {
         let graph = self.graph(historical);
         let indexes = self
             .entry_index(artifact)
@@ -307,11 +309,7 @@ impl GraphView {
         }
     }
 
-    pub fn incoming(
-        &self,
-        artifact: &ResolvedArtifact,
-        historical: bool,
-    ) -> IncomingReferences {
+    pub fn incoming(&self, artifact: &ResolvedArtifact, historical: bool) -> IncomingReferences {
         let graph = self.graph(historical);
         let target_index = self.entry_index(artifact);
         let indexes = target_index
@@ -352,11 +350,12 @@ impl GraphView {
             .into_iter()
             .map(|reference| (relationship_order(&reference.section), reference))
             .collect();
-        decorated.sort_by(|a, b| {
-            (a.0, &a.1.id, &a.1.path).cmp(&(b.0, &b.1.id, &b.1.path))
-        });
+        decorated.sort_by(|a, b| (a.0, &a.1.id, &a.1.path).cmp(&(b.0, &b.1.id, &b.1.path)));
         IncomingReferences {
-            items: decorated.into_iter().map(|(_, reference)| reference).collect(),
+            items: decorated
+                .into_iter()
+                .map(|(_, reference)| reference)
+                .collect(),
             total,
         }
     }
@@ -386,9 +385,8 @@ impl GraphView {
         for current_depth in 1..=depth {
             let mut next_frontier = Vec::new();
             let mut sorted_frontier = frontier.clone();
-            sorted_frontier.sort_by(|a, b| {
-                stable_entry_order(&self.entries[*a], &self.entries[*b])
-            });
+            sorted_frontier
+                .sort_by(|a, b| stable_entry_order(&self.entries[*a], &self.entries[*b]));
             for entry_index in &sorted_frontier {
                 let mut neighbors = graph.adjacency[*entry_index].clone();
                 neighbors.sort_by(|a, b| {
@@ -487,28 +485,29 @@ impl GraphView {
             .sum();
         let relationship_bytes = |relationships: &[Relationship]| -> usize {
             relationships
-            .iter()
-            .map(|relationship| {
-                relationship.source_path.len()
-                    + relationship.relationship.len()
-                    + relationship.target.len()
-                    + relationship.resolved_path.as_ref().map_or(0, String::len)
-                    + relationship.issue.as_ref().map_or(0, String::len)
-                    + relationship
-                        .source_artifact
-                        .as_ref()
-                        .map_or(0, |path| path.source.len() + path.relative_path.len())
-                    + relationship
-                        .resolved_artifact
-                        .as_ref()
-                        .map_or(0, |path| path.source.len() + path.relative_path.len())
-            })
-            .sum()
+                .iter()
+                .map(|relationship| {
+                    relationship.source_path.len()
+                        + relationship.relationship.len()
+                        + relationship.target.len()
+                        + relationship.resolved_path.as_ref().map_or(0, String::len)
+                        + relationship.issue.as_ref().map_or(0, String::len)
+                        + relationship
+                            .source_artifact
+                            .as_ref()
+                            .map_or(0, |path| path.source.len() + path.relative_path.len())
+                        + relationship
+                            .resolved_artifact
+                            .as_ref()
+                            .map_or(0, |path| path.source.len() + path.relative_path.len())
+                })
+                .sum()
         };
         let relationship_bytes = relationship_bytes(&self.effective_graph.relationships)
-            + self.historical_graph.as_ref().map_or(0, |graph| {
-                relationship_bytes(&graph.relationships)
-            });
+            + self
+                .historical_graph
+                .as_ref()
+                .map_or(0, |graph| relationship_bytes(&graph.relationships));
         let map_key_bytes = self.entry_by_path.keys().map(String::len).sum::<usize>()
             + self
                 .entry_by_artifact_path
@@ -517,26 +516,23 @@ impl GraphView {
                 .sum::<usize>();
         let projection_payload = |graph: &RelationshipProjection| {
             graph
-            .outgoing_by_source
-            .iter()
-            .map(|indexes| indexes.len() * std::mem::size_of::<usize>())
-            .sum::<usize>()
-            + graph
-                .incoming_by_target
+                .outgoing_by_source
                 .iter()
                 .map(|indexes| indexes.len() * std::mem::size_of::<usize>())
                 .sum::<usize>()
-            + graph
-                .adjacency
-                .iter()
-                .map(|neighbors| neighbors.len() * std::mem::size_of::<(usize, usize)>())
-                .sum::<usize>()
+                + graph
+                    .incoming_by_target
+                    .iter()
+                    .map(|indexes| indexes.len() * std::mem::size_of::<usize>())
+                    .sum::<usize>()
+                + graph
+                    .adjacency
+                    .iter()
+                    .map(|neighbors| neighbors.len() * std::mem::size_of::<(usize, usize)>())
+                    .sum::<usize>()
         };
         let vector_payload_bytes = projection_payload(&self.effective_graph)
-            + self
-                .historical_graph
-                .as_ref()
-                .map_or(0, projection_payload);
+            + self.historical_graph.as_ref().map_or(0, projection_payload);
         entry_bytes + relationship_bytes + map_key_bytes + vector_payload_bytes
     }
 }
@@ -546,12 +542,7 @@ mod tests {
     use super::*;
     use rac_engine::corpus::{ArtifactKey, CorpusLayer};
 
-    fn entry(
-        layer: CorpusLayer,
-        id: &str,
-        relative_path: &str,
-        physical_path: &str,
-    ) -> IndexEntry {
+    fn entry(layer: CorpusLayer, id: &str, relative_path: &str, physical_path: &str) -> IndexEntry {
         let origin = layer.origin();
         IndexEntry {
             key: Some(ArtifactKey::new(&origin.source, id)),
@@ -628,7 +619,6 @@ mod tests {
             Some("acme/standards")
         );
     }
-
 }
 
 fn identity_projection(entry: &IndexEntry) -> IndexEntry {
@@ -672,7 +662,10 @@ impl GraphCache {
                 &[
                     ("entries", replacement.entry_count() as u64),
                     ("relationships", replacement.relationship_count() as u64),
-                    ("payload_bytes", replacement.estimated_payload_bytes() as u64),
+                    (
+                        "payload_bytes",
+                        replacement.estimated_payload_bytes() as u64,
+                    ),
                 ],
             );
             self.view = Some(replacement);
@@ -700,7 +693,10 @@ impl GraphCache {
                 &[
                     ("entries", replacement.entry_count() as u64),
                     ("relationships", replacement.relationship_count() as u64),
-                    ("payload_bytes", replacement.estimated_payload_bytes() as u64),
+                    (
+                        "payload_bytes",
+                        replacement.estimated_payload_bytes() as u64,
+                    ),
                 ],
             );
             self.view = Some(replacement);
@@ -728,7 +724,10 @@ impl GraphCache {
                 &[
                     ("entries", replacement.entry_count() as u64),
                     ("relationships", replacement.relationship_count() as u64),
-                    ("payload_bytes", replacement.estimated_payload_bytes() as u64),
+                    (
+                        "payload_bytes",
+                        replacement.estimated_payload_bytes() as u64,
+                    ),
                 ],
             );
             self.view = Some(replacement);

@@ -54,14 +54,7 @@ fn events_value(body: &str) -> Value {
     Value::Array(
         consumed_events(body)
             .into_iter()
-            .map(|e| {
-                json!([
-                    if e.heading { "h" } else { "b" },
-                    e.tag,
-                    e.line,
-                    e.content
-                ])
-            })
+            .map(|e| json!([if e.heading { "h" } else { "b" }, e.tag, e.line, e.content]))
             .collect(),
     )
 }

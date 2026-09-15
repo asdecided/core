@@ -86,15 +86,12 @@ impl From<RevisionError> for RevisionSnapshotError {
 /// like the oracle's `FileNotFoundError` arm.
 fn run_git(args: &[&str], cwd: &Path) -> Result<Output, RevisionError> {
     let mut command = git_command(args, cwd);
-    command
-        .stdin(Stdio::null())
-        .output()
-        .map_err(|_| {
-            // FileNotFoundError -> "git executable not found"; the oracle
-            // would crash on any other spawn failure — degrade to the same
-            // user-facing class (PORT-CONTRACT decision 3).
-            RevisionError::NotAGitRepository("git executable not found".to_string())
-        })
+    command.stdin(Stdio::null()).output().map_err(|_| {
+        // FileNotFoundError -> "git executable not found"; the oracle
+        // would crash on any other spawn failure — degrade to the same
+        // user-facing class (PORT-CONTRACT decision 3).
+        RevisionError::NotAGitRepository("git executable not found".to_string())
+    })
 }
 
 /// Build a read-only Git command that cannot reinterpret objects through
@@ -486,7 +483,10 @@ impl RevisionSnapshot {
                 "cannot create snapshot corpus {requested}: {error}"
             ))
         })?;
-        if excluded_roots.iter().any(|excluded| excluded == &components) {
+        if excluded_roots
+            .iter()
+            .any(|excluded| excluded == &components)
+        {
             return Ok(MaterializedPath {
                 path: destination,
                 existed: true,
@@ -661,9 +661,7 @@ impl CorpusLimits {
         const MAX_QUERY_MULTIPLIER: usize = 4;
 
         self.query_records = self.query_records.saturating_add(1);
-        if self.query_records
-            > V2_MAX_VISITED_ENTRIES.saturating_mul(MAX_QUERY_MULTIPLIER)
-        {
+        if self.query_records > V2_MAX_VISITED_ENTRIES.saturating_mul(MAX_QUERY_MULTIPLIER) {
             return Err(materialization_error(format!(
                 "revision snapshot exceeds bounded Git query overhead for {context}"
             )));
@@ -885,7 +883,9 @@ fn read_nul_record(
     let mut record = Vec::new();
     loop {
         let buffer = reader.fill_buf().map_err(|error| {
-            materialization_error(format!("cannot read git ls-tree output for {context}: {error}"))
+            materialization_error(format!(
+                "cannot read git ls-tree output for {context}: {error}"
+            ))
         })?;
         if buffer.is_empty() {
             if record.is_empty() {
@@ -948,12 +948,14 @@ fn visit_tree_command(
         .map_err(|_| {
             RevisionSnapshotError::NotAGitRepository("git executable not found".to_string())
         })?;
-    let stdout = child.stdout.take().ok_or_else(|| {
-        materialization_error("git ls-tree stdout unavailable".to_string())
-    })?;
-    let stderr = child.stderr.take().ok_or_else(|| {
-        materialization_error("git ls-tree stderr unavailable".to_string())
-    })?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| materialization_error("git ls-tree stdout unavailable".to_string()))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| materialization_error("git ls-tree stderr unavailable".to_string()))?;
     let stderr_reader = std::thread::spawn(move || drain_git_stderr(stderr));
 
     let mut stdout = BufReader::new(stdout);
@@ -1273,8 +1275,7 @@ fn collect_corpus_tasks(
         let hidden = relative.iter().any(|component| component.starts_with('.'));
         let markdown_named = relative.last().is_some_and(|name| name.ends_with(".md"));
         if entry.mode == "120000"
-            && (symlink_policy == CorpusSymlinkPolicy::RejectAll
-                || (!hidden && markdown_named))
+            && (symlink_policy == CorpusSymlinkPolicy::RejectAll || (!hidden && markdown_named))
         {
             return Err(materialization_error(format!(
                 "committed symlink is unsupported in revision snapshot corpus: {display_path}"
@@ -1412,9 +1413,10 @@ fn materialize_blob_batch(
         .map_err(|_| {
             RevisionSnapshotError::NotAGitRepository("git executable not found".to_string())
         })?;
-    let stderr = child.stderr.take().ok_or_else(|| {
-        materialization_error("git cat-file stderr unavailable".to_string())
-    })?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| materialization_error("git cat-file stderr unavailable".to_string()))?;
     let stderr_reader = std::thread::spawn(move || drain_git_stderr(stderr));
 
     let exchange_result =
@@ -1449,9 +1451,9 @@ fn materialize_blob_batch(
     let status = child
         .wait()
         .map_err(|error| materialization_error(format!("cannot wait for git cat-file: {error}")))?;
-    let stderr = stderr_reader.join().map_err(|_| {
-        materialization_error("cannot join git cat-file stderr reader".to_string())
-    })?;
+    let stderr = stderr_reader
+        .join()
+        .map_err(|_| materialization_error("cannot join git cat-file stderr reader".to_string()))?;
     let stderr = stderr.map_err(|error| {
         materialization_error(format!("cannot read git cat-file stderr: {error}"))
     })?;
@@ -1771,9 +1773,8 @@ fn submodule_name_for_path(
         if record.is_empty() {
             continue;
         }
-        let record = std::str::from_utf8(record).map_err(|_| {
-            materialization_error("committed .gitmodules is not UTF-8".to_string())
-        })?;
+        let record = std::str::from_utf8(record)
+            .map_err(|_| materialization_error("committed .gitmodules is not UTF-8".to_string()))?;
         let Some((key, value)) = record.split_once('\n') else {
             return Err(materialization_error(
                 "malformed committed .gitmodules query result".to_string(),
@@ -1792,7 +1793,10 @@ fn submodule_name_for_path(
         };
         let components: Vec<String> = name.split('/').map(str::to_string).collect();
         validate_snapshot_path(&components)?;
-        if matched.as_ref().is_some_and(|previous| previous != &components) {
+        if matched
+            .as_ref()
+            .is_some_and(|previous| previous != &components)
+        {
             return Err(materialization_error(format!(
                 "multiple committed submodule names select path {submodule_path}"
             )));
@@ -1843,7 +1847,9 @@ fn absolute_git_common_dir(repository: &Path) -> Result<Option<PathBuf>, Revisio
         repository.join(git_dir)
     };
     let git_dir = std::fs::canonicalize(git_dir).map_err(|error| {
-        materialization_error(format!("cannot resolve local Git common directory: {error}"))
+        materialization_error(format!(
+            "cannot resolve local Git common directory: {error}"
+        ))
     })?;
     Ok(Some(git_dir))
 }
@@ -1865,7 +1871,15 @@ pub fn materialize_revision(
     subpath: &str,
 ) -> Result<MaterializedRevision, RevisionError> {
     let root = Path::new(repo_root);
-    let verify = run_git(&["rev-parse", "--verify", "--quiet", &format!("{rev}^{{commit}}")], root)?;
+    let verify = run_git(
+        &[
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("{rev}^{{commit}}"),
+        ],
+        root,
+    )?;
     if !verify.status.success() {
         return Err(RevisionError::RevisionNotFound(format!(
             "unknown revision: {rev}"
@@ -2058,7 +2072,10 @@ mod tests {
     #[test]
     fn pax_path_record() {
         let payload = b"33 path=decisions/some-long-name\n";
-        assert_eq!(pax_path(payload).as_deref(), Some("decisions/some-long-name"));
+        assert_eq!(
+            pax_path(payload).as_deref(),
+            Some("decisions/some-long-name")
+        );
     }
 
     #[test]

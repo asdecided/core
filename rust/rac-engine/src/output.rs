@@ -10,6 +10,7 @@ use serde_json::{json, Map, Value};
 
 use crate::classify::{TypeScore, CONFIDENCE_THRESHOLD};
 use crate::commands::{DirectoryValidation, StdinCorpusValidation, STATUS_INVALID};
+use crate::coverage::{CoverageReport, GAP_UNAPPLIED, GAP_UNSCHEDULED, GAP_UNSCOPED};
 use crate::diff::Diff;
 use crate::doctor::{DoctorFinding, DoctorReport};
 use crate::export::{CorpusExport, DocumentsExport, ExportIdentity, GraphExport};
@@ -18,13 +19,11 @@ use crate::improve::ImprovementResult;
 use crate::inspect::{DirectoryInspection, InspectionResult};
 use crate::markdown::Requirement;
 use crate::parse::Issue;
+use crate::portfolio::PortfolioSummary;
 use crate::pycompat::{
     py_float_repr, py_format_1f, py_format_percent0, py_repr_str, py_round, py_rstrip,
 };
-use crate::coverage::{CoverageReport, GAP_UNAPPLIED, GAP_UNSCHEDULED, GAP_UNSCOPED};
-use crate::portfolio::PortfolioSummary;
 use crate::pyjson::{dumps_compact, dumps_indent2, dumps_indent2_no_ascii, py_float};
-use crate::retrieve::{scope_lookup_value, ScopeLookupResult};
 use crate::relationships::{
     RelationshipIssue, RelationshipReport, RelationshipValidation, ISSUE_DUPLICATE_IDENTIFIER,
     ISSUE_EDGE_UNSUPPORTED, ISSUE_RELATIONSHIP_CYCLE, ISSUE_SCOPE_TARGET_NOT_FOUND,
@@ -35,6 +34,7 @@ use crate::resolve::{
     Evidence, Recency, ResolutionResult, ResolvedArtifact, SearchDiagnosis, SearchResult,
     OUTCOME_RESOLVED,
 };
+use crate::retrieve::{scope_lookup_value, ScopeLookupResult};
 use crate::review::{ReviewIssue, ReviewReport};
 use crate::sentry::SentryReport;
 use crate::spec::{snake as spec_snake, spec_for, specs, ArtifactSpec};
@@ -115,7 +115,13 @@ fn pass_fail_header(ok: bool, file: &str) -> String {
 /// One issue as its two human lines: the severity line (`error` padded with
 /// three trailing spaces, `warning` with one, so the `[code]` column aligns)
 /// followed by the indented message line.
-fn push_issue_lines(lines: &mut Vec<String>, severity: &str, code: &str, location: &str, message: &str) {
+fn push_issue_lines(
+    lines: &mut Vec<String>,
+    severity: &str,
+    code: &str,
+    location: &str,
+    message: &str,
+) {
     if severity == "error" {
         lines.push(format!("  {}   [{}] {}", red("error"), code, location));
     } else {
@@ -371,7 +377,11 @@ pub fn render_validate_dir_human(result: &DirectoryValidation) -> String {
     } else {
         String::new()
     };
-    let verdict = if result.ok() { green("PASS") } else { red("FAIL") };
+    let verdict = if result.ok() {
+        green("PASS")
+    } else {
+        red("FAIL")
+    };
     let mut summary = format!(
         "{}  {} \u{2014} {} artifact(s) checked: {} valid, {} invalid{}.",
         verdict,
@@ -394,7 +404,9 @@ pub fn render_validate_dir_human(result: &DirectoryValidation) -> String {
     lines.push(summary);
     if result.checked() == 0 && result.skipped() == 0 {
         lines.push(String::new());
-        lines.push("No artifacts yet \u{2014} create your first with: decided quickstart".to_string());
+        lines.push(
+            "No artifacts yet \u{2014} create your first with: decided quickstart".to_string(),
+        );
     }
     lines.join("\n")
 }
@@ -646,7 +658,11 @@ fn sarif_relationship_reason(code: &str) -> &str {
 /// message and path can never drift from `decided relationships --sarif`
 /// (the gate's relationship paths are therefore the ENCODED uri form).
 pub(crate) fn relationship_sarif_parts(issue: &RelationshipIssue) -> (String, String) {
-    let label = issue.relationship.as_deref().unwrap_or("").replace('_', " ");
+    let label = issue
+        .relationship
+        .as_deref()
+        .unwrap_or("")
+        .replace('_', " ");
     let (message, uri) = if issue.code == ISSUE_DUPLICATE_IDENTIFIER {
         let paths = issue.paths.clone().unwrap_or_default();
         let message = format!(
@@ -825,13 +841,7 @@ pub fn render_relationship_validation_json(report: &RelationshipValidation) -> S
     payload.insert("validation_issues".into(), json!(report.issues.len()));
     payload.insert(
         "issues".into(),
-        Value::Array(
-            report
-                .issues
-                .iter()
-                .map(relationship_issue_value)
-                .collect(),
-        ),
+        Value::Array(report.issues.iter().map(relationship_issue_value).collect()),
     );
     dumps_indent2(&Value::Object(payload))
 }
@@ -1015,7 +1025,10 @@ pub fn render_schema_json(spec: &ArtifactSpec) -> String {
 }
 
 pub fn render_schema_human(spec: &ArtifactSpec) -> String {
-    let mut lines = vec![bold(&format!("Artifact Type: {}", spec.display)), String::new()];
+    let mut lines = vec![
+        bold(&format!("Artifact Type: {}", spec.display)),
+        String::new(),
+    ];
 
     let mut section_block = |title: &str, names: &[String]| {
         lines.push(bold(title));
@@ -1026,9 +1039,7 @@ pub fn render_schema_human(spec: &ArtifactSpec) -> String {
         }
         for name in names {
             lines.push(format!("  - {}", py_title(name)));
-            if let Some((_, description)) =
-                spec.descriptions.iter().find(|(k, _)| k == name)
-            {
+            if let Some((_, description)) = spec.descriptions.iter().find(|(k, _)| k == name) {
                 if !description.is_empty() {
                     lines.push(format!("      Description: {description}"));
                 }
@@ -1066,7 +1077,10 @@ fn metadata_default(section: &str, values: &[String]) -> String {
     if section == "category" && values.iter().any(|v| v == "Other") {
         return "Other".to_string();
     }
-    values.first().cloned().unwrap_or_else(|| "TODO".to_string())
+    values
+        .first()
+        .cloned()
+        .unwrap_or_else(|| "TODO".to_string())
 }
 
 /// `_starter_body(ref, section, metadata_values)`.
@@ -1083,7 +1097,11 @@ fn starter_body(spec: &ArtifactSpec, section: &str, metadata_values: &[String]) 
 pub fn render_schema_template(spec: &ArtifactSpec) -> String {
     let mut blocks: Vec<String> = vec!["# Title".to_string()];
     // template_sections = required + recommended.
-    let sections: Vec<&String> = spec.required.iter().chain(spec.recommended.iter()).collect();
+    let sections: Vec<&String> = spec
+        .required
+        .iter()
+        .chain(spec.recommended.iter())
+        .collect();
     for section in sections {
         let metadata_values: &[String] = spec
             .metadata
@@ -1101,8 +1119,7 @@ pub fn render_schema_template(spec: &ArtifactSpec) -> String {
             comments.extend(guidance.iter().cloned());
         }
         if !comments.is_empty() {
-            let rendered: Vec<String> =
-                comments.iter().map(|c| format!("<!-- {c} -->")).collect();
+            let rendered: Vec<String> = comments.iter().map(|c| format!("<!-- {c} -->")).collect();
             block.push_str("\n\n");
             block.push_str(&rendered.join("\n"));
         }
@@ -1132,7 +1149,9 @@ pub fn render_diff_human(d: &Diff) -> String {
     let mut blocks: Vec<String> = Vec::new();
 
     let req_lines = |reqs: &[Requirement]| -> Vec<String> {
-        reqs.iter().map(|r| format!("{} {}", r.id, r.text)).collect()
+        reqs.iter()
+            .map(|r| format!("{} {}", r.id, r.text))
+            .collect()
     };
 
     diff_list_block(
@@ -1194,7 +1213,12 @@ pub fn render_diff_json(d: &Diff, old_path: &str, new_path: &str) -> String {
     );
     m.insert(
         "removed_requirements".into(),
-        Value::Array(d.removed_requirements.iter().map(requirement_value).collect()),
+        Value::Array(
+            d.removed_requirements
+                .iter()
+                .map(requirement_value)
+                .collect(),
+        ),
     );
     m.insert(
         "modified_requirements".into(),
@@ -1335,7 +1359,11 @@ pub fn render_inspect_verbose(result: &InspectionResult, scores: &[TypeScore]) -
     };
 
     block("Required Matches:", &chosen.matched_required, &mut lines);
-    block("Recommended Matches:", &chosen.matched_recommended, &mut lines);
+    block(
+        "Recommended Matches:",
+        &chosen.matched_recommended,
+        &mut lines,
+    );
     if !chosen.missing.is_empty() {
         lines.push(String::new());
         lines.push(bold("Missing:"));
@@ -1514,7 +1542,11 @@ pub fn render_improve_human(result: &ImprovementResult) -> String {
     };
 
     block("Missing Required:", &result.missing_required, &mut lines);
-    block("Missing Recommended:", &result.missing_recommended, &mut lines);
+    block(
+        "Missing Recommended:",
+        &result.missing_recommended,
+        &mut lines,
+    );
     py_rstrip(&lines.join("\n")).to_string()
 }
 
@@ -1713,18 +1745,17 @@ pub fn render_stats_json(s: &PortfolioStats) -> String {
         payload.insert("decisions".into(), Value::Object(m));
     }
 
-    let mut family = |
-        key: &str,
-        count: usize,
-        valid: usize,
-        invalid: Vec<(&str, &[String], Option<&crate::corpus::ArtifactOrigin>)>,
-    | {
-        let mut m = Map::new();
-        m.insert("count".into(), json!(count));
-        m.insert("valid".into(), json!(valid));
-        m.insert("invalid".into(), invalid_files_json(&invalid));
-        payload.insert(key.into(), Value::Object(m));
-    };
+    let mut family =
+        |key: &str,
+         count: usize,
+         valid: usize,
+         invalid: Vec<(&str, &[String], Option<&crate::corpus::ArtifactOrigin>)>| {
+            let mut m = Map::new();
+            m.insert("count".into(), json!(count));
+            m.insert("valid".into(), json!(valid));
+            m.insert("invalid".into(), invalid_files_json(&invalid));
+            payload.insert(key.into(), Value::Object(m));
+        };
 
     if !s.roadmaps.is_empty() {
         let invalid: Vec<(&str, &[String], Option<&crate::corpus::ArtifactOrigin>)> = s
@@ -1763,7 +1794,10 @@ pub fn render_stats_json(s: &PortfolioStats) -> String {
                         let mut fm = Map::new();
                         fm.insert("file".into(), json!(u.path));
                         fm.insert("name".into(), json!(u.name));
-                        fm.insert("confidence".into(), crate::pyjson::py_float(py_round(u.confidence, 2)));
+                        fm.insert(
+                            "confidence".into(),
+                            crate::pyjson::py_float(py_round(u.confidence, 2)),
+                        );
                         if let Some(origin) = &u.origin {
                             fm.insert("provenance".into(), artifact_origin_value(origin));
                         }
@@ -1862,7 +1896,12 @@ pub fn render_stats_human(s: &PortfolioStats) -> String {
     lines.push(String::new());
     let by_feature = s.requirements_by_feature();
     if !by_feature.is_empty() {
-        let width = by_feature.iter().map(|f| f.name.chars().count()).max().unwrap_or(0) + 4;
+        let width = by_feature
+            .iter()
+            .map(|f| f.name.chars().count())
+            .max()
+            .unwrap_or(0)
+            + 4;
         for f in &by_feature {
             lines.push(format!(
                 "{}{}{}",
@@ -1909,7 +1948,12 @@ pub fn render_stats_human(s: &PortfolioStats) -> String {
         breakdown("Category", &s.decision_category_counts());
     }
 
-    let mut family = |label: &str, underline: &str, count: usize, valid: usize, invalid_label: &str, invalid: &[&crate::stats::ValidityStat]| {
+    let mut family = |label: &str,
+                      underline: &str,
+                      count: usize,
+                      valid: usize,
+                      invalid_label: &str,
+                      invalid: &[&crate::stats::ValidityStat]| {
         lines.push(String::new());
         lines.push(bold(label));
         lines.push(underline.to_string());
@@ -1930,13 +1974,34 @@ pub fn render_stats_human(s: &PortfolioStats) -> String {
     };
 
     if !s.roadmaps.is_empty() {
-        family("Roadmaps", "========", s.roadmap_count(), s.valid_roadmaps(), "Invalid Roadmaps", &s.invalid_roadmaps());
+        family(
+            "Roadmaps",
+            "========",
+            s.roadmap_count(),
+            s.valid_roadmaps(),
+            "Invalid Roadmaps",
+            &s.invalid_roadmaps(),
+        );
     }
     if !s.prompts.is_empty() {
-        family("Prompts", "=======", s.prompt_count(), s.valid_prompts(), "Invalid Prompts", &s.invalid_prompts());
+        family(
+            "Prompts",
+            "=======",
+            s.prompt_count(),
+            s.valid_prompts(),
+            "Invalid Prompts",
+            &s.invalid_prompts(),
+        );
     }
     if !s.designs.is_empty() {
-        family("Designs", "=======", s.design_count(), s.valid_designs(), "Invalid Designs", &s.invalid_designs());
+        family(
+            "Designs",
+            "=======",
+            s.design_count(),
+            s.valid_designs(),
+            "Invalid Designs",
+            &s.invalid_designs(),
+        );
     }
 
     if !s.unrecognized.is_empty() {
@@ -2022,7 +2087,10 @@ pub fn render_portfolio_human(s: &PortfolioSummary) -> String {
         format!("  Valid:    {}", s.relationships.valid),
         format!("  Broken:   {}", s.relationships.broken),
         format!("  Orphaned: {}", s.relationships.orphaned),
-        format!("  Coverage: {}", py_format_percent0(s.relationships.coverage)),
+        format!(
+            "  Coverage: {}",
+            py_format_percent0(s.relationships.coverage)
+        ),
     ]);
 
     if !s.attention.is_empty() {
@@ -2690,10 +2758,7 @@ pub fn render_gate_sarif(report: &GateReport) -> String {
             message: f.message.clone(),
             uri: quote_uri(&f.path),
             line: f.line,
-            properties: f
-                .origin
-                .as_ref()
-                .map(artifact_origin_value),
+            properties: f.origin.as_ref().map(artifact_origin_value),
         })
         .collect();
     sarif_document(results)
@@ -2731,7 +2796,11 @@ pub fn render_sentry_human(report: &SentryReport) -> String {
     ];
     for finding in &report.findings {
         lines.push(String::new());
-        lines.push(format!("  {} {}", red("\u{2717}"), loc(&finding.path, finding.line)));
+        lines.push(format!(
+            "  {} {}",
+            red("\u{2717}"),
+            loc(&finding.path, finding.line)
+        ));
         lines.push(format!(
             "      [{}] {}",
             finding.rule_id.as_deref().unwrap_or(finding.code),
@@ -2818,16 +2887,10 @@ pub fn render_sentry_sarif(report: &SentryReport) -> String {
             .map(|finding| SarifResult {
                 rule_id: finding.code.to_string(),
                 level: "error",
-                message: format!(
-                    "{} (decision: {})",
-                    finding.message, finding.decision_path
-                ),
+                message: format!("{} (decision: {})", finding.message, finding.decision_path),
                 uri: quote_uri(&finding.path),
                 line: finding.line,
-                properties: finding
-                    .origin
-                    .as_ref()
-                    .map(artifact_origin_value),
+                properties: finding.origin.as_ref().map(artifact_origin_value),
             })
             .collect(),
     )
@@ -3007,9 +3070,7 @@ fn agent_rules_icon(state: &str) -> String {
         crate::agent_rules::STATE_WRITTEN => "+".to_string(),
         crate::agent_rules::STATE_UPDATED => "~".to_string(),
         crate::agent_rules::STATE_IN_SYNC => green("\u{2713}"),
-        crate::agent_rules::STATE_STALE | crate::agent_rules::STATE_MISSING => {
-            red("\u{2717}")
-        }
+        crate::agent_rules::STATE_STALE | crate::agent_rules::STATE_MISSING => red("\u{2717}"),
         _ => "\u{00b7}".to_string(),
     }
 }
@@ -3030,7 +3091,12 @@ pub fn render_agent_rules_human(result: &crate::agent_rules::AgentRulesResult) -
         String::new(),
     ];
     for f in &result.files {
-        lines.push(format!("  {} {}  [{}]", agent_rules_icon(f.state), f.path, f.state));
+        lines.push(format!(
+            "  {} {}  [{}]",
+            agent_rules_icon(f.state),
+            f.path,
+            f.state
+        ));
     }
     lines.push(String::new());
     if checking {
@@ -3223,7 +3289,11 @@ pub fn render_resolve_human(artifact: &ResolvedArtifact) -> String {
         "{}\n\nType: {}\nTitle: {}\nPath: {}",
         bold(&artifact.id),
         artifact.artifact_type,
-        artifact.title.as_deref().filter(|t| !t.is_empty()).unwrap_or("\u{2014}"),
+        artifact
+            .title
+            .as_deref()
+            .filter(|t| !t.is_empty())
+            .unwrap_or("\u{2014}"),
         artifact.path
     )
 }
@@ -3276,9 +3346,7 @@ fn artifact_key_value(key: &crate::corpus::ArtifactKey) -> Value {
     json!({"source": key.source, "id": key.canonical_id})
 }
 
-pub fn composed_provenance_value(
-    provenance: &crate::composition::ComposedProvenance,
-) -> Value {
+pub fn composed_provenance_value(provenance: &crate::composition::ComposedProvenance) -> Value {
     let mut value = artifact_origin_value(&provenance.origin)
         .as_object()
         .cloned()
@@ -3368,10 +3436,7 @@ pub fn composed_artifact_provenance_value(
         .map(|provenance| composed_provenance_value(&provenance))
 }
 /// Federated resolution JSON with additive source/layer/pin provenance.
-pub fn render_resolve_json_with_origin(
-    result: &ResolutionResult,
-    include_origin: bool,
-) -> String {
+pub fn render_resolve_json_with_origin(result: &ResolutionResult, include_origin: bool) -> String {
     if result.outcome != OUTCOME_RESOLVED {
         return dumps_indent2(&resolution_error_value(result));
     }
@@ -3440,10 +3505,7 @@ pub fn evidence_value(e: &Evidence) -> Value {
     components.insert("lexical_rank".into(), json!(e.lexical_rank));
     components.insert("graph_rank".into(), json!(e.graph_rank));
     components.insert("inbound".into(), json!(e.inbound));
-    components.insert(
-        "graph_floor_ratio".into(),
-        py_float(e.graph_floor_ratio),
-    );
+    components.insert("graph_floor_ratio".into(), py_float(e.graph_floor_ratio));
     components.insert("graph_gate".into(), json!(e.graph_gate));
     ev.insert("components".into(), Value::Object(components));
     Value::Object(ev)
@@ -3679,10 +3741,7 @@ pub fn diagnosis_value(diagnosis: &SearchDiagnosis) -> Value {
     diagnosis_value_with_origin(diagnosis, false)
 }
 
-pub fn diagnosis_value_with_origin(
-    diagnosis: &SearchDiagnosis,
-    include_origin: bool,
-) -> Value {
+pub fn diagnosis_value_with_origin(diagnosis: &SearchDiagnosis, include_origin: bool) -> Value {
     let mut m = Map::new();
     m.insert("schema_version".into(), json!("1"));
     m.insert("query".into(), json!(diagnosis.query));
@@ -3815,7 +3874,10 @@ fn render_find_human_with_suffix(
             "{}  {}  {}",
             ljust(&m.id, id_w),
             ljust(&m.artifact_type, type_w),
-            m.title.as_deref().filter(|t| !t.is_empty()).unwrap_or("\u{2014}")
+            m.title
+                .as_deref()
+                .filter(|t| !t.is_empty())
+                .unwrap_or("\u{2014}")
         );
         if let Some(recency) = &m.recency {
             if recency.stale == Some(true) {
@@ -3839,8 +3901,7 @@ fn render_find_human_with_suffix(
         }
         if explain {
             if let Some(e) = &m.evidence {
-                let mut attribution =
-                    format!("field={} terms={}", e.field, e.terms.join(","));
+                let mut attribution = format!("field={} terms={}", e.field, e.terms.join(","));
                 if let Some(snippet) = &m.snippet {
                     let where_ = match m.section.as_deref() {
                         Some(s) if !s.is_empty() => format!("{s}: "),
@@ -3890,7 +3951,10 @@ pub fn render_mcp_stats_human(summary: &crate::telemetry::TelemetrySummary) -> S
         lines.push("The native decided-mcp server does not record usage telemetry; this command only reads an existing compatibility log.".to_string());
         if summary.skipped_lines != 0 {
             lines.push(String::new());
-            lines.push(format!("Skipped Unreadable Lines: {}", summary.skipped_lines));
+            lines.push(format!(
+                "Skipped Unreadable Lines: {}",
+                summary.skipped_lines
+            ));
         }
         return lines.join("\n");
     }
@@ -3916,7 +3980,10 @@ pub fn render_mcp_stats_human(summary: &crate::telemetry::TelemetrySummary) -> S
     }
     if summary.skipped_lines != 0 {
         lines.push(String::new());
-        lines.push(format!("Skipped Unreadable Lines: {}", summary.skipped_lines));
+        lines.push(format!(
+            "Skipped Unreadable Lines: {}",
+            summary.skipped_lines
+        ));
     }
     lines.join("\n")
 }
@@ -3979,7 +4046,12 @@ pub fn render_usage_human(
             } else {
                 String::new()
             };
-            lines.push(format!("  {} {}{}", ljust(&tool.tool, 16), tool.calls, errs));
+            lines.push(format!(
+                "  {} {}{}",
+                ljust(&tool.tool, 16),
+                tool.calls,
+                errs
+            ));
         }
     }
     lines.join("\n")
@@ -4002,9 +4074,17 @@ pub fn render_usage_json(
 pub fn render_skill_list_human() -> String {
     let specs = &crate::skill::BUNDLED_SKILLS;
     let mut lines = vec![bold("Bundled agent skills:"), String::new()];
-    let name_w = specs.iter().map(|s| s.name.chars().count()).max().unwrap_or(0);
+    let name_w = specs
+        .iter()
+        .map(|s| s.name.chars().count())
+        .max()
+        .unwrap_or(0);
     for spec in specs {
-        lines.push(format!("- {}  {}", ljust(spec.name, name_w), spec.description));
+        lines.push(format!(
+            "- {}  {}",
+            ljust(spec.name, name_w),
+            spec.description
+        ));
     }
     lines.join("\n")
 }
@@ -4050,9 +4130,17 @@ pub fn render_skill_install_json(installation: &crate::skill::SkillInstallation)
 pub fn render_hook_list_human() -> String {
     let specs = &crate::hook::BUNDLED_HOOKS;
     let mut lines = vec![bold("Bundled git hooks:"), String::new()];
-    let style_w = specs.iter().map(|s| s.style.chars().count()).max().unwrap_or(0);
+    let style_w = specs
+        .iter()
+        .map(|s| s.style.chars().count())
+        .max()
+        .unwrap_or(0);
     for spec in specs {
-        lines.push(format!("- {}  {}", ljust(spec.style, style_w), spec.description));
+        lines.push(format!(
+            "- {}  {}",
+            ljust(spec.style, style_w),
+            spec.description
+        ));
     }
     lines.join("\n")
 }
@@ -4211,7 +4299,11 @@ pub(crate) fn render_init_json_with_parent_corpus(
 /// Human `decided quickstart`: identity (`Initialized`/`Using`), first
 /// artifact, next step.
 pub fn render_quickstart_human(result: &crate::scaffold::QuickstartResult) -> String {
-    let verb = if result.created { "Initialized" } else { "Using" };
+    let verb = if result.created {
+        "Initialized"
+    } else {
+        "Using"
+    };
     let artifact = &result.artifact;
     format!(
         "{verb} repository key {}\nCreated {} artifact: {}\nID: {}\n\nNext: edit the TODO placeholders, then run: decided validate {}",
@@ -4256,12 +4348,20 @@ pub fn render_migrate_human(report: &crate::scaffold::MigrationReport) -> String
         .filter(|f| f.status == STATUS_SKIPPED_UNKNOWN)
         .collect();
 
-    let verb = if report.dry_run { "Would migrate" } else { "Migrated" };
+    let verb = if report.dry_run {
+        "Would migrate"
+    } else {
+        "Migrated"
+    };
     if migrated.is_empty() {
         lines.push(format!("{verb} 0 artifact(s) \u{2014} nothing to migrate."));
     } else {
         lines.push(bold(&format!("{verb} {} artifact(s):", migrated.len())));
-        let path_w = migrated.iter().map(|f| f.path.chars().count()).max().unwrap_or(0);
+        let path_w = migrated
+            .iter()
+            .map(|f| f.path.chars().count())
+            .max()
+            .unwrap_or(0);
         for f in &migrated {
             lines.push(format!(
                 "  {}  {}  ({})",
@@ -4370,7 +4470,11 @@ pub fn render_rename_human(plan: &crate::rename::RenamePlan) -> String {
             red(&format!("\u{2717} Refused: {reason}.{path}"))
         );
     }
-    let mut lines = vec![header.clone(), "=".repeat(header.chars().count()), String::new()];
+    let mut lines = vec![
+        header.clone(),
+        "=".repeat(header.chars().count()),
+        String::new(),
+    ];
     lines.push(format!(
         "Target: {}  (identity field: {})",
         plan.target_path.as_deref().unwrap_or(""),
@@ -4474,8 +4578,7 @@ pub fn render_rename_result_json(result: &crate::rename::RenameResult) -> String
 use crate::compare::{RelationshipIssueRef, CHANGE_ADDED, CHANGE_MODIFIED};
 use crate::intent::{IntentFinding, SEVERITY_WARNING as WK_SEVERITY_WARNING};
 use crate::watchkeeper::{
-    is_recommending, WatchkeeperReport, REASON_BROKEN_RELATIONSHIP,
-    REASON_VALIDATION_REGRESSION,
+    is_recommending, WatchkeeperReport, REASON_BROKEN_RELATIONSHIP, REASON_VALIDATION_REGRESSION,
 };
 
 fn wk_delta(base: usize, head: usize) -> String {
@@ -4710,11 +4813,21 @@ fn wk_diff_value(diff: &Diff) -> Value {
     let mut m = Map::new();
     m.insert(
         "added_requirements".into(),
-        Value::Array(diff.added_requirements.iter().map(wk_requirement_value).collect()),
+        Value::Array(
+            diff.added_requirements
+                .iter()
+                .map(wk_requirement_value)
+                .collect(),
+        ),
     );
     m.insert(
         "removed_requirements".into(),
-        Value::Array(diff.removed_requirements.iter().map(wk_requirement_value).collect()),
+        Value::Array(
+            diff.removed_requirements
+                .iter()
+                .map(wk_requirement_value)
+                .collect(),
+        ),
     );
     m.insert(
         "modified_requirements".into(),
@@ -4788,7 +4901,13 @@ pub fn render_watchkeeper_json(report: &WatchkeeperReport) -> String {
     rel.insert("head".into(), wk_summary_value(&relationships.head));
     rel.insert(
         "new_issues".into(),
-        Value::Array(relationships.new_issues.iter().map(wk_issue_value).collect()),
+        Value::Array(
+            relationships
+                .new_issues
+                .iter()
+                .map(wk_issue_value)
+                .collect(),
+        ),
     );
     rel.insert(
         "resolved_issues".into(),
@@ -4906,7 +5025,10 @@ pub fn render_watchkeeper_github(report: &WatchkeeperReport) -> String {
         "| Broken relationships | {} | {} |",
         relationships.base.broken, relationships.head.broken
     ));
-    lines.push(format!("| Artifacts | {} | {} |", stats.total.0, stats.total.1));
+    lines.push(format!(
+        "| Artifacts | {} | {} |",
+        stats.total.0, stats.total.1
+    ));
     if !validation.newly_invalid.is_empty() {
         lines.push(String::new());
         lines.push("Newly invalid:".to_string());

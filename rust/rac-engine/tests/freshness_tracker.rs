@@ -125,7 +125,10 @@ fn detection_barrier_catches_immediate_nested_mutation() {
     fs::write(nested.join("adr-2-two.md"), DOC.replace("ADR-1", "ADR-2")).unwrap();
     match tracker.read_model(false) {
         TrackerModel::Delta(delta) => {
-            assert_eq!(delta.materialize_derived(&root, true).index_entries.len(), 2)
+            assert_eq!(
+                delta.materialize_derived(&root, true).index_entries.len(),
+                2
+            )
         }
         TrackerModel::View(_) => panic!("nested mutation must open the delta window"),
         TrackerModel::Snapshot(_) => panic!("default tracker must serve the delta generation"),
@@ -160,7 +163,10 @@ fn watcher_setup_and_runtime_failure_degrade_to_stat() {
     fs::remove_dir_all(&corpus).unwrap();
     match tracker.read_model(false) {
         TrackerModel::Delta(delta) => {
-            assert!(delta.materialize_derived(&root, true).index_entries.is_empty())
+            assert!(delta
+                .materialize_derived(&root, true)
+                .index_entries
+                .is_empty())
         }
         TrackerModel::View(_) => panic!("root removal must open an empty delta generation"),
         TrackerModel::Snapshot(_) => panic!("default tracker must serve the delta generation"),
@@ -215,9 +221,11 @@ fn assert_delta_matches_fresh(model: &TrackerModel, root: &str, tag: &str) {
     let fresh_items = rac_engine::relationships::corpus_items(root, true);
     assert_eq!(
         generation.summary.value(root, true),
-        rac_engine::output::portfolio_summary_value(
-            &rac_engine::portfolio::portfolio_from_corpus(root, &fresh_items, true)
-        ),
+        rac_engine::output::portfolio_summary_value(&rac_engine::portfolio::portfolio_from_corpus(
+            root,
+            &fresh_items,
+            true
+        )),
         "summary generation must equal a fresh portfolio reduction"
     );
     let scope_signature = |rows: Vec<rac_engine::retrieve::ScopeRow>| {
@@ -312,13 +320,10 @@ fn assert_delta_matches_fresh(model: &TrackerModel, root: &str, tag: &str) {
             &[],
             live_only,
         );
-        let actual = generation.search.search(
-            query,
-            artifact_type,
-            &[],
-            live_only,
-            &generation.graph,
-        );
+        let actual =
+            generation
+                .search
+                .search(query, artifact_type, &[], live_only, &generation.graph);
         assert_eq!(
             rac_engine::output::search_result_value(&actual, true),
             rac_engine::output::search_result_value(&expected, true),

@@ -13,7 +13,9 @@ use std::path::{Path, PathBuf};
 use crate::classify::classify;
 use crate::identity::identity_conflict;
 use crate::parse::{Artifact, Issue};
-use crate::pycompat::{is_re_digit, py_casefold, py_is_space, py_repr_str, py_splitlines, py_strip};
+use crate::pycompat::{
+    is_re_digit, py_casefold, py_is_space, py_repr_str, py_splitlines, py_strip,
+};
 use crate::spec::{spec_for, ArtifactSpec};
 
 pub const MAX_REQUIREMENTS: usize = 50;
@@ -106,9 +108,7 @@ fn ears_if(text: &str) -> bool {
     let rest = text.trim_start_matches(py_is_space);
     let mut it = rest.chars();
     match (it.next(), it.next()) {
-        (Some(a), Some(b))
-            if a.eq_ignore_ascii_case(&'i') && b.eq_ignore_ascii_case(&'f') =>
-        {
+        (Some(a), Some(b)) if a.eq_ignore_ascii_case(&'i') && b.eq_ignore_ascii_case(&'f') => {
             match it.next() {
                 Some(c) => !is_word_char(c),
                 None => true,
@@ -244,7 +244,10 @@ fn ticketing_provider(name: &str) -> Option<(TicketValidator, &'static str)> {
         "jira" => Some((jira_key, "Jira key (e.g. PROJ-1234) or URL")),
         "github" => Some((github_ref, "GitHub issue (e.g. owner/repo#123) or URL")),
         "linear" => Some((linear_key, "Linear key (e.g. ENG-123) or URL")),
-        "azure-devops" => Some((ado_ref, "Azure DevOps work item (e.g. 1234 or AB#1234) or URL")),
+        "azure-devops" => Some((
+            ado_ref,
+            "Azure DevOps work item (e.g. 1234 or AB#1234) or URL",
+        )),
         "servicenow" => Some((servicenow_ref, "ServiceNow record (e.g. INC0010023) or URL")),
         _ => None,
     }
@@ -336,8 +339,7 @@ fn validate_ticketing_references(
     let body = artifact.section(TICKETING_SECTION).unwrap_or("");
     let mut issues = Vec::new();
     for line in py_splitlines(body) {
-        let entry =
-            py_strip(crate::identity::strip_list_marker(py_strip(line))).to_string();
+        let entry = py_strip(crate::identity::strip_list_marker(py_strip(line))).to_string();
         if !entry.is_empty() && !url_match(&entry) && !is_valid(&entry) {
             issues.push(Issue::new(
                 "error",
@@ -908,10 +910,7 @@ pub fn find_config_file(start_dir: &str) -> Option<PathBuf> {
 }
 
 /// Nearest config without walking above an optional trusted filesystem root.
-pub fn find_config_file_with_boundary(
-    start_dir: &str,
-    boundary: Option<&Path>,
-) -> Option<PathBuf> {
+pub fn find_config_file_with_boundary(start_dir: &str, boundary: Option<&Path>) -> Option<PathBuf> {
     let resolved = resolve_path(start_dir);
     let mut current: Option<&Path> = Some(resolved.as_path());
     while let Some(dir) = current {
@@ -1005,10 +1004,7 @@ fn overrides_from_mapping(pairs: &[(Yaml, Yaml)]) -> SeverityOverrides {
         return SeverityOverrides::default();
     };
     SeverityOverrides {
-        rules: parse_severity_map(
-            yaml_map_get(section, "rules"),
-            &["error", "warning", "off"],
-        ),
+        rules: parse_severity_map(yaml_map_get(section, "rules"), &["error", "warning", "off"]),
         types: parse_severity_map(yaml_map_get(section, "types"), &["error", "warning"]),
     }
 }

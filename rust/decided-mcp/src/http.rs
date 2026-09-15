@@ -20,7 +20,10 @@
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::sync::{atomic::{AtomicUsize, Ordering}, Arc, Mutex};
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc, Mutex,
+};
 use std::time::Duration;
 
 use serde_json::Value;
@@ -202,14 +205,21 @@ fn handle_connection(
         Err(error) => {
             respond(
                 &mut stream,
-                &Response { status: error.status(), body: None },
+                &Response {
+                    status: error.status(),
+                    body: None,
+                },
             );
             return;
         }
     };
     let response = {
-        let mut state = state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        let mut recorder = recorder.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut state = state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut recorder = recorder
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         route(root, &mut state, &mut recorder, path, server_budget, &req)
     };
     respond(&mut stream, &response);
@@ -260,7 +270,10 @@ fn read_request(
     if !origin_allowed(&headers, allowed_origins) {
         return Err(ReadError::OriginDenied);
     }
-    if headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("transfer-encoding")) {
+    if headers
+        .iter()
+        .any(|(k, _)| k.eq_ignore_ascii_case("transfer-encoding"))
+    {
         return Err(ReadError::BadRequest);
     }
     let mut len = None;
@@ -268,7 +281,10 @@ fn read_request(
         .iter()
         .filter(|(k, _)| k.eq_ignore_ascii_case("content-length"))
     {
-        let parsed = value.trim().parse::<usize>().map_err(|_| ReadError::BadRequest)?;
+        let parsed = value
+            .trim()
+            .parse::<usize>()
+            .map_err(|_| ReadError::BadRequest)?;
         if len.is_some_and(|previous| previous != parsed) {
             return Err(ReadError::BadRequest);
         }
@@ -282,7 +298,12 @@ fn read_request(
     if len > 0 && reader.read_exact(&mut body).is_err() {
         return Err(ReadError::BadRequest);
     }
-    Ok(Some(Request { method, target, headers, body }))
+    Ok(Some(Request {
+        method,
+        target,
+        headers,
+        body,
+    }))
 }
 
 fn read_line_limited(
@@ -333,7 +354,10 @@ fn reject_connection(mut stream: TcpStream) {
     let _ = stream.set_write_timeout(Some(HTTP_IO_TIMEOUT));
     respond(
         &mut stream,
-        &Response { status: "503 Service Unavailable", body: None },
+        &Response {
+            status: "503 Service Unavailable",
+            body: None,
+        },
     );
 }
 
@@ -356,7 +380,10 @@ struct Response {
 }
 
 fn json_response(status: &'static str, body: String) -> Response {
-    Response { status, body: Some(body) }
+    Response {
+        status,
+        body: Some(body),
+    }
 }
 
 /// Apply the streamable-HTTP status-code semantics captured from the SDK, then
@@ -370,17 +397,29 @@ fn route(
     req: &Request,
 ) -> Response {
     if req.path() != path {
-        return Response { status: "404 Not Found", body: None };
+        return Response {
+            status: "404 Not Found",
+            body: None,
+        };
     }
     match req.method.as_str() {
         // The server offers no server-initiated SSE stream (stateless, read-only,
         // emits no notifications), so it declines GET — spec-permitted, and the
         // covered POST-only clients are unaffected (declared divergence from the
         // SDK, which opens an idle stream).
-        "GET" => Response { status: "405 Method Not Allowed", body: None },
-        "DELETE" => Response { status: "405 Method Not Allowed", body: None },
+        "GET" => Response {
+            status: "405 Method Not Allowed",
+            body: None,
+        },
+        "DELETE" => Response {
+            status: "405 Method Not Allowed",
+            body: None,
+        },
         "POST" => route_post(root, state, recorder, server_budget, req),
-        _ => Response { status: "405 Method Not Allowed", body: None },
+        _ => Response {
+            status: "405 Method Not Allowed",
+            body: None,
+        },
     }
 }
 
@@ -396,14 +435,20 @@ fn route_post(
         a.contains("application/json") || a.contains("text/event-stream") || a.contains("*/*")
     });
     if !accepts_json {
-        return Response { status: "406 Not Acceptable", body: None };
+        return Response {
+            status: "406 Not Acceptable",
+            body: None,
+        };
     }
     // Content-Type must be JSON.
     let json_ct = req
         .header("content-type")
         .is_some_and(|c| c.contains("application/json"));
     if !json_ct {
-        return Response { status: "400 Bad Request", body: None };
+        return Response {
+            status: "400 Bad Request",
+            body: None,
+        };
     }
     let message: Value = match serde_json::from_slice(&req.body) {
         Ok(v) => v,
@@ -448,7 +493,10 @@ fn route_post(
     // A notification (no id) is acknowledged with 202 and no body (ADR-032:
     // nothing to return; the read-only server holds no session to advance).
     if message.get("id").is_none() {
-        return Response { status: "202 Accepted", body: None };
+        return Response {
+            status: "202 Accepted",
+            body: None,
+        };
     }
     // Attribution rides X-AsDecided-Principal: recorded by audit, never an
     // access-control input — the response is
@@ -463,9 +511,7 @@ fn route_post(
         principal.as_deref(),
         server_budget,
     );
-    let status = if era == protocol::Era::Current
-        && !protocol::current_method_supported(method)
-    {
+    let status = if era == protocol::Era::Current && !protocol::current_method_supported(method) {
         "404 Not Found"
     } else {
         "200 OK"
@@ -566,12 +612,7 @@ fn validate_current_headers(
         if expected_name.is_none() || actual_name != expected_name {
             return Err(json_response(
                 "400 Bad Request",
-                protocol::header_mismatch_frame(
-                    id_json,
-                    "Mcp-Name",
-                    expected_name,
-                    actual_name,
-                ),
+                protocol::header_mismatch_frame(id_json, "Mcp-Name", expected_name, actual_name),
             ));
         }
     }

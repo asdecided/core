@@ -2,9 +2,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use rac_engine::export::{
-    build_corpus_export, build_documents_export, build_graph_export,
-};
+use rac_engine::export::{build_corpus_export, build_documents_export, build_graph_export};
 use rac_engine::output::{render_documents_jsonl, render_export_json, render_graph_json};
 use serde_json::Value;
 
@@ -65,7 +63,10 @@ fn projection_sources(corpus: &str) -> (String, String, String, String) {
     (
         viewer["corpus"]["name"].as_str().unwrap().to_string(),
         viewer["corpus"]["source"].as_str().unwrap().to_string(),
-        documents["metadata"]["source"].as_str().unwrap().to_string(),
+        documents["metadata"]["source"]
+            .as_str()
+            .unwrap()
+            .to_string(),
         graph["source"].as_str().unwrap().to_string(),
     )
 }
@@ -91,7 +92,10 @@ fn repository_key_and_basename_fallbacks_are_deterministic() {
     let initialised = Scratch::new("key-fallback");
     initialised.write_config(Some("APP"), None);
     let (_, viewer, documents, graph) = projection_sources(&initialised.corpus());
-    assert_eq!((viewer.as_str(), documents.as_str(), graph.as_str()), ("app", "app", "app"));
+    assert_eq!(
+        (viewer.as_str(), documents.as_str(), graph.as_str()),
+        ("app", "app", "app")
+    );
 
     let uninitialised = Scratch::new("basename-fallback");
     let (_, viewer, documents, graph) = projection_sources(&uninitialised.corpus());

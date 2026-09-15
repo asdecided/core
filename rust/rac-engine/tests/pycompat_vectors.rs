@@ -8,16 +8,15 @@ use rac_engine::pycompat::*;
 use serde_json::Value;
 
 fn vectors() -> Value {
-    let path = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/vectors/pycompat.json"
-    );
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/vectors/pycompat.json");
     let text = std::fs::read_to_string(path).expect("vector file readable");
     serde_json::from_str(&text).expect("vector file parses")
 }
 
 fn rows<'a>(v: &'a Value, section: &str) -> &'a Vec<Value> {
-    v[section].as_array().unwrap_or_else(|| panic!("section {section} present"))
+    v[section]
+        .as_array()
+        .unwrap_or_else(|| panic!("section {section} present"))
 }
 
 #[test]
@@ -39,9 +38,21 @@ fn strip_matches_oracle() {
     for row in rows(&v, "strip") {
         let input = row[0].as_str().unwrap();
         let exp = row[1].as_array().unwrap();
-        assert_eq!(py_strip(input), exp[0].as_str().unwrap(), "strip({input:?})");
-        assert_eq!(py_lstrip(input), exp[1].as_str().unwrap(), "lstrip({input:?})");
-        assert_eq!(py_rstrip(input), exp[2].as_str().unwrap(), "rstrip({input:?})");
+        assert_eq!(
+            py_strip(input),
+            exp[0].as_str().unwrap(),
+            "strip({input:?})"
+        );
+        assert_eq!(
+            py_lstrip(input),
+            exp[1].as_str().unwrap(),
+            "lstrip({input:?})"
+        );
+        assert_eq!(
+            py_rstrip(input),
+            exp[2].as_str().unwrap(),
+            "rstrip({input:?})"
+        );
     }
 }
 
@@ -154,9 +165,21 @@ fn fuzz_vectors_from_env() {
         for row in rows {
             let input = row[0].as_str().unwrap();
             let exp = row[1].as_array().unwrap();
-            assert_eq!(py_strip(input), exp[0].as_str().unwrap(), "strip({input:?})");
-            assert_eq!(py_lstrip(input), exp[1].as_str().unwrap(), "lstrip({input:?})");
-            assert_eq!(py_rstrip(input), exp[2].as_str().unwrap(), "rstrip({input:?})");
+            assert_eq!(
+                py_strip(input),
+                exp[0].as_str().unwrap(),
+                "strip({input:?})"
+            );
+            assert_eq!(
+                py_lstrip(input),
+                exp[1].as_str().unwrap(),
+                "lstrip({input:?})"
+            );
+            assert_eq!(
+                py_rstrip(input),
+                exp[2].as_str().unwrap(),
+                "rstrip({input:?})"
+            );
             n += 1;
         }
     }
@@ -176,14 +199,22 @@ fn fuzz_vectors_from_env() {
     if let Some(rows) = v["repr"].as_array() {
         for row in rows {
             let input = row[0].as_str().unwrap();
-            assert_eq!(py_repr_str(input), row[1].as_str().unwrap(), "repr({input:?})");
+            assert_eq!(
+                py_repr_str(input),
+                row[1].as_str().unwrap(),
+                "repr({input:?})"
+            );
             n += 1;
         }
     }
     if let Some(rows) = v["float_repr"].as_array() {
         for row in rows {
             let x = f64::from_bits(row[0].as_u64().unwrap());
-            assert_eq!(py_float_repr(x), row[1].as_str().unwrap(), "float_repr({x:e})");
+            assert_eq!(
+                py_float_repr(x),
+                row[1].as_str().unwrap(),
+                "float_repr({x:e})"
+            );
             n += 1;
         }
     }
@@ -205,14 +236,22 @@ fn fuzz_vectors_from_env() {
     if let Some(rows) = v["format_1f"].as_array() {
         for row in rows {
             let x = f64::from_bits(row[0].as_u64().unwrap());
-            assert_eq!(py_format_1f(x), row[1].as_str().unwrap(), "format_1f({x:e})");
+            assert_eq!(
+                py_format_1f(x),
+                row[1].as_str().unwrap(),
+                "format_1f({x:e})"
+            );
             n += 1;
         }
     }
     if let Some(rows) = v["percent0"].as_array() {
         for row in rows {
             let x = f64::from_bits(row[0].as_u64().unwrap());
-            assert_eq!(py_format_percent0(x), row[1].as_str().unwrap(), "percent0({x:e})");
+            assert_eq!(
+                py_format_percent0(x),
+                row[1].as_str().unwrap(),
+                "percent0({x:e})"
+            );
             n += 1;
         }
     }

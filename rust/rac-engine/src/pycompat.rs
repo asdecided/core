@@ -64,7 +64,9 @@ pub fn set_surrogate_sentinels_active(on: bool) {
 /// the oracle would hold instead.
 pub fn sentinel_surrogate(c: char) -> Option<u32> {
     let cp = c as u32;
-    if surrogate_sentinels_active() && (SURROGATE_SENTINEL_BASE + 0x80..=SURROGATE_SENTINEL_BASE + 0xFF).contains(&cp) {
+    if surrogate_sentinels_active()
+        && (SURROGATE_SENTINEL_BASE + 0x80..=SURROGATE_SENTINEL_BASE + 0xFF).contains(&cp)
+    {
         Some(0xDC00 + (cp - SURROGATE_SENTINEL_BASE))
     } else {
         None
@@ -483,9 +485,7 @@ fn shortest_digits(x: f64, n: &str, decpt: i64) -> (String, i64) {
                 let pick_hi = match cmp_rem_half(rem) {
                     std::cmp::Ordering::Greater => true,
                     std::cmp::Ordering::Less => false,
-                    std::cmp::Ordering::Equal => {
-                        (lo.as_bytes()[d - 1] - b'0') % 2 == 1
-                    }
+                    std::cmp::Ordering::Equal => (lo.as_bytes()[d - 1] - b'0') % 2 == 1,
                 };
                 return if pick_hi {
                     (strip_trailing_zeros(&hi).to_string(), hi_decpt)
@@ -756,9 +756,7 @@ pub fn py_normpath(path: &str) -> String {
         if comp.is_empty() || comp == "." {
             continue;
         }
-        if comp != ".."
-            || (initial_slashes == 0 && comps.is_empty())
-            || comps.last() == Some(&"..")
+        if comp != ".." || (initial_slashes == 0 && comps.is_empty()) || comps.last() == Some(&"..")
         {
             comps.push(comp);
         } else if !comps.is_empty() {
@@ -873,12 +871,15 @@ mod tests {
     fn stdin_surrogateescape_decode_and_reencode() {
         let cases: &[(&[u8], &[u32])] = &[
             (b"abc", &[0x61, 0x62, 0x63]),
-            (b"---\n\xcc\n---", &[0x2d, 0x2d, 0x2d, 0x0a, 0x10FCCC, 0x0a, 0x2d, 0x2d, 0x2d]),
-            (b"\xc3\x28", &[0x10FCC3, 0x28]),               // bad continuation
+            (
+                b"---\n\xcc\n---",
+                &[0x2d, 0x2d, 0x2d, 0x0a, 0x10FCCC, 0x0a, 0x2d, 0x2d, 0x2d],
+            ),
+            (b"\xc3\x28", &[0x10FCC3, 0x28]), // bad continuation
             (b"\xf0\x9f\x98", &[0x10FCF0, 0x10FC9F, 0x10FC98]), // truncated 4-byte
             (b"\xed\xa0\x80", &[0x10FCED, 0x10FCA0, 0x10FC80]), // encoded surrogate
-            (b"\xc0\xaf", &[0x10FCC0, 0x10FCAF]),           // overlong
-            (b"\xc3\xa9", &[0xE9]),                         // valid 2-byte passes
+            (b"\xc0\xaf", &[0x10FCC0, 0x10FCAF]), // overlong
+            (b"\xc3\xa9", &[0xE9]),           // valid 2-byte passes
         ];
         for (bytes, chars) in cases {
             let s = decode_stdin_surrogateescape(bytes);
@@ -918,7 +919,10 @@ mod tests {
     #[test]
     fn relpath_contract_examples() {
         // Absolute inputs keep relpath cwd-independent in the test.
-        assert_eq!(py_relpath("/x/decisions/decisions/a.md", "/x/decisions"), "decisions/a.md");
+        assert_eq!(
+            py_relpath("/x/decisions/decisions/a.md", "/x/decisions"),
+            "decisions/a.md"
+        );
         assert_eq!(py_relpath("/x/decisions", "/x/decisions"), ".");
         assert_eq!(py_relpath("/x/other/a.md", "/x/decisions"), "../other/a.md");
         assert_eq!(py_relpath("/x/decisions/a.md", "/x/decisions/"), "a.md");

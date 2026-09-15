@@ -166,7 +166,10 @@ pub fn summarize() -> Result<TelemetrySummary, LogNotUtf8> {
 /// `TelemetrySummary.to_dict()` — pinned key order.
 pub fn summary_value(summary: &TelemetrySummary) -> Value {
     let mut m = Map::new();
-    m.insert("schema_version".into(), Value::String(SCHEMA_VERSION.into()));
+    m.insert(
+        "schema_version".into(),
+        Value::String(SCHEMA_VERSION.into()),
+    );
     m.insert("path".into(), Value::String(summary.path.clone()));
     m.insert("event_count".into(), Value::from(summary.event_count));
     m.insert("session_count".into(), Value::from(summary.session_count));

@@ -35,9 +35,7 @@ fn impact_for(code: &str) -> &'static str {
         ATTENTION_MISSING_RECOMMENDED => {
             "Recommended sections are empty, weakening the artifact's completeness."
         }
-        REVIEW_UNKNOWN_ARTIFACT => {
-            "No schema matched, so required structure cannot be checked."
-        }
+        REVIEW_UNKNOWN_ARTIFACT => "No schema matched, so required structure cannot be checked.",
         REVIEW_STALE_CORPUS => {
             "The write habit has stalled; product knowledge stops reflecting the work."
         }
@@ -348,11 +346,7 @@ pub(crate) fn drift_problem(record: &DriftRecord) -> String {
 
 // --- write-cadence nudge -----------------------------------------------------
 
-fn cadence_finding(
-    directory: &str,
-    items: &[CorpusItem],
-    window_days: i64,
-) -> Option<ReviewIssue> {
+fn cadence_finding(directory: &str, items: &[CorpusItem], window_days: i64) -> Option<ReviewIssue> {
     // most_recent = newest last-committed across recognised (non-unknown) artifacts.
     let recognised: Vec<PathBuf> = items
         .iter()

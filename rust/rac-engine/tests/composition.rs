@@ -95,12 +95,8 @@ fn item_with_canonical_and_legacy(
     let text = format!(
         "---\nschema_version: 1\nid: {canonical_id}\ntype: decision\n---\n# Qualified fixture\n\n## ID\n\n{legacy_id}\n\n## Status\n\nAccepted\n\n## Context\n\nComposition fixture.\n\n## Decision\n\nKeep qualification canonical.\n\n## Consequences\n\nAliases cannot bypass qualification.\n"
     );
-    let origin = CorpusLayer::inherited(
-        PARENT_SOURCE,
-        PARENT_ALIAS,
-        "sha256:0123456789abcdef",
-    )
-    .origin();
+    let origin =
+        CorpusLayer::inherited(PARENT_SOURCE, PARENT_ALIAS, "sha256:0123456789abcdef").origin();
     let display = format!("/runtime/{PARENT_SOURCE}/{relative_path}");
     CorpusItem::new(
         display.clone(),
@@ -240,7 +236,9 @@ fn qualified_resolution_rejects_legacy_and_unknown_aliases() {
     let corpus = ComposedCorpus::compose(Vec::new(), vec![inherited], parent(), Vec::new());
 
     assert_eq!(
-        corpus.resolve_identity("standards::STD-KWJ4VMKVSS66").outcome,
+        corpus
+            .resolve_identity("standards::STD-KWJ4VMKVSS66")
+            .outcome,
         rac_engine::resolve::OUTCOME_RESOLVED
     );
     for invalid in [

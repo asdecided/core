@@ -17,7 +17,11 @@ fn render_matches_oracle() {
     let text = std::fs::read_to_string(path).expect("vector file readable");
     let v: Value = serde_json::from_str(&text).expect("vector file parses");
     let cases = v["cases"].as_array().expect("cases present");
-    assert!(cases.len() >= 500, "expected >=500 mdhtml cases, got {}", cases.len());
+    assert!(
+        cases.len() >= 500,
+        "expected >=500 mdhtml cases, got {}",
+        cases.len()
+    );
     for case in cases {
         let name = case["name"].as_str().unwrap();
         let body = case["text"].as_str().unwrap();

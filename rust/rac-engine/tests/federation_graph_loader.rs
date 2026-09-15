@@ -130,10 +130,7 @@ fn verifies_every_diamond_route_then_deduplicates_the_logical_source() {
     assert_eq!(closure.node("acme/a").unwrap().manifest_version, Some(2));
     assert!(closure.node("acme/a").unwrap().overrides.is_some());
     let shared = closure.node("acme/shared").unwrap();
-    assert_eq!(
-        shared.source_route,
-        ["acme/root", "acme/a", "acme/shared"]
-    );
+    assert_eq!(shared.source_route, ["acme/root", "acme/a", "acme/shared"]);
     assert_eq!(shared.route_count, 2);
     assert_eq!(
         closure
@@ -390,7 +387,10 @@ fn every_inherited_regular_entry_is_checked_for_hard_links() {
         );
         let error = verify_federation(&root, "decisions").unwrap_err();
         assert_eq!(error.code, ParentCorpusErrorCode::UnsupportedFilesystem);
-        assert_eq!(error.validation_origin.as_ref().unwrap().source, "acme/root");
+        assert_eq!(
+            error.validation_origin.as_ref().unwrap().source,
+            "acme/root"
+        );
         assert_eq!(
             error.source_route.as_deref().unwrap(),
             &["acme/root", "acme/parent"]

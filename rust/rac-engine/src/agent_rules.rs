@@ -34,10 +34,22 @@ pub struct AgentRulesTarget {
 }
 
 pub const TARGETS: [AgentRulesTarget; 4] = [
-    AgentRulesTarget { client: "agents", path: "AGENTS.md" },
-    AgentRulesTarget { client: "claude", path: "CLAUDE.md" },
-    AgentRulesTarget { client: "copilot", path: ".github/copilot-instructions.md" },
-    AgentRulesTarget { client: "cursor", path: ".cursor/rules" },
+    AgentRulesTarget {
+        client: "agents",
+        path: "AGENTS.md",
+    },
+    AgentRulesTarget {
+        client: "claude",
+        path: "CLAUDE.md",
+    },
+    AgentRulesTarget {
+        client: "copilot",
+        path: ".github/copilot-instructions.md",
+    },
+    AgentRulesTarget {
+        client: "cursor",
+        path: ".cursor/rules",
+    },
 ];
 
 /// `targets_for(clients)` — always `TARGETS` order regardless of selector
@@ -107,7 +119,10 @@ impl AgentRulesResult {
 pub fn py_path_str(p: &str) -> String {
     let double_root = p.starts_with("//") && !p.starts_with("///");
     let absolute = p.starts_with('/');
-    let comps: Vec<&str> = p.split('/').filter(|c| !c.is_empty() && *c != ".").collect();
+    let comps: Vec<&str> = p
+        .split('/')
+        .filter(|c| !c.is_empty() && *c != ".")
+        .collect();
     let body = comps.join("/");
     if absolute {
         let root = if double_root { "//" } else { "/" };
@@ -287,8 +302,7 @@ fn merge_managed_block(existing: Option<&str>, block: &str) -> String {
     if let (Some(begin), Some(end)) = (begin, end) {
         if end > begin {
             let end = end + END_MARKER.len();
-            let mut merged =
-                format!("{}{}{}", &existing[..begin], block, &existing[end..]);
+            let mut merged = format!("{}{}{}", &existing[..begin], block, &existing[end..]);
             if !merged.ends_with('\n') {
                 merged.push('\n');
             }
@@ -346,7 +360,11 @@ pub fn generate_agent_rules(
         files.push(AgentRulesFileResult {
             client: target.client,
             path: target.path,
-            state: if existing.is_none() { STATE_WRITTEN } else { STATE_UPDATED },
+            state: if existing.is_none() {
+                STATE_WRITTEN
+            } else {
+                STATE_UPDATED
+            },
         });
     }
 
@@ -373,7 +391,10 @@ pub fn check_agent_rules(
         let state = if !Path::new(&dest).exists() {
             STATE_MISSING
         } else {
-            match read_text_universal(&dest).as_deref().and_then(embedded_digest) {
+            match read_text_universal(&dest)
+                .as_deref()
+                .and_then(embedded_digest)
+            {
                 None => STATE_MISSING,
                 Some(d) if d == digest => STATE_IN_SYNC,
                 Some(_) => STATE_STALE,
@@ -423,7 +444,8 @@ mod tests {
 
     #[test]
     fn merge_rules() {
-        let block = "<!-- BEGIN RAC MANAGED BLOCK (digest: d) -->\nB\n<!-- END RAC MANAGED BLOCK -->";
+        let block =
+            "<!-- BEGIN RAC MANAGED BLOCK (digest: d) -->\nB\n<!-- END RAC MANAGED BLOCK -->";
         assert_eq!(merge_managed_block(None, block), format!("{block}\n"));
         assert_eq!(merge_managed_block(Some(""), block), format!("{block}\n"));
         assert_eq!(

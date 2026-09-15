@@ -31,7 +31,11 @@ fn stdio_caps_large_artifact_payload() {
         .pointer("/result/content/0/text")
         .and_then(Value::as_str)
         .expect("tool text");
-    assert!(text.chars().count() <= 512, "{} characters", text.chars().count());
+    assert!(
+        text.chars().count() <= 512,
+        "{} characters",
+        text.chars().count()
+    );
     let payload: Value = serde_json::from_str(text).expect("serialized payload");
     assert_eq!(payload["truncated"], json!(true));
     assert!(payload["omitted"].as_i64().unwrap_or(0) > 0);

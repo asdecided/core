@@ -103,8 +103,14 @@ fn recency_matches_pinned_semantics() {
     assert_eq!(st.last_committed.as_deref(), last.as_deref());
 
     // Strictly-greater rule: age == threshold is NOT stale.
-    assert_eq!(staleness(last.as_deref(), 184, REFERENCE_EPOCH).stale, Some(false));
-    assert_eq!(staleness(last.as_deref(), 183, REFERENCE_EPOCH).stale, Some(true));
+    assert_eq!(
+        staleness(last.as_deref(), 184, REFERENCE_EPOCH).stale,
+        Some(false)
+    );
+    assert_eq!(
+        staleness(last.as_deref(), 183, REFERENCE_EPOCH).stale,
+        Some(true)
+    );
 
     // Negative committer offset stays verbatim; 2026-12-31T20:00-07:00 is
     // 2027-01-01T03:00Z -> negative exact delta floors to -1, not stale.
@@ -171,10 +177,7 @@ fn iso8601_parse_offsets() {
         Some(0),
         "offset must be subtracted to reach UTC"
     );
-    assert_eq!(
-        parse_iso8601_epoch("1970-01-01T00:00:00-01:00"),
-        Some(3600)
-    );
+    assert_eq!(parse_iso8601_epoch("1970-01-01T00:00:00-01:00"), Some(3600));
     // Compact offset form.
     assert_eq!(parse_iso8601_epoch("1970-01-01T00:00:00+0000"), Some(0));
     // Fractional seconds are ignored for whole-day math.

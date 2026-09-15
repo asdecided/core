@@ -135,11 +135,7 @@ fn all_six_tools_have_cold_warm_and_cache_disabled_graph_parity() {
             "get_artifact",
             json!({"id": "acme/standards::STD-01K000000001"}),
         ),
-        request(
-            2,
-            "search_artifacts",
-            json!({"query": "quantum ledger"}),
-        ),
+        request(2, "search_artifacts", json!({"query": "quantum ledger"})),
         request(
             3,
             "retrieve_grounding",
@@ -156,11 +152,7 @@ fn all_six_tools_have_cold_warm_and_cache_disabled_graph_parity() {
             json!({"id": "acme/product::PRD-01K000000001", "depth": 2}),
         ),
         request(6, "get_summary", json!({})),
-        request(
-            7,
-            "find_decisions",
-            json!({"path": "src/guarded.rs"}),
-        ),
+        request(7, "find_decisions", json!({"path": "src/guarded.rs"})),
     ];
 
     let uncached = run(&corpus, &["--no-cache"], &requests);
@@ -220,14 +212,20 @@ impl LiveServer {
             .expect("spawn live MCP graph server");
         let stdin = child.stdin.take().expect("live MCP stdin");
         let stdout = BufReader::new(child.stdout.take().expect("live MCP stdout"));
-        Self { child, stdin, stdout }
+        Self {
+            child,
+            stdin,
+            stdout,
+        }
     }
 
     fn send(&mut self, value: &Value) -> Value {
         writeln!(self.stdin, "{value}").expect("write live MCP request");
         self.stdin.flush().expect("flush live MCP request");
         let mut line = String::new();
-        self.stdout.read_line(&mut line).expect("read live MCP frame");
+        self.stdout
+            .read_line(&mut line)
+            .expect("read live MCP frame");
         assert!(!line.is_empty(), "live MCP process closed unexpectedly");
         serde_json::from_str(&line).expect("live MCP JSON-RPC frame")
     }
@@ -318,17 +316,32 @@ fn override_chain_is_atomic_and_historical_reads_are_explicit() {
     );
     let effective = payload(&frames[0]);
     assert_eq!(effective["id"], json!("APP-01K000000010"));
-    assert_eq!(effective["provenance"]["overrides"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        effective["provenance"]["overrides"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
     let historical = payload(&frames[1]);
     assert_eq!(historical["id"], json!("BAS-01K000000001"));
     assert_eq!(historical["provenance"]["source"], json!("acme/base"));
-    assert_eq!(historical["provenance"]["overrides"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        historical["provenance"]["overrides"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
 
     let bounded = payload(&frames[2]);
     if bounded.get("error").is_some() {
         assert!(bounded.to_string().contains("response_budget_exceeded"));
     } else {
-        assert_eq!(bounded["provenance"]["overrides"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            bounded["provenance"]["overrides"].as_array().unwrap().len(),
+            2
+        );
     }
 }
 
@@ -377,9 +390,17 @@ fn diamond_equal_paths_and_equal_ids_remain_source_aware() {
         &[
             request(1, "search_artifacts", json!({"query": "equal identity"})),
             request(2, "get_artifact", json!({"id": COMMON})),
-            request(3, "get_artifact", json!({"id": format!("acme/a::{COMMON}")})),
+            request(
+                3,
+                "get_artifact",
+                json!({"id": format!("acme/a::{COMMON}")}),
+            ),
             request(4, "get_artifact", json!({"id": format!("b::{COMMON}")})),
-            request(5, "get_artifact", json!({"id": "acme/shared::SHR-01K000000001"})),
+            request(
+                5,
+                "get_artifact",
+                json!({"id": "acme/shared::SHR-01K000000001"}),
+            ),
         ],
     );
     let matches = payload(&frames[0]);
@@ -389,7 +410,10 @@ fn diamond_equal_paths_and_equal_ids_remain_source_aware() {
         .iter()
         .map(|item| item["provenance"]["source"].as_str().unwrap())
         .collect::<std::collections::BTreeSet<_>>();
-    assert_eq!(sources, std::collections::BTreeSet::from(["acme/a", "acme/b"]));
+    assert_eq!(
+        sources,
+        std::collections::BTreeSet::from(["acme/a", "acme/b"])
+    );
     assert!(matches["matches"]
         .as_array()
         .unwrap()
@@ -402,7 +426,10 @@ fn diamond_equal_paths_and_equal_ids_remain_source_aware() {
     assert!(payload(&frames[1]).to_string().contains("ambiguous"));
     assert_eq!(payload(&frames[2])["provenance"]["source"], json!("acme/a"));
     assert_eq!(payload(&frames[3])["provenance"]["source"], json!("acme/b"));
-    assert_eq!(payload(&frames[4])["provenance"]["source"], json!("acme/shared"));
+    assert_eq!(
+        payload(&frames[4])["provenance"]["source"],
+        json!("acme/shared")
+    );
 }
 
 #[test]
@@ -493,7 +520,8 @@ fn malformed_live_manifest_presence_is_sticky_before_version_selection() {
     );
     let malformed = server.send(&call(2));
     assert_eq!(malformed["result"]["isError"], json!(true));
-    std::fs::remove_file(repo.root().join(".decided/corpus.md")).expect("remove malformed manifest");
+    std::fs::remove_file(repo.root().join(".decided/corpus.md"))
+        .expect("remove malformed manifest");
     let removed = server.send(&call(3));
     assert_eq!(removed["result"]["isError"], json!(true));
     assert!(tool_text(&removed).contains("manifest disappeared"));

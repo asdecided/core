@@ -14,9 +14,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use crate::pycompat::{py_casefold, py_is_space, py_splitlines, py_strip};
-use crate::relationships::{
-    corpus_items, resolution_index_from_rows, CorpusItem, ValidationRow,
-};
+use crate::relationships::{corpus_items, resolution_index_from_rows, CorpusItem, ValidationRow};
 use crate::spec::RELATIONSHIP_SECTIONS;
 
 // Stable reason codes for an invalid plan (part of the JSON contract).
@@ -61,11 +59,17 @@ pub struct RenamePlan {
 
 impl RenamePlan {
     pub fn reference_edits(&self) -> usize {
-        self.edits.iter().filter(|e| e.kind == KIND_REFERENCE).count()
+        self.edits
+            .iter()
+            .filter(|e| e.kind == KIND_REFERENCE)
+            .count()
     }
 
     pub fn identity_edits(&self) -> usize {
-        self.edits.iter().filter(|e| e.kind == KIND_IDENTITY).count()
+        self.edits
+            .iter()
+            .filter(|e| e.kind == KIND_IDENTITY)
+            .count()
     }
 
     pub fn files_changed(&self) -> usize {
@@ -424,7 +428,9 @@ fn reference_edits(
             .optional
             .iter()
             .filter(|section| {
-                RELATIONSHIP_SECTIONS.iter().any(|(name, _)| name == section)
+                RELATIONSHIP_SECTIONS
+                    .iter()
+                    .any(|(name, _)| name == section)
                     && item
                         .artifact
                         .section(section)
@@ -530,7 +536,12 @@ fn frontmatter_id_line(line: &str) -> Option<(String, String, String, String)> {
         if !ws_then_optional_comment(after) {
             return None;
         }
-        Some((g1, q.to_string(), body[..vlen].to_string(), after.to_string()))
+        Some((
+            g1,
+            q.to_string(),
+            body[..vlen].to_string(),
+            after.to_string(),
+        ))
     } else {
         // Unquoted: a quote anywhere before the comment fails; the lazy
         // group pushes trailing whitespace into the suffix.
@@ -722,7 +733,14 @@ fn compute_rename_internal(
 ) -> RenamePlan {
     let new_ref = py_strip(new_ref).to_string();
     if !valid_new_ref(&new_ref) {
-        return refused(directory, recursive, old_ref, &new_ref, None, REASON_NEW_INVALID);
+        return refused(
+            directory,
+            recursive,
+            old_ref,
+            &new_ref,
+            None,
+            REASON_NEW_INVALID,
+        );
     }
 
     let root = match fs::canonicalize(directory) {
@@ -762,11 +780,25 @@ fn compute_rename_internal(
     targets.sort_unstable();
     let target_path = match targets.as_slice() {
         [] => {
-            return refused(directory, recursive, old_ref, &new_ref, None, REASON_OLD_NOT_FOUND)
+            return refused(
+                directory,
+                recursive,
+                old_ref,
+                &new_ref,
+                None,
+                REASON_OLD_NOT_FOUND,
+            )
         }
         [one] => (*one).to_string(),
         _ => {
-            return refused(directory, recursive, old_ref, &new_ref, None, REASON_OLD_AMBIGUOUS)
+            return refused(
+                directory,
+                recursive,
+                old_ref,
+                &new_ref,
+                None,
+                REASON_OLD_AMBIGUOUS,
+            )
         }
     };
 
@@ -775,8 +807,7 @@ fn compute_rename_internal(
     if py_casefold(&new_ref) != py_casefold(old_ref) {
         let folded_new = py_casefold(&new_ref);
         let collides = rows.iter().any(|row| {
-            row.path != target_path
-                && row.identifiers.iter().any(|i| py_casefold(i) == folded_new)
+            row.path != target_path && row.identifiers.iter().any(|i| py_casefold(i) == folded_new)
         });
         if collides {
             return refused(
@@ -807,7 +838,14 @@ fn compute_rename_internal(
     let (identity, identity_field) = match identity_edit(target_item, old_ref, &new_ref) {
         Ok(pair) => pair,
         Err(reason) => {
-            return refused(directory, recursive, old_ref, &new_ref, Some(target_path), reason)
+            return refused(
+                directory,
+                recursive,
+                old_ref,
+                &new_ref,
+                Some(target_path),
+                reason,
+            )
         }
     };
 
@@ -863,8 +901,7 @@ fn temporary_sibling(
     kind: &str,
 ) -> Result<PathBuf, String> {
     let destination = Path::new(path);
-    check_sibling_parent(root, destination)
-        .map_err(|issue| path_issue_message("stage", &issue))?;
+    check_sibling_parent(root, destination).map_err(|issue| path_issue_message("stage", &issue))?;
     let parent = destination
         .parent()
         .ok_or_else(|| format!("rename: cannot stage {path}: path has no parent directory"))?;
@@ -873,9 +910,7 @@ fn temporary_sibling(
             ".asdecided-rename-{token}-{index}-{kind}-{attempt}.tmp"
         ));
         match fs::symlink_metadata(&candidate) {
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Ok(candidate)
-            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(candidate),
             Ok(_) => continue,
             Err(error) => {
                 return Err(format!(
@@ -897,10 +932,7 @@ fn stage_text(
     injector: FailureInjector,
 ) -> Result<PathBuf, String> {
     if injector.should_fail(FailurePoint::Stage(index)) {
-        return Err(format!(
-            "injected staging failure for {}",
-            prepared.path
-        ));
+        return Err(format!("injected staging failure for {}", prepared.path));
     }
     let staged = temporary_sibling(root, &prepared.path, token, index, "stage")?;
     let mut options = OpenOptions::new();
@@ -973,7 +1005,12 @@ fn remove_installed_path(root: &Path, path: &str) -> Result<(), String> {
 
 fn restore_backup(root: &Path, entry: &StagedRenameFile) -> Result<(), String> {
     match fs::symlink_metadata(&entry.path) {
-        Ok(_) => return Err(format!("destination {} is occupied during rollback", entry.path)),
+        Ok(_) => {
+            return Err(format!(
+                "destination {} is occupied during rollback",
+                entry.path
+            ))
+        }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => {
             return Err(format!(
@@ -1074,9 +1111,7 @@ fn apply_rename_transaction(
             .map_err(|error| format!("rename: cannot inspect {path}: {error}"))?
             .permissions();
         if permissions.readonly() {
-            return Err(format!(
-                "rename: cannot write {path}: file is read-only"
-            ));
+            return Err(format!("rename: cannot write {path}: file is read-only"));
         }
         let original = std::fs::read_to_string(path)
             .map_err(|e| format!("rename: cannot read {path}: {e}"))?;
@@ -1115,7 +1150,9 @@ fn apply_rename_transaction(
             Err(error) => {
                 let cleanup_errors = cleanup_staging(&entries);
                 return if cleanup_errors.is_empty() {
-                    Err(format!("rename: staging failed: {error}; no corpus files were replaced"))
+                    Err(format!(
+                        "rename: staging failed: {error}; no corpus files were replaced"
+                    ))
                 } else {
                     Err(format!(
                         "rename: staging failed: {error}; temporary cleanup failed: {}",
@@ -1131,7 +1168,9 @@ fn apply_rename_transaction(
                 remove_temp(&staged, &mut cleanup_errors);
                 cleanup_errors.extend(cleanup_staging(&entries));
                 return if cleanup_errors.is_empty() {
-                    Err(format!("rename: staging failed: {error}; no corpus files were replaced"))
+                    Err(format!(
+                        "rename: staging failed: {error}; no corpus files were replaced"
+                    ))
                 } else {
                     Err(format!(
                         "rename: staging failed: {error}; temporary cleanup failed: {}",
@@ -1341,7 +1380,12 @@ mod tests {
         );
         assert_eq!(
             frontmatter_id_line("  id:  'RAC-A'  # note"),
-            Some(("  id:  ".into(), "'".into(), "RAC-A".into(), "  # note".into()))
+            Some((
+                "  id:  ".into(),
+                "'".into(),
+                "RAC-A".into(),
+                "  # note".into()
+            ))
         );
         assert_eq!(frontmatter_id_line("id: 'RAC"), None);
         // "ident" begins with the literal `id`, but the regex then demands
@@ -1370,11 +1414,8 @@ mod tests {
         let root = transaction_root();
         let plan = transaction_plan(&root);
 
-        let error = apply_rename_transaction(
-            &plan,
-            FailureInjector::at(FailurePoint::Replace(1)),
-        )
-        .expect_err("injected replacement must fail");
+        let error = apply_rename_transaction(&plan, FailureInjector::at(FailurePoint::Replace(1)))
+            .expect_err("injected replacement must fail");
         assert!(error.contains("corpus restored"), "{error}");
         assert_eq!(fs::read_to_string(root.join("first.md")).unwrap(), "old\n");
         assert_eq!(fs::read_to_string(root.join("second.md")).unwrap(), "old\n");

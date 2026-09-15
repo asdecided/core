@@ -33,8 +33,7 @@ fn copy_tree(source: &Path, target: &Path) {
 
 fn eval_fixture(tag: &str) -> PathBuf {
     let target = scratch(tag);
-    let source = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../fixtures/eval/federation/child");
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/eval/federation/child");
     copy_tree(&source, &target);
     target
 }
@@ -105,11 +104,7 @@ fn spawn_live(root: &Path, extra_args: &[&str]) -> (Child, ChildStdin, BufReader
     (child, stdin, stdout)
 }
 
-fn live_call(
-    stdin: &mut ChildStdin,
-    stdout: &mut BufReader<ChildStdout>,
-    call: &str,
-) -> Value {
+fn live_call(stdin: &mut ChildStdin, stdout: &mut BufReader<ChildStdout>, call: &str) -> Value {
     writeln!(stdin, "{call}").expect("write MCP request");
     stdin.flush().expect("flush MCP request");
     let mut line = String::new();
@@ -120,7 +115,9 @@ fn live_call(
 fn finish_live(child: Child, stdin: ChildStdin, stdout: BufReader<ChildStdout>) {
     drop(stdin);
     drop(stdout);
-    let output = child.wait_with_output().expect("wait for long-lived server");
+    let output = child
+        .wait_with_output()
+        .expect("wait for long-lived server");
     assert!(
         output.status.success(),
         "server failed: {}",
@@ -182,12 +179,10 @@ fn all_six_tools_share_one_verified_composition_with_or_without_cache() {
         json!("eval/standards")
     );
     assert!(search["matches"].as_array().unwrap().iter().any(|record| {
-        record["provenance"]["source"] == json!("eval/child")
-            && record.get("recency").is_some()
+        record["provenance"]["source"] == json!("eval/child") && record.get("recency").is_some()
     }));
     assert!(search["matches"].as_array().unwrap().iter().all(|record| {
-        record["provenance"]["source"] != json!("eval/standards")
-            || record.get("recency").is_none()
+        record["provenance"]["source"] != json!("eval/standards") || record.get("recency").is_none()
     }));
     let grounding = tool_value(&cached[2]);
     assert_eq!(
@@ -313,11 +308,7 @@ fn composed_exact_tools_share_source_aware_ambiguity_and_qualification() {
             request(1, "get_artifact", json!({"id": "shared"})),
             request(2, "get_related", json!({"id": "shared"})),
             request(3, "get_artifact", json!({"id": "standards::shared"})),
-            request(
-                4,
-                "get_artifact",
-                json!({"id": "other::STD-01JY4M8X2QZ7"}),
-            ),
+            request(4, "get_artifact", json!({"id": "other::STD-01JY4M8X2QZ7"})),
             request(
                 5,
                 "get_artifact",
@@ -327,10 +318,7 @@ fn composed_exact_tools_share_source_aware_ambiguity_and_qualification() {
     );
     let artifact_duplicate = tool_value(&frames[0]);
     let related_duplicate = tool_value(&frames[1]);
-    let expected_paths = json!([
-        "acme/app::shared.md",
-        "acme/standards::shared.md"
-    ]);
+    let expected_paths = json!(["acme/app::shared.md", "acme/standards::shared.md"]);
     assert_eq!(artifact_duplicate["error"], json!("duplicate"));
     assert_eq!(related_duplicate["error"], json!("duplicate"));
     assert_eq!(artifact_duplicate["paths"], expected_paths);
@@ -355,8 +343,16 @@ fn qualified_history_and_canonical_redirect_keep_complete_override_provenance() 
                 json!({"id": "standards::STD-01JY4M8X2QZ7"}),
             ),
             request(2, "get_artifact", json!({"id": "STD-01JY4M8X2QZ7"})),
-            request(3, "get_related", json!({"id": "STD-01JY4M8X2QZ7", "depth": 2})),
-            request(4, "get_related", json!({"id": "STD-01JY4M8X2QZA", "depth": 2})),
+            request(
+                3,
+                "get_related",
+                json!({"id": "STD-01JY4M8X2QZ7", "depth": 2}),
+            ),
+            request(
+                4,
+                "get_related",
+                json!({"id": "STD-01JY4M8X2QZA", "depth": 2}),
+            ),
             request(
                 5,
                 "get_related",
@@ -367,7 +363,10 @@ fn qualified_history_and_canonical_redirect_keep_complete_override_provenance() 
     let parent = tool_value(&frames[0]);
     let replacement = tool_value(&frames[1]);
     assert_eq!(parent["id"], json!("STD-01JY4M8X2QZ7"));
-    assert_eq!(parent["provenance"]["overrides"][0]["state"], json!("overridden"));
+    assert_eq!(
+        parent["provenance"]["overrides"][0]["state"],
+        json!("overridden")
+    );
     assert_eq!(replacement["id"], json!("APP-01JY4M8X2QZ8"));
     let mapping = &replacement["provenance"]["overrides"][0];
     assert_eq!(mapping["state"], json!("replacement"));
@@ -464,12 +463,14 @@ fn stale_parent_blocks_the_next_request_instead_of_serving_the_old_generation() 
     writeln!(stdin, "{query}").expect("write first request");
     stdin.flush().expect("flush first request");
     let mut first_line = String::new();
-    stdout.read_line(&mut first_line).expect("read first response");
+    stdout
+        .read_line(&mut first_line)
+        .expect("read first response");
     let first: Value = serde_json::from_str(first_line.trim()).expect("first response JSON");
     assert_eq!(first["result"]["isError"], json!(false));
 
-    let parent_file = repository
-        .join("vendor/standards/decisions/quantum-ledger-compaction-anchor.md");
+    let parent_file =
+        repository.join("vendor/standards/decisions/quantum-ledger-compaction-anchor.md");
     fs::write(&parent_file, "changed after verification\n").expect("mutate parent bytes");
     let second = request(
         2,
@@ -488,7 +489,9 @@ fn stale_parent_blocks_the_next_request_instead_of_serving_the_old_generation() 
     assert!(!tool_text(&second).contains("FEDEVAL-000000000001"));
 
     drop(stdin);
-    let output = child.wait_with_output().expect("wait for long-lived server");
+    let output = child
+        .wait_with_output()
+        .expect("wait for long-lived server");
     assert!(
         output.status.success(),
         "server failed: {}",

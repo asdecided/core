@@ -815,13 +815,12 @@ fn parse_manifest_v1_bytes(
                     "## overrides must contain exactly one fenced yaml block",
                 ));
             }
-            let value: serde_yaml::Value =
-                serde_yaml::from_str(&blocks[0]).map_err(|error| {
-                    malformed(
-                        &path,
-                        format!("## overrides YAML must be one mapping: {error}"),
-                    )
-                })?;
+            let value: serde_yaml::Value = serde_yaml::from_str(&blocks[0]).map_err(|error| {
+                malformed(
+                    &path,
+                    format!("## overrides YAML must be one mapping: {error}"),
+                )
+            })?;
             if !value.is_mapping() {
                 return Err(malformed(&path, "## overrides YAML must be one mapping"));
             }
@@ -874,11 +873,7 @@ fn validate_v2_path(value: &str, field: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_v2_path_limits(
-    path: &Path,
-    value: &str,
-    field: &str,
-) -> Result<(), ParentCorpusError> {
+fn validate_v2_path_limits(path: &Path, value: &str, field: &str) -> Result<(), ParentCorpusError> {
     if value.len() > V2_MAX_PATH_BYTES {
         return Err(limit_error(
             path,
@@ -1068,9 +1063,8 @@ fn manifest_yaml_version(yaml: &str) -> Option<u64> {
 }
 
 fn restricted_yaml_event_check(path: &Path, yaml: &str) -> Result<(), ParentCorpusError> {
-    let scan = scan_yaml_events(yaml).map_err(|(_, reason)| {
-        malformed(path, format!("version 2 YAML is invalid: {reason}"))
-    })?;
+    let scan = scan_yaml_events(yaml)
+        .map_err(|(_, reason)| malformed(path, format!("version 2 YAML is invalid: {reason}")))?;
     if let Some(line) = scan.forbidden_line {
         return Err(malformed(
             path,
@@ -1151,19 +1145,9 @@ fn parse_strict_v2_yaml(
     let mut nodes = 0;
     yaml_shape(&value, 1, &mut nodes).map_err(|reason| {
         if reason.contains("nodes") {
-            limit_error(
-                path,
-                "yaml-nodes",
-                V2_MAX_YAML_NODES,
-                V2_MAX_YAML_NODES + 1,
-            )
+            limit_error(path, "yaml-nodes", V2_MAX_YAML_NODES, V2_MAX_YAML_NODES + 1)
         } else if reason.contains("levels") {
-            limit_error(
-                path,
-                "yaml-depth",
-                V2_MAX_YAML_DEPTH,
-                V2_MAX_YAML_DEPTH + 1,
-            )
+            limit_error(path, "yaml-depth", V2_MAX_YAML_DEPTH, V2_MAX_YAML_DEPTH + 1)
         } else {
             malformed(path, reason)
         }
@@ -1411,53 +1395,50 @@ fn parse_graph_manifest_bytes(
     if override_sections.len() > 1 {
         return Err(malformed(&path, "## overrides may appear at most once"));
     }
-    let (overrides, override_mapping_bytes) =
-        if let Some((start, end)) = override_sections.first().copied() {
-            let blocks = fenced_yaml_blocks(&path, &text, start, end)?;
-            if blocks.len() != 1 {
+    let (overrides, override_mapping_bytes) = if let Some((start, end)) =
+        override_sections.first().copied()
+    {
+        let blocks = fenced_yaml_blocks(&path, &text, start, end)?;
+        if blocks.len() != 1 {
+            return Err(malformed(
+                &path,
+                "## overrides must contain exactly one fenced yaml block",
+            ));
+        }
+        let value = parse_strict_v2_yaml(&path, &blocks[0], "## overrides")?;
+        let parsed: RawGraphOverrides = serde_yaml::from_value(value.clone()).map_err(|error| {
+            malformed(
+                &path,
+                format!("invalid version 2 override mapping: {error}"),
+            )
+        })?;
+        if parsed.version != 2 {
+            return Err(malformed(
+                &path,
+                "## overrides version must match ## inherits version 2",
+            ));
+        }
+        for item in &parsed.items {
+            if item.target.is_empty() || item.replacement.is_empty() || item.rationale.is_empty() {
                 return Err(malformed(
                     &path,
-                    "## overrides must contain exactly one fenced yaml block",
+                    "version 2 override operands must be non-empty canonical references",
                 ));
             }
-            let value = parse_strict_v2_yaml(&path, &blocks[0], "## overrides")?;
-            let parsed: RawGraphOverrides =
-                serde_yaml::from_value(value.clone()).map_err(|error| {
-                    malformed(
-                        &path,
-                        format!("invalid version 2 override mapping: {error}"),
-                    )
-                })?;
-            if parsed.version != 2 {
-                return Err(malformed(
-                    &path,
-                    "## overrides version must match ## inherits version 2",
-                ));
-            }
-            for item in &parsed.items {
-                if item.target.is_empty()
-                    || item.replacement.is_empty()
-                    || item.rationale.is_empty()
-                {
-                    return Err(malformed(
-                        &path,
-                        "version 2 override operands must be non-empty canonical references",
-                    ));
-                }
-            }
-            let item_count = parsed.items.len();
-            if item_count > V2_MAX_OVERRIDES {
-                return Err(limit_error(
-                    &path,
-                    "overrides",
-                    V2_MAX_OVERRIDES,
-                    V2_MAX_OVERRIDES + 1,
-                ));
-            }
-            (Some(value), Some(blocks[0].as_bytes().to_vec()))
-        } else {
-            (None, None)
-        };
+        }
+        let item_count = parsed.items.len();
+        if item_count > V2_MAX_OVERRIDES {
+            return Err(limit_error(
+                &path,
+                "overrides",
+                V2_MAX_OVERRIDES,
+                V2_MAX_OVERRIDES + 1,
+            ));
+        }
+        (Some(value), Some(blocks[0].as_bytes().to_vec()))
+    } else {
+        (None, None)
+    };
 
     Ok(GraphCorpusManifest {
         path,
@@ -1608,7 +1589,10 @@ fn ensure_no_reparse_components(boundary: &Path, target: &Path) -> Result<(), Pa
             ParentCorpusError::at(
                 ParentCorpusErrorCode::PathEscape,
                 target,
-                format!("parent path escapes repository boundary: {}", target.display()),
+                format!(
+                    "parent path escapes repository boundary: {}",
+                    target.display()
+                ),
             )
         })?;
         let mut current = boundary.to_path_buf();
@@ -1774,15 +1758,14 @@ impl WalkMountBoundary {
     fn check(&self, target: &Path) -> Result<(), ParentCorpusError> {
         #[cfg(target_os = "linux")]
         {
-            let nested = nested_mount_from_text(&self.mountinfo, &self.boundary, target).map_err(
-                |()| {
+            let nested =
+                nested_mount_from_text(&self.mountinfo, &self.boundary, target).map_err(|()| {
                     ParentCorpusError::at(
                         ParentCorpusErrorCode::UnsupportedFilesystem,
                         target,
                         "Linux mount identity record is malformed",
                     )
-                },
-            )?;
+                })?;
             if let Some(mount) = nested {
                 return Err(ParentCorpusError::at(
                     ParentCorpusErrorCode::UnsupportedFilesystem,
@@ -1875,15 +1858,13 @@ fn opened_file_identity(file: &std::fs::File) -> Result<StableFileIdentity, ()> 
     if information.file_attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
         return Err(());
     }
-    let last_write = ((information.last_write_time.high as u64) << 32)
-        | information.last_write_time.low as u64;
+    let last_write =
+        ((information.last_write_time.high as u64) << 32) | information.last_write_time.low as u64;
     Ok(StableFileIdentity {
         device: information.volume_serial_number as u64,
-        inode: ((information.file_index_high as u64) << 32)
-            | information.file_index_low as u64,
+        inode: ((information.file_index_high as u64) << 32) | information.file_index_low as u64,
         links: information.number_of_links as u64,
-        length: ((information.file_size_high as u64) << 32)
-            | information.file_size_low as u64,
+        length: ((information.file_size_high as u64) << 32) | information.file_size_low as u64,
         changed_seconds: (last_write / 10_000_000) as i64,
         changed_nanos: ((last_write % 10_000_000) * 100) as i64,
     })
@@ -2099,7 +2080,10 @@ fn capture_stable_regular(
         return Err(ParentCorpusError::at(
             ParentCorpusErrorCode::SnapshotChanged,
             path,
-            format!("federation input changed shape during capture: {}", path.display()),
+            format!(
+                "federation input changed shape during capture: {}",
+                path.display()
+            ),
         ));
     }
     let after_identity = stable_path_identity(path, &after, false).map_err(|_| {
@@ -2135,14 +2119,8 @@ fn read_stable_regular(
     reject_hard_links: bool,
     expected_device: Option<u64>,
 ) -> Result<Vec<u8>, ParentCorpusError> {
-    capture_stable_regular(
-        path,
-        maximum,
-        dimension,
-        reject_hard_links,
-        expected_device,
-    )
-    .map(|capture| capture.bytes)
+    capture_stable_regular(path, maximum, dimension, reject_hard_links, expected_device)
+        .map(|capture| capture.bytes)
 }
 
 fn validate_regular_entry(
@@ -2154,14 +2132,20 @@ fn validate_regular_entry(
         ParentCorpusError::at(
             ParentCorpusErrorCode::SnapshotFailed,
             path,
-            format!("cannot inspect federation entry {}: {error}", path.display()),
+            format!(
+                "cannot inspect federation entry {}: {error}",
+                path.display()
+            ),
         )
     })?;
     if is_symlink_or_reparse(&before) || !before.is_file() {
         return Err(ParentCorpusError::at(
             ParentCorpusErrorCode::SymlinkTraversal,
             path,
-            format!("federation entry must be a real regular file: {}", path.display()),
+            format!(
+                "federation entry must be a real regular file: {}",
+                path.display()
+            ),
         ));
     }
     let before_identity = stable_path_identity(path, &before, false).map_err(|_| {
@@ -2175,14 +2159,20 @@ fn validate_regular_entry(
         return Err(ParentCorpusError::at(
             ParentCorpusErrorCode::UnsupportedFilesystem,
             path,
-            format!("version 2 files must have exactly one hard link: {}", path.display()),
+            format!(
+                "version 2 files must have exactly one hard link: {}",
+                path.display()
+            ),
         ));
     }
     if before_identity.device != expected_device {
         return Err(ParentCorpusError::at(
             ParentCorpusErrorCode::UnsupportedFilesystem,
             path,
-            format!("federation entry crosses a filesystem boundary: {}", path.display()),
+            format!(
+                "federation entry crosses a filesystem boundary: {}",
+                path.display()
+            ),
         ));
     }
     let file = open_no_follow(path, false).map_err(|error| {
@@ -2203,7 +2193,10 @@ fn validate_regular_entry(
         ParentCorpusError::at(
             ParentCorpusErrorCode::SnapshotChanged,
             path,
-            format!("federation entry changed during inspection {}: {error}", path.display()),
+            format!(
+                "federation entry changed during inspection {}: {error}",
+                path.display()
+            ),
         )
     })?;
     let after_identity = stable_path_identity(path, &after, false).map_err(|_| {
@@ -2221,7 +2214,10 @@ fn validate_regular_entry(
         return Err(ParentCorpusError::at(
             ParentCorpusErrorCode::SnapshotChanged,
             path,
-            format!("federation entry changed during inspection: {}", path.display()),
+            format!(
+                "federation entry changed during inspection: {}",
+                path.display()
+            ),
         ));
     }
     Ok(())
@@ -2297,14 +2293,20 @@ fn directory_device(path: &Path) -> Result<u64, ParentCorpusError> {
         ParentCorpusError::at(
             ParentCorpusErrorCode::UnsupportedFilesystem,
             path,
-            format!("opened directory identity is unavailable for {}", path.display()),
+            format!(
+                "opened directory identity is unavailable for {}",
+                path.display()
+            ),
         )
     })?;
     if before != opened {
         return Err(ParentCorpusError::at(
             ParentCorpusErrorCode::SnapshotChanged,
             path,
-            format!("federation directory changed while opening: {}", path.display()),
+            format!(
+                "federation directory changed while opening: {}",
+                path.display()
+            ),
         ));
     }
     Ok(opened.device)
@@ -2337,19 +2339,23 @@ fn snapshot_directory_v2(
         return Err(ParentCorpusError::at(
             ParentCorpusErrorCode::SymlinkTraversal,
             directory,
-            format!("inherited directory must be a real directory: {}", directory.display()),
-        ));
-    }
-    let directory_identity = stable_path_identity(directory, &directory_before, true).map_err(|_| {
-        ParentCorpusError::at(
-            ParentCorpusErrorCode::UnsupportedFilesystem,
-            directory,
             format!(
-                "stable directory identity is unavailable for {}",
+                "inherited directory must be a real directory: {}",
                 directory.display()
             ),
-        )
-    })?;
+        ));
+    }
+    let directory_identity =
+        stable_path_identity(directory, &directory_before, true).map_err(|_| {
+            ParentCorpusError::at(
+                ParentCorpusErrorCode::UnsupportedFilesystem,
+                directory,
+                format!(
+                    "stable directory identity is unavailable for {}",
+                    directory.display()
+                ),
+            )
+        })?;
     let directory_handle = open_no_follow(directory, true).map_err(|error| {
         ParentCorpusError::at(
             ParentCorpusErrorCode::SnapshotFailed,
@@ -2364,14 +2370,20 @@ fn snapshot_directory_v2(
         ParentCorpusError::at(
             ParentCorpusErrorCode::UnsupportedFilesystem,
             directory,
-            format!("opened directory identity is unavailable for {}", directory.display()),
+            format!(
+                "opened directory identity is unavailable for {}",
+                directory.display()
+            ),
         )
     })?;
     if directory_identity != opened_directory_identity {
         return Err(ParentCorpusError::at(
             ParentCorpusErrorCode::SnapshotChanged,
             directory,
-            format!("inherited directory changed while opening: {}", directory.display()),
+            format!(
+                "inherited directory changed while opening: {}",
+                directory.display()
+            ),
         ));
     }
     if directory_identity.device != expected_device {
@@ -2517,14 +2529,20 @@ fn snapshot_directory_v2(
         return Err(ParentCorpusError::at(
             ParentCorpusErrorCode::SnapshotChanged,
             directory,
-            format!("inherited directory changed shape during capture: {}", directory.display()),
+            format!(
+                "inherited directory changed shape during capture: {}",
+                directory.display()
+            ),
         ));
     }
     let opened_after_identity = opened_file_identity(&directory_handle).map_err(|_| {
         ParentCorpusError::at(
             ParentCorpusErrorCode::UnsupportedFilesystem,
             directory,
-            format!("opened directory identity is unavailable for {}", directory.display()),
+            format!(
+                "opened directory identity is unavailable for {}",
+                directory.display()
+            ),
         )
     })?;
     let after_identity = stable_path_identity(directory, &directory_after, true).map_err(|_| {
@@ -2897,7 +2915,6 @@ impl CapturedManifest {
         }
     }
 
-
     fn version(&self) -> Option<u32> {
         match self {
             Self::None => None,
@@ -2925,9 +2942,7 @@ impl CapturedManifest {
     fn override_count(&self) -> usize {
         self.overrides()
             .and_then(serde_yaml::Value::as_mapping)
-            .and_then(|mapping| {
-                mapping.get(serde_yaml::Value::String("items".to_string()))
-            })
+            .and_then(|mapping| mapping.get(serde_yaml::Value::String("items".to_string())))
             .and_then(serde_yaml::Value::as_sequence)
             .map_or(0, Vec::len)
     }
@@ -3261,7 +3276,11 @@ impl GraphVerification {
                             other.source, declaration.source
                         ),
                     )
-                    .with_graph_context(owner_origin.clone(), declared_route.clone(), 1));
+                    .with_graph_context(
+                        owner_origin.clone(),
+                        declared_route.clone(),
+                        1,
+                    ));
                 }
             }
             siblings.push((materialisation_root.clone(), declaration));
@@ -3292,7 +3311,11 @@ impl GraphVerification {
                         declaration.source, captured.source
                     ),
                 )
-                .with_graph_context(owner_origin.clone(), declared_route.clone(), 1));
+                .with_graph_context(
+                    owner_origin.clone(),
+                    declared_route.clone(),
+                    1,
+                ));
             }
             let verified_pin = if declaration.version == 1 {
                 digest_snapshot(&captured.source, &captured.config_bytes, &captured.files)
@@ -3308,7 +3331,11 @@ impl GraphVerification {
                         declaration.digest, verified_pin
                     ),
                 )
-                .with_graph_context(owner_origin.clone(), declared_route.clone(), 1));
+                .with_graph_context(
+                    owner_origin.clone(),
+                    declared_route.clone(),
+                    1,
+                ));
             }
             if owner_is_v1 && !matches!(captured.manifest, CapturedManifest::None) {
                 return Err(ParentCorpusError::at(
@@ -3319,7 +3346,11 @@ impl GraphVerification {
                         captured.source
                     ),
                 )
-                .with_graph_context(owner_origin.clone(), declared_route.clone(), 1));
+                .with_graph_context(
+                    owner_origin.clone(),
+                    declared_route.clone(),
+                    1,
+                ));
             }
             if active_sources
                 .iter()
@@ -3428,7 +3459,11 @@ impl GraphVerification {
                         V2_MAX_INHERITED_SOURCES,
                         V2_MAX_INHERITED_SOURCES + 1,
                     )
-                    .with_graph_context(node_origin.clone(), declared_route.clone(), 1));
+                    .with_graph_context(
+                        node_origin.clone(),
+                        declared_route.clone(),
+                        1,
+                    ));
                 }
                 add_limited(
                     &mut self.counters.logical_files,

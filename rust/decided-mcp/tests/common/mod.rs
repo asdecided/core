@@ -9,10 +9,8 @@ pub const CURRENT_VERSION: &str = "2026-07-28";
 pub const VERSION_META_KEY: &str = "io.modelcontextprotocol/protocolVersion";
 
 pub fn scratch(tag: &str) -> PathBuf {
-    let directory = std::env::temp_dir().join(format!(
-        "decided-mcp-protocol-{tag}-{}",
-        std::process::id()
-    ));
+    let directory =
+        std::env::temp_dir().join(format!("decided-mcp-protocol-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&directory);
     std::fs::create_dir_all(&directory).expect("create scratch corpus");
     std::fs::write(

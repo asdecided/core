@@ -448,10 +448,7 @@ fn composition_repository_root(directory: &str) -> PathBuf {
     composition_repository_root_with_boundary(directory, None)
 }
 
-fn composition_repository_root_with_boundary(
-    directory: &str,
-    boundary: Option<&Path>,
-) -> PathBuf {
+fn composition_repository_root_with_boundary(directory: &str, boundary: Option<&Path>) -> PathBuf {
     let input = Path::new(directory);
     let absolute = if input.is_absolute() {
         input.to_path_buf()
@@ -486,30 +483,28 @@ fn graph_corpus_relative(
     directory: &str,
     repository_root: &Path,
 ) -> Result<String, FederatedCorpusError> {
-    let corpus = std::fs::canonicalize(directory).map_err(|error| {
-        FederatedCorpusError::LocalSnapshot {
+    let corpus =
+        std::fs::canonicalize(directory).map_err(|error| FederatedCorpusError::LocalSnapshot {
             path: PathBuf::from(directory),
             message: error.to_string(),
-        }
-    })?;
+        })?;
     let root = std::fs::canonicalize(repository_root).map_err(|error| {
         FederatedCorpusError::LocalSnapshot {
             path: repository_root.to_path_buf(),
             message: error.to_string(),
         }
     })?;
-    let relative = corpus.strip_prefix(&root).map_err(|_| {
-        FederatedCorpusError::LocalSnapshot {
+    let relative = corpus
+        .strip_prefix(&root)
+        .map_err(|_| FederatedCorpusError::LocalSnapshot {
             path: PathBuf::from(directory),
             message: "corpus path escapes the configured repository root".to_string(),
-        }
-    })?;
+        })?;
     let text = relative.to_string_lossy().replace('\\', "/");
     if text.is_empty() {
         return Err(FederatedCorpusError::LocalSnapshot {
             path: PathBuf::from(directory),
-            message: "version-2 federation requires a repository-relative corpus path"
-                .to_string(),
+            message: "version-2 federation requires a repository-relative corpus path".to_string(),
         });
     }
     Ok(text)
@@ -613,7 +608,9 @@ fn load_verified_graph_corpus_with_boundary(
             message: "version-2 manifest changed during verification".to_string(),
         }
     })?;
-    compose_verified_federation(verified).map(Some).map_err(Into::into)
+    compose_verified_federation(verified)
+        .map(Some)
+        .map_err(Into::into)
 }
 
 /// Return the writable local layer for a configured corpus, or the released
@@ -634,18 +631,13 @@ pub fn local_writable_items(
 /// Stable `artifact_path` identity stays corpus-relative, while mutation and
 /// source-copy consumers receive the same root-prefixed `path` that a direct
 /// local walk would have produced. Physical provenance remains in `locator`.
-pub fn local_writable_projection(
-    directory: &str,
-    corpus: &ComposedCorpus,
-) -> Vec<CorpusItem> {
+pub fn local_writable_projection(directory: &str, corpus: &ComposedCorpus) -> Vec<CorpusItem> {
     corpus
         .local_items()
         .cloned()
         .map(|mut item| {
-            item.path = crate::walk::py_join(
-                directory,
-                &[item.artifact_path.relative_path.as_str()],
-            );
+            item.path =
+                crate::walk::py_join(directory, &[item.artifact_path.relative_path.as_str()]);
             item
         })
         .collect()
@@ -772,9 +764,7 @@ fn resolve_write_target(path: &Path) -> Result<PathBuf, String> {
             Component::CurDir => {}
             Component::ParentDir => {
                 if missing_components != 0 {
-                    return Err(
-                        "a '..' component follows a nonexistent path component".to_string()
-                    );
+                    return Err("a '..' component follows a nonexistent path component".to_string());
                 }
                 resolved.pop();
             }
@@ -786,8 +776,8 @@ fn resolve_write_target(path: &Path) -> Result<PathBuf, String> {
                 let candidate = resolved.join(part);
                 match std::fs::symlink_metadata(&candidate) {
                     Ok(_) => {
-                        resolved = std::fs::canonicalize(&candidate)
-                            .map_err(|error| error.to_string())?;
+                        resolved =
+                            std::fs::canonicalize(&candidate).map_err(|error| error.to_string())?;
                     }
                     Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                         resolved.push(part);
@@ -811,12 +801,11 @@ pub(crate) fn write_target_within_roots(
     let target = target.as_ref();
     let absolute = absolute_write_target(target)?;
     let lexical = lexical_normalize(&absolute);
-    let resolved = resolve_write_target(&absolute).map_err(|message| {
-        FederatedCorpusError::WriteTarget {
+    let resolved =
+        resolve_write_target(&absolute).map_err(|message| FederatedCorpusError::WriteTarget {
             path: target.to_path_buf(),
             message,
-        }
-    })?;
+        })?;
     Ok(roots.iter().any(|root| {
         resolved == *root
             || resolved.starts_with(root)
@@ -837,12 +826,11 @@ pub fn is_read_only_graph_materialised_path(
     let target = target.as_ref();
     let absolute = absolute_write_target(target)?;
     let lexical = lexical_normalize(&absolute);
-    let resolved = resolve_write_target(&absolute).map_err(|message| {
-        FederatedCorpusError::WriteTarget {
+    let resolved =
+        resolve_write_target(&absolute).map_err(|message| FederatedCorpusError::WriteTarget {
             path: target.to_path_buf(),
             message,
-        }
-    })?;
+        })?;
     let discover = |path: &Path| {
         manifest_roots(path).map_err(|message| FederatedCorpusError::WriteTarget {
             path: target.to_path_buf(),

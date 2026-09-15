@@ -863,10 +863,7 @@ impl GraphComposition {
         let coverage = if known.is_empty() {
             1.0
         } else {
-            crate::pycompat::py_round(
-                artifacts_with_relationships as f64 / known.len() as f64,
-                4,
-            )
+            crate::pycompat::py_round(artifacts_with_relationships as f64 / known.len() as f64, 4)
         };
         RelationshipSummary {
             total,

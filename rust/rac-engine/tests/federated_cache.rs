@@ -4,8 +4,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use rac_engine::corpus::{ArtifactKey, Layer};
 use rac_engine::derived_cache::{
-    capture_logical_generation, FederatedCacheError, FederatedCacheRefresh,
-    FederatedCacheTracker, LogicalGeneration, ReadModel,
+    capture_logical_generation, FederatedCacheError, FederatedCacheRefresh, FederatedCacheTracker,
+    LogicalGeneration, ReadModel,
 };
 use rac_engine::federation::{calculate_parent_digest, ParentCorpusErrorCode};
 use rac_engine::index_store::{corpus_content_hash, store_dir, STORE_LAYOUT_VERSION};
@@ -333,7 +333,9 @@ fn every_composed_input_invalidates_and_an_invalid_parent_is_never_served() {
         Err(error) => error,
         Ok(_) => panic!("stale parent bytes must not return the retained model"),
     };
-    assert!(!error.to_string().contains(&child.to_string_lossy().to_string()));
+    assert!(!error
+        .to_string()
+        .contains(&child.to_string_lossy().to_string()));
     assert_digest_mismatch(error);
     assert_eq!(tracker.current_key().unwrap(), served_key);
 
@@ -471,12 +473,13 @@ fn recursive_mode_and_exact_child_snapshot_are_generation_inputs() {
         CHILD_DECISION.replace("Child Policy", "Changed After Capture"),
     )
     .unwrap();
-    let captured_composition = rac_engine::federated_corpus::compose_verified_generation_from_snapshot(
-        &directory,
-        captured.verified_parent().unwrap(),
-        captured.child_files().unwrap(),
-    )
-    .unwrap();
+    let captured_composition =
+        rac_engine::federated_corpus::compose_verified_generation_from_snapshot(
+            &directory,
+            captured.verified_parent().unwrap(),
+            captured.child_files().unwrap(),
+        )
+        .unwrap();
     assert_eq!(
         captured_composition
             .resolve("APP-KWJ4VMKVSS65")
@@ -620,9 +623,7 @@ fn ancillary_readers_share_effective_and_local_composed_projections() {
     assert_eq!(coverage.gaps.len(), 2);
     assert!(coverage.gaps.iter().all(|gap| gap.origin.is_some()));
     let relationships = rac_engine::relationships::build_relationship_report_from_composed(
-        &directory,
-        true,
-        &corpus,
+        &directory, true, &corpus,
     );
     assert_eq!(relationships.total_files, 2);
     assert!(relationships
@@ -697,7 +698,10 @@ fn composed_portfolio_disambiguates_equal_relative_paths_by_source() {
     assert_eq!(relationship.path, "shared.md");
     assert_eq!(relationship.identifier, "APP-KWJ4VMKVSS65");
     assert_eq!(
-        relationship.origin.as_ref().map(|origin| origin.source.as_str()),
+        relationship
+            .origin
+            .as_ref()
+            .map(|origin| origin.source.as_str()),
         Some("acme/app")
     );
 
