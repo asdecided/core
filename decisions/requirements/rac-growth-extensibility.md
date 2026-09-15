@@ -29,11 +29,11 @@ same shape — discovered when present, invisible when absent.
 
 ## Requirements
 
-- [REQ-001] RAC shall discover third-party artifact specs through a declared Python entry-point group (for example `rac.artifact_specs`), resolved at runtime via `importlib.metadata`; when no third-party package is installed, every command's behaviour and output shall be unchanged from the built-in-only registry.
+- [REQ-001] RAC shall discover additional artifact specs through a spec bundle — one JSON file in the shape of the shared artifact registry, pinned by path and content digest in `.decided/config.yaml` (ADR-083, revised) — and when no bundle is pinned, every command's behaviour and output shall be unchanged from the built-in-only registry.
 - [REQ-002] A discovered spec shall satisfy the same structural contract as a built-in `ArtifactSpec` (name, display label, required and recommended section tuples); a spec that fails this contract, or whose name collides with a built-in or previously loaded type, shall be reported as a warning and skipped — it shall never alter built-in behaviour or crash a command.
-- [REQ-003] A third-party type's canonical template shall ship as a package resource of the contributing package, mirroring ADR-021: `rac new <type>` shall create an artifact from it, and the newly generated artifact shall pass baseline validation for that type.
+- [REQ-003] An additional type's starter template shall be rendered from the spec element itself (its starter bodies, descriptions, and guidance), never loaded from a separate resource or loader: `decided new <type>` shall create an artifact from it, and the newly generated artifact shall pass baseline validation for that type.
 - [REQ-004] A loaded third-party type shall participate in classification, validation, `rac schema`, and template listing through the same deterministic, section-heading-based mechanisms as built-in types, with no artifact-specific branches in core code.
-- [REQ-005] The discovery mechanism shall add no mandatory dependency to the core install and shall import nothing from a contributing package beyond its registered entry point, preserving the boundary the `explorer` extra already demonstrates.
+- [REQ-005] The discovery mechanism shall add no mandatory dependency to the engine and shall execute no third-party code at any point; a bundle is bounded, digest-verified, parsed data in the published registry element shape (ADR-115), and nothing from it runs.
 
 ## Success Metrics
 
@@ -70,6 +70,12 @@ same shape — discovered when present, invisible when absent.
 ## Draft: Third-Party Bundle Convention
 
 Blocked: GATE-2 (CLA not yet in place)
+
+Python-era packaging draft, retained as history. Under the revised ADR-083 a
+shared type ships as a spec bundle — a JSON file in the shared registry
+shape — that an adopting corpus commits and pins by digest in its
+`.decided/config.yaml`; there is no package to install. A type that proves
+general is promoted into the shared registry in `asdecided/spec`.
 
 This convention is a draft recorded for when the contribution policy
 goes live. It is not published in `docs/` and is not yet an invitation.
