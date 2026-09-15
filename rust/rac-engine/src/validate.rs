@@ -291,8 +291,26 @@ pub fn validate(
             issues.extend(validate_status_metadata(artifact, spec));
             issues.extend(validate_requirement_standards(artifact));
         }
-        _ => issues.extend(validate_requirement(artifact)),
+        // A bundle-declared type (ADR-083 decision 3): generic structural
+        // validation only, keyed on the predicate, never on a type name. An
+        // unregistered type keeps the legacy requirement fallback.
+        other => match spec_for(other) {
+            Some(spec) if !crate::spec::is_builtin(other) => {
+                issues.extend(validate_generic(artifact, spec));
+            }
+            _ => issues.extend(validate_requirement(artifact)),
+        },
     }
+    issues
+}
+
+/// Pure composition of the shared structural validators (ADR-060) for a
+/// bundle-declared type: title, required sections, status metadata. No
+/// bespoke rule may be added here — a custom type gets exactly this.
+fn validate_generic(artifact: &Artifact, spec: &ArtifactSpec) -> Vec<Issue> {
+    let mut issues = validate_title(artifact);
+    issues.extend(validate_required_sections(artifact, spec));
+    issues.extend(validate_status_metadata(artifact, spec));
     issues
 }
 
@@ -842,7 +860,7 @@ pub fn check_okf_conformance(
             continue;
         }
         checked += 1;
-        if !OKF_TYPES.contains(&entry.artifact_type) {
+        if crate::spec::okf_type_for(entry.artifact_type).is_none() {
             add_okf(
                 &mut findings,
                 "okf-unmapped-type",

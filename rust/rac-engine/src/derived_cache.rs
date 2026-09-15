@@ -175,6 +175,14 @@ pub fn corpus_hash_from_complete_manifest(manifest: &[(String, FileState)]) -> S
         hasher.update(state.content_hash.as_bytes());
         hasher.update(b"\0");
     }
+    // A pinned spec bundle changes what every row's classification means, so
+    // its digest is part of the generation identity (ADR-083 decision 9). With
+    // no bundle the preimage is exactly the pre-bundle bytes.
+    if let Some(digest) = crate::spec::active_bundle_digest() {
+        hasher.update(b"\0artifact-spec-bundle\0");
+        hasher.update(digest.as_bytes());
+        hasher.update(b"\0");
+    }
     hasher.hexdigest()
 }
 
