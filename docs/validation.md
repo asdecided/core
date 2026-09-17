@@ -68,6 +68,57 @@ A typical onboarding path: start by capping noisy types to `warning`, get CI
 green, then remove entries (or restore `error`) rule-by-rule as the corpus is
 cleaned up.
 
+## Custom artifact types (spec bundles)
+
+The five built-in types come from the shared registry that ships inside the
+binary. A repository can add its own types — a `runbook`, a `policy` — by
+committing one **spec bundle**: a JSON file in the same shape as
+`artifact-specs.json` (a top-level `artifact_specs` array of type elements),
+pinned by path and content digest in `.decided/config.yaml` (ADR-083):
+
+```yaml
+artifact_types:
+  version: 1
+  bundle:
+    path: .decided/artifact-specs.json
+    digest: sha256:<sha256 of the bundle's raw bytes, 64 lowercase hex>
+```
+
+Each element carries the registry keys — `name`, `display`, `required`,
+`recommended`, `optional`, `metadata`, `retired_status`, `descriptions`,
+`guidance`, `synonyms`, `id_field`, `starter_bodies` — plus an optional
+`okf_type`, the OKF `type` the export writes for that artifact type (default:
+the element's `display`). Section names must already be normalised (trimmed,
+lower-case, single-spaced). The digest is `sha256sum` of the file; edit the
+bundle, then re-pin.
+
+What the engine does with it:
+
+- **Built-ins always win.** The merged registry is the five built-ins in their
+  fixed order, then admitted bundle elements in file order, so classification
+  tie-breaks are stable. An element whose `name` collides with a built-in,
+  duplicates an earlier element, or fails the structural contract is skipped
+  with a warning-severity `artifact-spec-skipped` finding in `decided validate`
+  and `decided doctor`; nothing else changes.
+- **A pin that cannot be honoured is a hard error.** A malformed stanza, a
+  missing or symlinked bundle, an oversized or unparseable file, or bytes that
+  do not match the pinned digest fail `decided validate` with one error row for
+  the bundle (`artifact-spec-bundle-digest-mismatch` and its siblings, exit 1);
+  every other command refuses with `decided: <code>: <detail>` and exit 1, and
+  MCP tool calls return an error. This is the federation pin's standard.
+- **Custom types are structural only.** They classify, validate (title,
+  required sections, status metadata — no bespoke rules), appear in `schema
+  --list`, `templates`, `inspect`, `stats`, `find`, exports, and every MCP tool,
+  and `decided new <type>` scaffolds them from their starter bodies. They are
+  not relationship targets and add no edge kinds (ADR-055): a built-in
+  `## Related Decisions` reference to a custom-type artifact still reports
+  `relationship-target-type-mismatch`.
+- **Without the stanza nothing changes.** Every command's bytes, exit codes,
+  and cache keys are identical to an engine with no bundle support.
+
+The repository's own `rust/fixtures/spec-bundle/` is a worked example with a
+`runbook`, a `policy`, and a deliberately colliding element.
+
 ## SARIF output for GitHub Code Scanning
 
 `decided validate <dir> --sarif` emits a [SARIF 2.1.0](https://json-schema.org/)

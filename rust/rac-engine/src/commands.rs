@@ -77,6 +77,10 @@ pub struct DirectoryValidation {
     pub recursive: bool,
     pub files: Vec<FileValidation>,
     pub okf: Option<OkfConformanceReport>,
+    /// The pinned spec bundle behind this run's registry (ADR-083): its
+    /// admitted types and skipped elements. Absent — and rendered as nothing —
+    /// for a corpus with no `artifact_types` stanza.
+    pub bundle: Option<&'static crate::spec::SpecBundle>,
 }
 
 impl DirectoryValidation {
@@ -190,6 +194,7 @@ pub fn validate_directory(directory: &str, recursive: bool) -> DirectoryValidati
         recursive,
         files,
         okf: Some(okf),
+        bundle: crate::spec::active_bundle(),
     }
 }
 
@@ -264,6 +269,21 @@ pub(crate) fn validate_directory_from_items(
         recursive,
         files,
         okf: Some(check_okf_conformance(&okf_entries, &overrides)),
+        bundle: crate::spec::active_bundle(),
+    }
+}
+
+/// Bring the artifact-type registry in line with the corpus governing
+/// `start` (ADR-083): a pinned spec bundle is loaded and verified, no stanza
+/// installs the built-ins. A pin that cannot be honoured is a hard error in
+/// the federation family's shape (`decided: <code>: <detail>`, exit 1).
+fn spec_sync_or_exit(start: &str) -> Option<i32> {
+    match crate::spec::sync_registry(start) {
+        Ok(()) => None,
+        Err(error) => {
+            eprintln!("decided: {error}");
+            Some(EXIT_VALIDATION_FAILED)
+        }
     }
 }
 
@@ -540,6 +560,7 @@ pub fn validate_directory_incremental_in(
         recursive,
         files,
         okf: Some(okf),
+        bundle: crate::spec::active_bundle(),
     }
 }
 
@@ -660,11 +681,57 @@ fn manifest_failure_origin(directory: &str) -> Option<ArtifactOrigin> {
     )
 }
 
+/// The row path for a bundle pin failure: the declared bundle path when the
+/// stanza parsed, else the governing config itself.
+fn spec_bundle_failure_path(directory: &str) -> String {
+    let config = crate::validate::find_config_file(directory);
+    let declared = config
+        .as_ref()
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .and_then(|text| crate::frontmatter::yaml_load_config(&text).ok())
+        .and_then(|yaml| crate::spec::bundle_pin_from_config(&yaml).ok().flatten())
+        .map(|pin| pin.path);
+    declared.unwrap_or_else(|| ".decided/config.yaml".to_string())
+}
+
 pub fn cmd_validate(args: &ValidateArgs) -> i32 {
     // Directory? Validate every recognized artifact beneath it.
     if args.file != "-" && Path::new(&args.file).is_dir() {
         if args.corpus.is_some() {
             return usage_error("--corpus applies to stdin ('-') or a single file");
+        }
+        if let Err(error) = crate::spec::sync_registry(&args.file) {
+            // A pinned bundle the engine cannot honour fails the corpus the
+            // way a federation pin failure does: one synthetic error row for
+            // the bundle, rendered in every output mode, exit 1.
+            let result = DirectoryValidation {
+                directory: args.file.clone(),
+                recursive: !args.top_level,
+                files: vec![FileValidation {
+                    path: spec_bundle_failure_path(&args.file),
+                    artifact_type: "artifact-spec-bundle".to_string(),
+                    status: STATUS_INVALID,
+                    issues: vec![Issue::new(
+                        "error",
+                        error.stable_code(),
+                        error.detail(),
+                        None,
+                    )],
+                    origin: None,
+                    source_route: None,
+                    route_count: None,
+                }],
+                okf: None,
+                bundle: None,
+            };
+            if args.sarif {
+                emit(output::render_validate_sarif(&result));
+            } else if args.json {
+                emit(output::render_validate_dir_json(&result));
+            } else {
+                emit(output::render_validate_dir_human(&result));
+            }
+            return EXIT_VALIDATION_FAILED;
         }
         let composed = crate::federated_corpus::load_composed_corpus(&args.file, !args.top_level);
         // The cache reuses per-file results across runs (ADR-106),
@@ -708,6 +775,7 @@ pub fn cmd_validate(args: &ValidateArgs) -> i32 {
                         route_count,
                     }],
                     okf: None,
+                    bundle: None,
                 }
             }
         };
@@ -727,6 +795,14 @@ pub fn cmd_validate(args: &ValidateArgs) -> i32 {
 
     if args.sarif {
         return usage_error("--sarif applies to directory validation");
+    }
+    let registry_start = match &args.corpus {
+        Some(corpus) => corpus.clone(),
+        None if args.file == "-" => ".".to_string(),
+        None => py_path_parent(&args.file),
+    };
+    if let Some(code) = spec_sync_or_exit(&registry_start) {
+        return code;
     }
 
     let artifact = match read_validate_input(&args.file) {
@@ -873,6 +949,11 @@ pub struct InspectArgs {
 
 pub fn cmd_inspect(args: &InspectArgs) -> i32 {
     if args.file != "-" {
+        if let Some(code) = spec_sync_or_exit(&py_path_parent(&args.file)) {
+            return code;
+        }
+    }
+    if args.file != "-" {
         match crate::federated_corpus::is_read_only_graph_materialised_path(&args.file) {
             Ok(true) => {
                 return usage_error(&format!(
@@ -974,6 +1055,11 @@ pub struct ImproveArgs {
 }
 
 pub fn cmd_improve(args: &ImproveArgs) -> i32 {
+    if args.file != "-" {
+        if let Some(code) = spec_sync_or_exit(&py_path_parent(&args.file)) {
+            return code;
+        }
+    }
     let text = match read_markdown_input(&args.file, "improve") {
         Ok(t) => t,
         Err(code) => return code,
@@ -1003,6 +1089,9 @@ pub struct RelationshipsArgs {
 }
 
 pub fn cmd_relationships(args: &RelationshipsArgs) -> i32 {
+    if let Some(code) = spec_sync_or_exit(&args.path) {
+        return code;
+    }
     if args.sarif && !args.validate {
         return usage_error("relationships --sarif requires --validate");
     }
@@ -1084,6 +1173,9 @@ pub struct StatsArgs {
 }
 
 pub fn cmd_stats(args: &StatsArgs) -> i32 {
+    if let Some(code) = spec_sync_or_exit(&args.directory) {
+        return code;
+    }
     if !Path::new(&args.directory).is_dir() {
         return usage_error(&format!("not a directory: {}", args.directory));
     }
@@ -1118,6 +1210,9 @@ pub struct PortfolioArgs {
 }
 
 pub fn cmd_portfolio(args: &PortfolioArgs) -> i32 {
+    if let Some(code) = spec_sync_or_exit(&args.directory) {
+        return code;
+    }
     if !Path::new(&args.directory).is_dir() {
         return usage_error(&format!("not a directory: {}", args.directory));
     }
@@ -1152,6 +1247,9 @@ pub struct IndexArgs {
 
 /// `decided index` — the plain-walk inventory; never touches the cache.
 pub fn cmd_index(args: &IndexArgs) -> i32 {
+    if let Some(code) = spec_sync_or_exit(&args.directory) {
+        return code;
+    }
     if !Path::new(&args.directory).is_dir() {
         return usage_error(&format!("not a directory: {}", args.directory));
     }
@@ -1183,6 +1281,9 @@ pub struct CoverageArgs {
 
 /// Advisory, never a build failure: exit 0 on every valid run (REQ-005).
 pub fn cmd_coverage(args: &CoverageArgs) -> i32 {
+    if let Some(code) = spec_sync_or_exit(&args.directory) {
+        return code;
+    }
     if !Path::new(&args.directory).is_dir() {
         return usage_error(&format!("not a directory: {}", args.directory));
     }
@@ -1535,6 +1636,9 @@ pub struct DoctorArgs {
 /// relationship-integrity ERROR; orphan/hub/injection/unlinked/suspect
 /// warnings exit 0 (REQ-007).
 pub fn cmd_doctor(args: &DoctorArgs) -> i32 {
+    if let Some(code) = spec_sync_or_exit(&args.directory) {
+        return code;
+    }
     if !Path::new(&args.directory).is_dir() {
         return usage_error(&format!("not a directory: {}", args.directory));
     }
@@ -1575,6 +1679,9 @@ pub struct ReviewArgs {
 }
 
 pub fn cmd_review(args: &ReviewArgs) -> i32 {
+    if let Some(code) = spec_sync_or_exit(&args.directory) {
+        return code;
+    }
     if !Path::new(&args.directory).is_dir() {
         return usage_error(&format!("not a directory: {}", args.directory));
     }
@@ -2003,6 +2110,11 @@ pub(crate) fn cmd_export_at(args: &ExportArgs, at: Option<&str>) -> i32 {
     if args.schema.is_none() && at.is_none() && !Path::new(&args.directory).is_dir() {
         return usage_error(&format!("not a directory: {}", args.directory));
     }
+    if args.schema.is_none() {
+        if let Some(code) = spec_sync_or_exit(&args.directory) {
+            return code;
+        }
+    }
     if args.local_only && (args.okf || args.agent_rules || args.schema.is_some()) {
         return usage_error(
             "--local-only is available only for viewer, documents, and graph exports",
@@ -2299,6 +2411,9 @@ pub struct SchemaArgs {
 }
 
 pub fn cmd_schema(args: &SchemaArgs) -> i32 {
+    if let Some(code) = spec_sync_or_exit(".") {
+        return code;
+    }
     let names = crate::spec::available_schemas();
     if args.list {
         if args.template {
@@ -2340,6 +2455,9 @@ pub struct TemplatesArgs {
 }
 
 pub fn cmd_templates(args: &TemplatesArgs) -> i32 {
+    if let Some(code) = spec_sync_or_exit(".") {
+        return code;
+    }
     let names = crate::spec::available_schemas();
     if args.json {
         emit(output::render_templates_json(&names));
@@ -2409,6 +2527,9 @@ fn composed_resolution(
 }
 
 pub fn cmd_resolve(args: &ResolveArgs) -> i32 {
+    if let Some(code) = spec_sync_or_exit(&args.directory) {
+        return code;
+    }
     if !Path::new(&args.directory).is_dir() {
         return usage_error(&format!("not a directory: {}", args.directory));
     }
@@ -2768,6 +2889,9 @@ fn cmd_find_graph(args: &FindArgs, repository_root: &Path, corpus_relative: &str
 }
 
 pub fn cmd_find(args: &FindArgs) -> i32 {
+    if let Some(code) = spec_sync_or_exit(&args.directory) {
+        return code;
+    }
     if !Path::new(&args.directory).is_dir() {
         return usage_error(&format!("not a directory: {}", args.directory));
     }
@@ -2872,6 +2996,9 @@ pub struct DiagnoseArgs {
 /// Named-target explain-miss diagnostic. It calls the same directory-backed
 /// matcher and ranking path as `find`, then renders only the trace.
 pub fn cmd_diagnose(args: &DiagnoseArgs) -> i32 {
+    if let Some(code) = spec_sync_or_exit(&args.target) {
+        return code;
+    }
     if !Path::new(&args.directory).is_dir() {
         return usage_error(&format!("not a directory: {}", args.directory));
     }
@@ -2956,6 +3083,9 @@ pub struct RetrieveArgs {
 /// `--json` face emits the budget-capped serialization; the human face renders
 /// the same truncated payload. An empty `items` list is a valid answer.
 pub fn cmd_retrieve(args: &RetrieveArgs) -> i32 {
+    if let Some(code) = spec_sync_or_exit(&args.directory) {
+        return code;
+    }
     if !Path::new(&args.directory).is_dir() {
         return usage_error(&format!("not a directory: {}", args.directory));
     }
@@ -3271,6 +3401,9 @@ pub struct NewArgs {
 /// exit 1 — all stderr `decided: <msg>`.
 pub fn cmd_new(args: &NewArgs) -> i32 {
     use crate::scaffold::ScaffoldError;
+    if let Some(code) = spec_sync_or_exit(&py_path_parent(&args.output_path)) {
+        return code;
+    }
     if let Some(code) = refuse_read_only_target(&args.output_path) {
         return code;
     }
@@ -3928,6 +4061,7 @@ mod validation_provenance_tests {
                 route_count: None,
             }],
             okf: None,
+            bundle: None,
         }
     }
 
@@ -4000,6 +4134,7 @@ mod validation_provenance_tests {
                 route_count: Some(2),
             }],
             okf: None,
+            bundle: None,
         };
 
         let human = output::render_validate_dir_human(&result);

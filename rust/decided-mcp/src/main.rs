@@ -781,6 +781,10 @@ fn dispatch(
     ) {
         return Err(format!("Unknown tool: {name}"));
     }
+    // A pinned spec bundle (ADR-083) is governing config: re-read the pin on
+    // every call so a re-pin lands on the next request, and refuse to serve
+    // when the pin cannot be honoured, exactly as a federation pin failure.
+    rac_engine::spec::sync_registry(root).map_err(|error| error.to_string())?;
     let ServerState {
         repository_root,
         root_corpus_relative,
