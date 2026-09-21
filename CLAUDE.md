@@ -23,7 +23,7 @@ to the corpus artifact and they load through the imports below.
 - Historical roadmaps: `decisions/roadmaps/archive/`
 - Decisions (ADRs): `decisions/decisions/`
 
-<!-- BEGIN RAC MANAGED BLOCK (digest: 9bd32aa128aca801628967581df3ff7e0b36a1137d517b708bab47b138fe8b6f) -->
+<!-- BEGIN RAC MANAGED BLOCK (digest: 517651d99142390f757a33139dc6bcb837b0d5d76824f59069a59fd1ba0ab64a) -->
 <!-- Managed by `decided export --agent-rules`. Edit decisions in decisions/, not here; content outside this block is preserved. -->
 ## Settled decisions (AsDecided)
 
@@ -92,6 +92,7 @@ These decisions are already accepted. Do not re-open or contradict them; ask the
 - **RAC-KVSQ2A0BB9XF** — ADR-079: Note-Tool Exports Are Ingested by Normalisation, Not markitdown _(Architecture)_
 - **RAC-KVSTYDARXKYW** — ADR-080: The Single Source of Truth Is Git, Not a Database _(Architecture)_
 - **RAC-KVTS86ZGVJV7** — ADR-077: The Two-Gate Capture Write Model _(Architecture)_
+- **RAC-KVTSPK4CJHWK** — ADR-083: Third-Party Artifact Types via Pinned Spec Bundles (Schema Composition Over the Code-Defined Core) _(Architecture)_
 - **RAC-KW2YW6XK593X** — ADR-084: Read-Access Audit Recorder _(Product)_
 - **RAC-KW47GFBHK31W** — ADR-086: Air-Gap Posture and Enterprise Telemetry Hard-Lock _(Product)_
 - **RAC-KW47GGS85CKG** — ADR-087: External-Reference Relationships (Jira and Beyond) _(Technical)_
