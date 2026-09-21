@@ -8,7 +8,7 @@ tags: [extensibility, plugins, schema, spec, rust, architecture]
 
 ## Status
 
-Proposed
+Accepted
 
 **Revised 2026-09-15.** This ADR was first recorded for the Python engine, with
 discovery through a Python entry-point group (`rac.artifact_specs`, resolved by
@@ -21,8 +21,15 @@ entry-point group, no package-resource loader, no installed-package discovery
 of any kind. The original decisions 1, 3, and 5 are therefore obsolete and are
 **superseded by this revision**; they are listed at the end of the Decision
 section so the change is on the record rather than a silent edit. Decisions 2,
-4, and 6 carry forward unchanged. The status stays Proposed until the mechanism
-ships; nothing under `rust/` changes on the strength of this ADR alone.
+4, and 6 carry forward unchanged.
+
+**Accepted 2026-09-21.** The mechanism shipped in the native engine
+(asdecided/core #481, on `main` ahead of the next release): the `artifact_types`
+stanza, the pinned bundle, built-ins-first merge order, warn-and-skip per
+element, hard errors per bundle, generic structural validation, scaffolding
+from starter bodies, and the `okf_type` export mapping, with the
+`rust/fixtures/spec-bundle/` corpus and CLI and MCP suites as the executable
+record. Decision 9's federation deferral is taken up by ADR-150.
 
 ## Category
 
