@@ -339,8 +339,10 @@ documentation follows the repository's readable-prose conventions.
 
 - Whether `decided` should offer a pin helper (print the `sha256:` digest of
   a bundle file) to make re-pinning a one-liner; a CLI nicety, not a decision.
-- When to replace the leaking slot with an explicitly threaded `&Registry`
-  owned by the serving generation.
+- When to replace the leaked-registry slot with an explicitly threaded
+  `&Registry` owned by the serving generation. The leak is now bounded to one
+  registry per distinct pin a process has served (registries are memoised by
+  pin), so the remaining cost is the `&'static` shape, not growth.
 - The federation-propagation decision: whether a child inherits a parent's
   bundle, and how a same-name / different-spec collision across parents is
   adjudicated (ADR-137, ADR-147 lineage).

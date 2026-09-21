@@ -30,7 +30,7 @@
 //! consumer sees exactly the embedded five.
 
 use std::path::{Component, Path, PathBuf};
-use std::sync::{OnceLock, RwLock};
+use std::sync::{Mutex, OnceLock, RwLock};
 
 use serde_json::Value;
 
@@ -385,21 +385,54 @@ impl Registry {
 /// every reader then touches exactly the same data as before bundles existed.
 static ACTIVE: RwLock<Option<&'static Registry>> = RwLock::new(None);
 
+/// Every registry this process has built, keyed by the pin that produced it.
+/// A registry is leaked once so `&'static` keeps every consumer signature
+/// intact; a later sync that observes a pin already here reuses its registry
+/// instead of leaking another copy. The process therefore holds at most one
+/// registry per distinct pin it has served, however often a long-running
+/// server flips between pins.
+static BUILT: Mutex<Vec<(BundlePin, &'static Registry)>> = Mutex::new(Vec::new());
+
 fn active() -> Option<&'static Registry> {
     *ACTIVE
         .read()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-/// Install a merged registry for the rest of the process (or until the next
-/// [`sync_registry`] observes a different pin). The value is leaked: the
-/// registry is small, a re-pin is rare, and `&'static` keeps every existing
-/// consumer signature intact.
-fn install(registry: Option<Registry>) {
-    let leaked = registry.map(|r| &*Box::leak(Box::new(r)));
+/// Point the slot at `registry` for the rest of the process (or until the
+/// next [`sync_registry`] observes a different pin).
+fn install(registry: Option<&'static Registry>) {
     *ACTIVE
         .write()
-        .unwrap_or_else(|poisoned| poisoned.into_inner()) = leaked;
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = registry;
+}
+
+/// The registry for `pin`: the one already built for it, else `build` it once
+/// and keep it for the life of the process. The pin is the identity because
+/// its digest covers the bundle bytes; a bundle edited without a re-pin fails
+/// verification in `build` rather than silently replacing a kept registry.
+fn registry_for_pin(
+    pin: &BundlePin,
+    build: impl FnOnce() -> Result<Registry, SpecBundleError>,
+) -> Result<&'static Registry, SpecBundleError> {
+    {
+        let built = BUILT
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some((_, registry)) = built.iter().find(|(known, _)| known == pin) {
+            return Ok(registry);
+        }
+    }
+    let registry: &'static Registry = Box::leak(Box::new(build()?));
+    let mut built = BUILT
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    // Another thread may have built the same pin meanwhile; keep the first.
+    if let Some((_, existing)) = built.iter().find(|(known, _)| known == pin) {
+        return Ok(existing);
+    }
+    built.push((pin.clone(), registry));
+    Ok(registry)
 }
 
 /// The ordered spec registry (`ARTIFACT_SPECS`): requirement, decision,
@@ -996,7 +1029,7 @@ pub fn sync_registry(start_dir: &str) -> Result<(), SpecBundleError> {
         .and_then(Path::parent)
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("."));
-    let registry = load_bundle(&repository_root, &pin)?;
+    let registry = registry_for_pin(&pin, || load_bundle(&repository_root, &pin))?;
     install(Some(registry));
     Ok(())
 }
@@ -1263,6 +1296,32 @@ mod tests {
                 "{bad}"
             );
         }
+    }
+
+    #[test]
+    fn a_pin_is_built_and_leaked_at_most_once() {
+        let root = scratch("memo");
+        let pin = write_bundle(&root, &format!("{{\"artifact_specs\":[{RUNBOOK}]}}"));
+        let mut builds = 0;
+        let first = registry_for_pin(&pin, || {
+            builds += 1;
+            load_bundle(&root, &pin)
+        })
+        .unwrap();
+        let second = registry_for_pin(&pin, || {
+            builds += 1;
+            load_bundle(&root, &pin)
+        })
+        .unwrap();
+        assert!(std::ptr::eq(first, second));
+        assert_eq!(builds, 1);
+        assert_eq!(first.spec_for("runbook").unwrap().display, "Runbook");
+        // A different pin is its own registry; a failing build keeps nothing.
+        let mut other = pin.clone();
+        other.digest = format!("sha256:{}", "1".repeat(64));
+        assert!(registry_for_pin(&other, || load_bundle(&root, &other)).is_err());
+        let third = registry_for_pin(&pin, || unreachable!("memoised")).unwrap();
+        assert!(std::ptr::eq(first, third));
     }
 
     #[test]
