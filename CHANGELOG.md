@@ -46,6 +46,14 @@ details, release history over commit history.
 
 ### Fixed
 
+- `decided gate`, `sentry`, `watchkeeper`, and `rename` now load a pinned spec
+  bundle, so a bundle-type artifact that `validate` fails also fails the gate,
+  a broken pin is refused (exit 1) instead of ignored, and `rename --apply`
+  rewrites references held by bundle-type artifacts instead of leaving them
+  dangling. `inspect` and `improve` compose a federated closure, including
+  version 1, so inherited types classify, and read stdin (`-`) with the
+  working directory's registry. The `decided-mcp` startup probe no longer
+  warns that a corpus holding only bundle types is empty.
 - `decided new` and `decided migrate` in a repository with a version-2
   federation manifest, which failed with `federated-corpus-snapshot-failed`
   because the identifier-collision scan composed the repository root, a path
