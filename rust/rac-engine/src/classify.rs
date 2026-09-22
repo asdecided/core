@@ -131,7 +131,19 @@ pub fn score_artifacts(artifact: &Artifact) -> Vec<TypeScore> {
 /// `classify(product)`.
 pub fn classify(artifact: &Artifact) -> Classification {
     let scores = score_artifacts(artifact);
-    let best = &scores[0]; // 5 specs -> never empty
+    let qualifies =
+        |score: &TypeScore| score.fit >= CONFIDENCE_THRESHOLD && !score.matched_required.is_empty();
+    // Built-ins always win (ADR-083): a bundle type ranked first takes a
+    // document only when no built-in qualifies for it, so a bundle can never
+    // take classification away from a built-in artifact. With no bundle the
+    // first score is always a built-in and nothing here changes.
+    let best = match scores.first() {
+        Some(first) if !crate::spec::is_builtin(&first.name) => scores
+            .iter()
+            .find(|score| crate::spec::is_builtin(&score.name) && qualifies(score))
+            .unwrap_or(first),
+        _ => &scores[0], // 5 specs -> never empty
+    };
     if best.fit < CONFIDENCE_THRESHOLD || best.matched_required.is_empty() {
         return Classification {
             artifact_type: "unknown".to_string(),
