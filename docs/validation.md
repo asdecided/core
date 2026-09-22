@@ -105,7 +105,11 @@ What the engine does with it:
   do not match the pinned digest fail `decided validate` with one error row for
   the bundle (`artifact-spec-bundle-digest-mismatch` and its siblings, exit 1);
   every other command refuses with `decided: <code>: <detail>` and exit 1, and
-  MCP tool calls return an error. This is the federation pin's standard.
+  MCP tool calls return an error. This is the federation pin's standard. The
+  decisions-only commands `decided decisions-for` and `decided herald` read
+  decision artifacts alone and do not load the bundle. `decided watchkeeper`
+  compares both sides under the working tree's registry, because a base
+  revision is materialised from the corpus path without its config.
 - **Custom types are structural only.** They classify, validate (title,
   required sections, status metadata — no bespoke rules), appear in `schema
   --list`, `templates`, `inspect`, `stats`, `find`, exports, and every MCP tool,
