@@ -409,6 +409,68 @@ fn a_decision_backed_override_selects_the_preferred_declaration() {
 }
 
 #[test]
+fn a_type_override_rationale_resolves_across_the_whole_local_corpus() {
+    let root = fixture_copy("override-scope");
+    let policy: serde_json::Value =
+        serde_json::from_slice(&fs::read(root.join(".decided/artifact-specs.json")).unwrap())
+            .unwrap();
+    let policy = policy["artifact_specs"][0].to_string();
+    write_and_repin(
+        &root,
+        ".decided/artifact-specs.json",
+        ".decided/config.yaml",
+        &[&policy, RUNBOOK_ALT],
+    );
+    // Rationale identifiers casefold, as ADR-137 artifact-override
+    // rationales do.
+    let lowered = LIVE_RATIONALE.to_lowercase();
+    append_overrides(&root, &[("runbook", "local", &lowered)]);
+    fs::create_dir_all(root.join("decisions/runbooks")).unwrap();
+    fs::write(
+        root.join("decisions/runbooks/rotate-keys.md"),
+        "---\nschema_version: 1\nid: SPC-000000000009\ntype: runbook\n---\n# Rotate Keys\n\n## Status\n\nActive\n\n## Purpose\n\nRotate credentials.\n",
+    )
+    .unwrap();
+
+    // The Decision lives in decisions/decisions/, outside every scope below
+    // but the first; a type override is config-level policy and resolves in
+    // the declaring corpus whatever directory a command names.
+    for args in [
+        &["validate", "decisions", "--json"][..],
+        &["validate", "decisions/runbooks", "--json"],
+        &["validate", "decisions", "--top-level", "--json"],
+        &["stats", "decisions/runbooks", "--json"],
+        &["doctor", "decisions/runbooks", "--json"],
+    ] {
+        let output = run_in(&root, args);
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{args:?}: {}{}",
+            stdout(&output),
+            stderr(&output)
+        );
+    }
+    fs::create_dir_all(root.join("other")).unwrap();
+    let created = run_in(&root, &["new", "decision", "other/choice.md"]);
+    assert_eq!(created.status.code(), Some(0), "{}", stderr(&created));
+
+    // A parent's Decision is not a local rationale, in any scope.
+    let config = root.join(".decided/config.yaml");
+    let text = fs::read_to_string(&config)
+        .unwrap()
+        .replace(&lowered, "SPS-000000000002");
+    fs::write(&config, text).unwrap();
+    let output = run_in(&root, &["validate", "decisions/runbooks", "--json"]);
+    assert_eq!(output.status.code(), Some(1), "{}", stdout(&output));
+    assert!(
+        stdout(&output).contains(INVALID_OVERRIDE) && stdout(&output).contains("does not resolve"),
+        "{}",
+        stdout(&output)
+    );
+}
+
+#[test]
 fn override_defects_fail_with_one_stable_code_each() {
     let policy_of = |root: &Path| -> String {
         let policy: serde_json::Value =
@@ -936,4 +998,59 @@ fn historical_exports_classify_under_the_bundles_pinned_at_that_revision() {
         &["export", "decisions", "--at", "HEAD~1", "--json"],
     ));
     assert_eq!(then, ["decision", "policy", "runbook"]);
+}
+
+#[test]
+fn a_version_one_type_override_rationale_resolves_outside_the_command_scope() {
+    let repo = FederationRepo::new("spec-override-v-one");
+    let runbook = standards_runbook(&fixture());
+    let bundle = format!("{{\"artifact_specs\":[{runbook}]}}\n");
+    repo.write("vendor/standards/.decided/artifact-specs.json", &bundle);
+    repo.append(
+        "vendor/standards/.decided/config.yaml",
+        &format!(
+            "artifact_types:\n  version: 1\n  bundle:\n    path: .decided/artifact-specs.json\n    digest: sha256:{}\n",
+            sha256(bundle.as_bytes())
+        ),
+    );
+    let local = format!("{{\"artifact_specs\":[{RUNBOOK_ALT}]}}\n");
+    repo.write(".decided/artifact-specs.json", &local);
+    repo.append(
+        ".decided/config.yaml",
+        &format!(
+            "artifact_types:\n  version: 1\n  bundle:\n    path: .decided/artifact-specs.json\n    digest: sha256:{}\n  overrides:\n    - name: runbook\n      prefer: local\n      rationale: {}\n",
+            sha256(local.as_bytes()),
+            federation_support::CHILD_DECISION_ID.to_lowercase()
+        ),
+    );
+    repo.write(
+        "decisions/runbooks/rotate-keys.md",
+        "---\nschema_version: 1\nid: APP-000000000009\ntype: runbook\n---\n# Rotate Keys\n\n## Status\n\nActive\n\n## Purpose\n\nRotate credentials.\n",
+    );
+    repo.activate();
+
+    // The rationale Decision sits in decisions/decisions/, which neither the
+    // subdirectory nor the top-level scope reaches.
+    for args in [
+        &["validate", "decisions", "--json"][..],
+        &["validate", "decisions/runbooks", "--json"],
+        &["validate", "decisions", "--top-level", "--json"],
+    ] {
+        let output = repo.run(args);
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{args:?}: {}{}",
+            stdout(&output),
+            stderr(&output)
+        );
+    }
+    let payload = json(&repo.run(&["validate", "decisions/runbooks", "--json"]));
+    let row = payload["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["artifact_type"] == "runbook")
+        .expect("the local runbook classifies under the preferred declaration");
+    assert_eq!(row["status"], "valid");
 }
