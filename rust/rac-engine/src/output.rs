@@ -383,7 +383,8 @@ pub fn render_validate_dir_human(result: &DirectoryValidation) -> String {
     {
         lines.push(format!(
             "WARN  {}:{}  (artifact spec bundle, inherited)",
-            source.source, source.bundle.pin.path
+            source.source.as_deref().unwrap_or_default(),
+            source.bundle.pin.path
         ));
         for warning in &source.bundle.warnings {
             let label = match &warning.name {

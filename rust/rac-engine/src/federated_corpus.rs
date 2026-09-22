@@ -734,7 +734,14 @@ pub fn compose_verified_generation_from_snapshot(
     if let Some(registry) = registry {
         crate::spec_composition::verify_override_rationales(
             registry,
+            &verified.child_source,
             local.iter().chain(inherited.iter()),
+            || {
+                crate::spec_composition::root_tree_items(
+                    &verified.child_repository_root,
+                    std::slice::from_ref(&verified.materialisation_root),
+                )
+            },
         )
         .map_err(|error| spec_error(verified, error))?;
     }

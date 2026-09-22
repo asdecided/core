@@ -672,12 +672,19 @@ fn issued_ids(repository_root: &str, target_dir: &str) -> Result<HashSet<String>
     let items = match graph_collision_scope(repository_root, target_dir)? {
         // A version-2 graph rejects the repository root as a corpus path, so
         // the collision set is the composed closure of the top-level corpus
-        // directory holding the target, inherited layer included: an
-        // identifier a parent already issued is not free either.
-        Some(directory) => crate::federated_corpus::load_composed_corpus(&directory, true)
-            .map_err(|error| ScaffoldError::MalformedRepositoryConfig(error.to_string()))?
-            .map(|corpus| corpus.effective().cloned().collect::<Vec<_>>())
-            .unwrap_or_default(),
+        // directory holding the target, inherited layer included (an
+        // identifier a parent already issued is not free either), plus a
+        // plain walk of the whole repository, so identifiers in sibling
+        // top-level directories and in replaced parent artifacts stay issued
+        // as they were before the graph existed.
+        Some(directory) => {
+            let mut items = crate::federated_corpus::load_composed_corpus(&directory, true)
+                .map_err(|error| ScaffoldError::MalformedRepositoryConfig(error.to_string()))?
+                .map(|corpus| corpus.effective().cloned().collect::<Vec<_>>())
+                .unwrap_or_default();
+            items.extend(crate::relationships::corpus_items(repository_root, true));
+            items
+        }
         None => local_items(repository_root, true)?,
     };
     Ok(items
