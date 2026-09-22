@@ -16,7 +16,7 @@ use crate::composition::{
     ComposedCorpus, OverrideDeclaration, OverrideSyntaxError, ParentIdentity,
     FINDING_INVALID_OVERRIDE,
 };
-use crate::corpus::{CorpusLayer, PhysicalArtifactLocator, PhysicalCorpusLocator};
+use crate::corpus::{CorpusLayer, Layer, PhysicalArtifactLocator, PhysicalCorpusLocator};
 use crate::federation::{
     direct_graph_materialisation_roots, load_graph_manifest, verify_federation, verify_parent,
     ParentCorpusError, SnapshotFile, VerifiedParent,
@@ -361,6 +361,51 @@ fn validate_parent(
     Ok(())
 }
 
+/// Compose and install the effective artifact-type registry of a version-1
+/// child and its one parent (ADR-150).
+fn install_parent_registry(
+    verified: &VerifiedParent,
+) -> Result<Option<&'static crate::spec::Registry>, FederatedCorpusError> {
+    let nodes = [
+        crate::spec_composition::SourceSpecInput {
+            source: verified.child_source.clone(),
+            layer: Layer::Local,
+            repository_root: verified.child_repository_root.clone(),
+            config_bytes: verified.child_config_bytes.clone(),
+            parents: vec![verified.declaration.source.clone()],
+        },
+        crate::spec_composition::SourceSpecInput {
+            source: verified.declaration.source.clone(),
+            layer: Layer::Inherited,
+            repository_root: verified.materialisation_root.clone(),
+            config_bytes: verified.config_bytes.clone(),
+            parents: Vec::new(),
+        },
+    ];
+    crate::spec_composition::install_effective_registry(&verified.child_source, &nodes)
+        .map_err(|error| spec_error(verified, error))
+}
+
+fn spec_error(
+    verified: &VerifiedParent,
+    error: crate::spec::SpecBundleError,
+) -> FederatedCorpusError {
+    let path = match error.source() {
+        Some(source) if source == verified.declaration.source => verified.config_path.clone(),
+        _ => verified.child_config_path.clone(),
+    };
+    FederatedCorpusError::Composition {
+        code: error.stable_code(),
+        path,
+        message: format!(
+            "{} (child source '{}', parent source '{}')",
+            error.detail(),
+            verified.child_source,
+            verified.declaration.source
+        ),
+    }
+}
+
 fn inherited_items(verified: &VerifiedParent) -> Vec<CorpusItem> {
     let origin = CorpusLayer::inherited(
         verified.declaration.source.clone(),
@@ -662,10 +707,21 @@ pub fn compose_verified_generation_from_snapshot(
     verified: &VerifiedParent,
     child_files: &[SnapshotFile],
 ) -> Result<ComposedCorpus, FederatedCorpusError> {
+    // The effective artifact-type registry (ADR-150) is installed before any
+    // file is classified, so the parent's declared types classify as
+    // themselves in the child.
+    let registry = install_parent_registry(verified)?;
     let overrides = parse_overrides(verified)?;
     let inherited = inherited_items(verified);
     validate_parent(verified, &inherited)?;
     let (local, mut captured) = local_items_from_snapshot(directory, verified, child_files);
+    if let Some(registry) = registry {
+        crate::spec_composition::verify_override_rationales(
+            registry,
+            local.iter().chain(inherited.iter()),
+        )
+        .map_err(|error| spec_error(verified, error))?;
+    }
     captured.extend(
         inherited
             .iter()

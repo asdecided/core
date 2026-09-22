@@ -168,27 +168,42 @@ pub fn diagnose_composed(
 /// One warning per bundle element the registry skipped (ADR-083 decision
 /// 2). Empty — and therefore invisible — for a corpus with no pinned bundle.
 fn spec_bundle_findings() -> Vec<DoctorFinding> {
-    let Some(bundle) = crate::spec::active_bundle() else {
-        return Vec::new();
-    };
-    bundle
-        .warnings
+    crate::spec::active_sources()
         .iter()
-        .map(|warning| DoctorFinding {
-            path: bundle.pin.path.clone(),
-            code: CODE_ARTIFACT_SPEC_SKIPPED,
-            severity: SEVERITY_WARNING,
-            problem: match &warning.name {
-                Some(name) => format!("bundle element {} skipped: {}", name, warning.message),
-                None => format!(
-                    "bundle element #{} skipped: {}",
-                    warning.index, warning.message
-                ),
-            },
-            fix: "Fix the element in the spec bundle and re-pin its digest in \
-                  .decided/config.yaml; built-ins always win and the first declaration \
-                  of a name wins (ADR-083)."
-                .to_string(),
+        .flat_map(|source| {
+            let inherited = source.layer == crate::corpus::Layer::Inherited;
+            source.bundle.warnings.iter().map(move |warning| {
+                let element = match &warning.name {
+                    Some(name) => format!("bundle element {name}"),
+                    None => format!("bundle element #{}", warning.index),
+                };
+                DoctorFinding {
+                    path: source.bundle.pin.path.clone(),
+                    code: CODE_ARTIFACT_SPEC_SKIPPED,
+                    severity: SEVERITY_WARNING,
+                    problem: if inherited {
+                        format!(
+                            "inherited source '{}': {element} skipped: {}",
+                            source.source, warning.message
+                        )
+                    } else {
+                        format!("{element} skipped: {}", warning.message)
+                    },
+                    fix: if inherited {
+                        format!(
+                            "Fix the element in the spec bundle of '{}' and re-pin its digest in \
+                             that corpus's .decided/config.yaml; the child inherits the parent's \
+                             admitted types as pinned (ADR-150).",
+                            source.source
+                        )
+                    } else {
+                        "Fix the element in the spec bundle and re-pin its digest in \
+                         .decided/config.yaml; built-ins always win and the first declaration \
+                         of a name wins (ADR-083)."
+                            .to_string()
+                    },
+                }
+            })
         })
         .collect()
 }

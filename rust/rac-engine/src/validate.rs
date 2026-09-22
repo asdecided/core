@@ -949,7 +949,7 @@ pub fn find_config_file_with_boundary(start_dir: &str, boundary: Option<&Path>) 
 
 /// Python `Path(p).resolve()` approximation: canonicalize when possible,
 /// else absolutize against the CWD (non-strict resolve of a missing path).
-fn resolve_path(p: &str) -> PathBuf {
+pub(crate) fn resolve_path(p: &str) -> PathBuf {
     if let Ok(c) = std::fs::canonicalize(p) {
         return c;
     }

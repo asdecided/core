@@ -81,6 +81,10 @@ pub struct DirectoryValidation {
     /// admitted types and skipped elements. Absent — and rendered as nothing —
     /// for a corpus with no `artifact_types` stanza.
     pub bundle: Option<&'static crate::spec::SpecBundle>,
+    /// Every source contributing a bundle to the effective registry, in
+    /// composition order (ADR-150 decision 6). Empty — and rendered as
+    /// nothing — when no source in the closure pins a bundle.
+    pub bundles: &'static [crate::spec::SourceSpecBundle],
 }
 
 impl DirectoryValidation {
@@ -195,6 +199,7 @@ pub fn validate_directory(directory: &str, recursive: bool) -> DirectoryValidati
         files,
         okf: Some(okf),
         bundle: crate::spec::active_bundle(),
+        bundles: crate::spec::active_sources(),
     }
 }
 
@@ -270,6 +275,7 @@ pub(crate) fn validate_directory_from_items(
         files,
         okf: Some(check_okf_conformance(&okf_entries, &overrides)),
         bundle: crate::spec::active_bundle(),
+        bundles: crate::spec::active_sources(),
     }
 }
 
@@ -285,6 +291,41 @@ fn spec_sync_or_exit(start: &str) -> Option<i32> {
             Some(EXIT_VALIDATION_FAILED)
         }
     }
+}
+
+/// Bring the registry in line with the whole federated closure governing
+/// `directory` (ADR-150): the local sync, then, when a federation manifest is
+/// present, one composition of the closure so inherited types are installed.
+/// Commands that compose the closure themselves never need this; `new` and
+/// single-file `validate` do, because they classify without composing.
+fn spec_sync_closure_or_exit(directory: &str) -> Option<i32> {
+    if let Some(code) = spec_sync_or_exit(directory) {
+        return Some(code);
+    }
+    let repository_root = crate::validate::repository_root(directory);
+    if std::fs::symlink_metadata(repository_root.join(crate::federation::MANIFEST_RELATIVE_PATH))
+        .is_err()
+    {
+        return None;
+    }
+    // Compose the corpus rooted at the top-level directory that holds
+    // `directory` (the `decisions/` of a standard layout): a nested directory
+    // is not a corpus of its own, and a directory that does not exist yet
+    // still sees the inherited types before `new` reports it missing.
+    let mut candidate = crate::validate::resolve_path(directory);
+    if !candidate.starts_with(&repository_root) {
+        return None;
+    }
+    while candidate
+        .parent()
+        .is_some_and(|parent| parent != repository_root)
+    {
+        candidate = candidate.parent().map(Path::to_path_buf)?;
+    }
+    if candidate == repository_root || !candidate.is_dir() {
+        return None;
+    }
+    load_composed_or_exit(&candidate.display().to_string(), true).err()
 }
 
 fn load_composed_or_exit(
@@ -561,6 +602,7 @@ pub fn validate_directory_incremental_in(
         files,
         okf: Some(okf),
         bundle: crate::spec::active_bundle(),
+        bundles: crate::spec::active_sources(),
     }
 }
 
@@ -723,6 +765,7 @@ pub fn cmd_validate(args: &ValidateArgs) -> i32 {
                 }],
                 okf: None,
                 bundle: None,
+                bundles: &[],
             };
             if args.sarif {
                 emit(output::render_validate_sarif(&result));
@@ -776,6 +819,7 @@ pub fn cmd_validate(args: &ValidateArgs) -> i32 {
                     }],
                     okf: None,
                     bundle: None,
+                    bundles: &[],
                 }
             }
         };
@@ -801,7 +845,7 @@ pub fn cmd_validate(args: &ValidateArgs) -> i32 {
         None if args.file == "-" => ".".to_string(),
         None => py_path_parent(&args.file),
     };
-    if let Some(code) = spec_sync_or_exit(&registry_start) {
+    if let Some(code) = spec_sync_closure_or_exit(&registry_start) {
         return code;
     }
 
@@ -3401,7 +3445,7 @@ pub struct NewArgs {
 /// exit 1 — all stderr `decided: <msg>`.
 pub fn cmd_new(args: &NewArgs) -> i32 {
     use crate::scaffold::ScaffoldError;
-    if let Some(code) = spec_sync_or_exit(&py_path_parent(&args.output_path)) {
+    if let Some(code) = spec_sync_closure_or_exit(&py_path_parent(&args.output_path)) {
         return code;
     }
     if let Some(code) = refuse_read_only_target(&args.output_path) {
@@ -4062,6 +4106,7 @@ mod validation_provenance_tests {
             }],
             okf: None,
             bundle: None,
+            bundles: &[],
         }
     }
 
@@ -4135,6 +4180,7 @@ mod validation_provenance_tests {
             }],
             okf: None,
             bundle: None,
+            bundles: &[],
         };
 
         let human = output::render_validate_dir_human(&result);
