@@ -10,6 +10,14 @@ tags: [federation, extensibility, schema, spec, architecture]
 
 Accepted
 
+**Amended 2026-09-22.** Decision 1 named the manifest's declaration order;
+the manifest loader canonicalises `parents` for every consumer (ADR-146 rejects
+a second precedence rule), so the implementation (asdecided/core #487) composes
+in that canonical order and decision 1 now says so. Identity of a duplicate is
+the admitted element's content, not its bytes, so key order and whitespace
+cannot manufacture a conflict. Order never changes which types exist or their
+content.
+
 **Accepted 2026-09-22.** Accepted ahead of implementation, unlike ADR-083,
 whose revision held at Proposed until the mechanism shipped: the decisions
 here follow the federation rules ADR-137, ADR-144, ADR-146, and ADR-147
@@ -58,11 +66,13 @@ already invalidates the child's serving generation.
 1. **A child inherits its parents' admitted bundle types.** The effective
    registry of a corpus in a federated closure is: the built-ins in registry
    order; then the corpus's own admitted bundle elements in bundle order; then,
-   for each direct parent in the manifest's `parents` declaration order, that
+   for each direct parent in the canonical `parents` order the manifest loader
+   fixes (sorted by source; the raw declaration order is authenticated but not
+   semantic, so every consumer of the manifest reads the same order), that
    parent's effective registry beyond the built-ins, recursively. Composition
    is bottom-up, mirroring ADR-147: a node unions its parents' type sets, then
-   adds its own. A name already present is skipped; an element whose bytes are
-   identical to the one already present is a silent duplicate.
+   adds its own. A name already present is skipped; an element whose admitted
+   content is identical to the one already present is a silent duplicate.
 
 2. **A same-name, different-content collision is a composition error.** Two
    sources declaring the same type name with different element content stop
