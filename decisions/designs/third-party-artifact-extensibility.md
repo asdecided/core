@@ -211,11 +211,13 @@ config file plus, when pinned, the bundle file. Concretely:
   preimage when a bundle is active, so the derived store and the serving
   generation are keyed to the registry; with no bundle the preimage is
   byte-identical to before.
-- `decided-mcp` re-reads the pin on every tool call and reloads the registry
-  when it changed; the bundle digest is folded into the corpus hash that keys
-  the derived store and the freshness tracker's generation, so a re-pin
-  rebuilds the read model on the next request. The built-in registry is
-  installed for a corpus with no pin.
+- `decided-mcp` re-syncs the registry on every tool call, re-verifying the
+  pinned bundle's bytes, and rebuilds its trackers and served model whenever
+  the installed registry changes, so a re-pin lands on the next request; the
+  file-freshness watch list does not carry the bundle, because a re-pin is
+  observed through the registry rather than through a stat. The bundle digest
+  is also folded into the corpus hash that keys the derived store. The
+  built-in registry is installed for a corpus with no pin.
 - The federation digest preimage (ADR-134, ADR-145) is unchanged. A
   parent's raw `.decided/config.yaml` bytes are already framed in it, and
   that config pins the parent's bundle digest, so a parent cannot change its
@@ -257,12 +259,12 @@ rest.
   headings does not classify as `prompt` and a prompt does not classify as
   `runbook`, with `inspect`'s fit breakdown explaining the winner; a `policy`
   document carrying only built-in relationship sections classifies `unknown`.
-- **Skip negatives**: digest mismatch, missing file, oversized file,
-  symlinked path, invalid JSON, built-in collision, duplicate name, bad name,
-  unknown key, unnormalised section, empty `okf_type` — each yields exactly
-  one warning with the expected code, and the remaining elements (or, for a
-  bundle-level failure, the built-ins) stay admitted; `find` and `resolve`
-  exit 0.
+- **Bundle and element negatives**: a digest mismatch, missing file,
+  oversized file, symlinked path, or invalid JSON is one hard
+  `artifact-spec-bundle-*` error that fails `decided validate` (section 2);
+  a built-in collision, duplicate name, bad name, unknown key, unnormalised
+  section, or empty `okf_type` yields exactly one `artifact-spec-skipped`
+  warning and the remaining elements stay admitted.
 - **Contract pins**: `relationship-target-type-mismatch` for a built-in
   reference to a `runbook`; OKF export emits the `runbook` under `Runbook` and
   the `policy` under `Policy`, with the five fixed index sections
@@ -275,10 +277,11 @@ rest.
   as runbooks; an identical element declared by two sources is silent; a
   same-name, different-content element is
   `corpus-federation-artifact-type-conflict` on every command and MCP tool;
-  a Decision-backed override resolves it and a missing, inherited, retired,
-  or non-Decision rationale, a duplicate name, a `prefer` outside the
-  inherited view, and an override for a name that does not collide each fail
-  with `corpus-federation-invalid-override`; a parent bundle whose bytes no
+  a Decision-backed override resolves it; a missing, inherited, retired, or
+  non-Decision rationale, a `prefer` outside the inherited view, and an
+  override for a name that does not collide each fail with
+  `corpus-federation-invalid-override`, and a name overridden twice in one
+  stanza is `artifact-spec-bundle-config-invalid`; a parent bundle whose bytes no
   longer match the digest in the parent's captured config fails composition
   with the parent's source in the message; a closure in which no source pins
   a bundle is byte-identical to before.
@@ -297,8 +300,10 @@ fixes for `parents`. That canonical order is the order every other consumer
 of the manifest already uses; the raw byte order is authenticated but not
 semantic, so the ADR's "declaration order" is realised as the loader's
 canonical order rather than a second ordering rule. Order never changes which
-types exist or their content (a different-content duplicate is an error), only
-the registry order of inherited types and the listing order of provenance.
+types exist or their content (a different-content duplicate is an error). It
+fixes the registry order of inherited types, which is the classification
+tie-break (ADR-083 decision 8) and so can decide an exact tie between two
+inherited types, and the listing order of provenance.
 
 **Stanza.** `artifact_types` gains an optional `overrides` list beside
 `bundle`; `bundle` becomes optional when `overrides` is present, so a child
@@ -329,11 +334,13 @@ memo:
    with `corpus-federation-artifact-type-conflict`, naming the type and every
    declaring source; with an override, the candidate declared by `prefer`
    (`local` meaning this source) wins and the rest are dropped.
-4. An override at this source that names a non-colliding name, repeats a
-   name, prefers a source outside this source's transitive parents, or prefers
-   a source that declares no candidate for the name is
-   `corpus-federation-invalid-override`, the finding the artifact-override
-   family already uses for a malformed ADR-137 declaration.
+4. An override at this source that names a non-colliding name, prefers a
+   source outside this source's transitive parents, or prefers a source that
+   declares no candidate for the name is `corpus-federation-invalid-override`,
+   the finding the artifact-override family already uses for a malformed
+   ADR-137 declaration. A name repeated within one stanza never reaches
+   composition: the stanza reader rejects it as
+   `artifact-spec-bundle-config-invalid`.
 5. The effective registry is the built-ins in registry order followed by the
    surviving elements in first-appearance order. The winner of a collision is
    what descendants inherit through this source; a descendant that declares
@@ -376,8 +383,9 @@ composition replaces it whenever the closure's key changes.
 **Where it runs.** `graph_federated_corpus::compose_verified_federation`
 (version 2) and `federated_corpus::compose_verified_generation_from_snapshot`
 (version 1) install the effective registry before parsing any file and run
-the rationale check after; `decided-mcp` re-verifies and recomposes on every
-request, so a parent re-pin lands on the next call. `decided new` and
+the rationale check after; `decided-mcp` re-verifies every pinned bundle in
+the closure on each request and recomposes when the registry or the closure
+changes, so a parent re-pin lands on the next call. `decided new` and
 single-file `validate` inside a federated repository compose the closure
 first so an inherited type scaffolds and validates; `schema` and `templates`
 list the effective registry of the corpus given with `--corpus <dir>` and the
@@ -415,8 +423,8 @@ frame each, so a corpus with exactly one local bundle keeps today's preimage.
   only by a Decision-backed override declared by the corpus that owns the
   resolution; the pin the child already holds covers the parent's bundle.
 - **Deferred boundaries.** No new edge kinds (ADR-055); no custom validators;
-  a descendant cannot un-inherit a type short of overriding it; any public
-  invitation stays behind GATE-2 (ADR-071).
+  a descendant cannot un-inherit a type (an override only settles a
+  collision); any public invitation stays behind GATE-2 (ADR-071).
 
 ## Rationale
 
@@ -432,7 +440,9 @@ code and no type-named branch. Rendering the template from the spec removes a
 second source of starter text that could disagree with the spec. Widening the
 fingerprint set reuses the machinery that already keys on severity overrides
 instead of adding a freshness rung. Leaving the federation digest untouched
-keeps every existing pin valid and makes bundle propagation its own decision.
+keeps every existing pin valid, and it let bundle propagation arrive later as
+its own decision (ADR-150) with no digest bump, because a parent's config
+already pins its bundle digest.
 
 ## Alternatives
 
@@ -444,9 +454,11 @@ keeps every existing pin valid and makes bundle propagation its own decision.
 - **Load the bundle without verifying the digest, warning on mismatch.**
   Rejected: a mismatched bundle is by definition not the reviewed one; loading
   it and warning would make the pin advisory.
-- **Bump the federation digest to cover a parent's bundle now.** Rejected for
-  v1: it invalidates every existing pin for a capability the child does not
-  yet consume from the parent.
+- **Bump the federation digest to cover a parent's bundle.** Rejected: it
+  invalidates every existing pin and adds nothing, since the parent's config
+  bytes, framed in the v1 and v2 preimages, already pin its bundle digest, so
+  the child's pin covers the parent's bundle transitively (ADR-150
+  decision 4).
 
 ## Accessibility
 
@@ -458,9 +470,10 @@ documentation follows the repository's readable-prose conventions.
 
 - The registry type is `spec::Registry`; the slot accessor is `spec::install`;
   the free functions keep their names.
-- Warning codes are `artifact-spec-bundle-skipped` (whole bundle) and
-  `artifact-spec-skipped` (one element); the config stanza is
-  `artifact_types` with `version` and `bundle { path, digest }`.
+- A whole-bundle failure is a hard `artifact-spec-bundle-*` error (there is
+  no whole-bundle warning); a skipped element is the warning
+  `artifact-spec-skipped`; the config stanza is `artifact_types` with
+  `version`, `bundle { path, digest }`, and `overrides`.
 - The validation branch stays predicate-keyed — `is_builtin`, never a named
   custom type; the generic validator is `validate_generic`.
 - The element field is `okf_type`; it reads as data, not behaviour.
@@ -470,9 +483,9 @@ documentation follows the repository's readable-prose conventions.
 - Whether `decided` should offer a pin helper (print the `sha256:` digest of
   a bundle file) to make re-pinning a one-liner; a CLI nicety, not a decision.
 - When to replace the leaked-registry slot with an explicitly threaded
-  `&Registry` owned by the serving generation. The leak is now bounded to one
-  registry per distinct pin a process has served (registries are memoised by
-  pin), so the remaining cost is the `&'static` shape, not growth.
+  `&Registry` owned by the serving generation. The leak is bounded to one
+  registry per distinct registry key a process has served (the process slot
+  in section 10), so the remaining cost is the `&'static` shape, not growth.
 - The trigger that schedules implementation, and the separate GATE-2 trigger
   for any public ecosystem invitation.
 
