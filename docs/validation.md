@@ -89,18 +89,27 @@ Each element carries the registry keys — `name`, `display`, `required`,
 `guidance`, `synonyms`, `id_field`, `starter_bodies` — plus an optional
 `okf_type`, the OKF `type` the export writes for that artifact type (default:
 the element's `display`). Section names must already be normalised (trimmed,
-lower-case, single-spaced). The digest is `sha256sum` of the file; edit the
-bundle, then re-pin.
+lower-case, single-spaced). `display` and `okf_type` are single-line labels
+with no surrounding whitespace, and `okf_type` may not be one of the built-in
+OKF types (`Requirement`, `ADR`, `Design`, `Roadmap`, `Prompt`).
+`descriptions` and `starter_bodies` map sections to strings and `guidance`
+maps sections to lists of strings. A `name` may not be `unknown` or a key the
+engine already emits beside the per-type families in `decided stats --json`
+(for example `decisions`, `invalid`, `metrics`). The digest is `sha256sum` of
+the file; edit the bundle, then re-pin.
 
 What the engine does with it:
 
 - **Built-ins always win.** The merged registry is the five built-ins in their
   fixed order, then admitted bundle elements in file order, so classification
-  tie-breaks are stable. An element whose `name` collides with a built-in,
+  tie-breaks are stable. A bundle type classifies a document only when no
+  built-in qualifies for it, so a bundle can never take a built-in artifact's
+  type away. An element whose `name` collides with a built-in,
   duplicates an earlier element, or fails the structural contract is skipped
   with a warning-severity `artifact-spec-skipped` finding in `decided validate`
   and `decided doctor`; nothing else changes.
-- **A pin that cannot be honoured is a hard error.** A malformed stanza, a
+- **A pin that cannot be honoured is a hard error.** A config that declares
+  `artifact_types` but cannot be parsed, a malformed stanza, a
   missing or symlinked bundle, an oversized or unparseable file, or bytes that
   do not match the pinned digest fail `decided validate` with one error row for
   the bundle (`artifact-spec-bundle-digest-mismatch` and its siblings, exit 1);

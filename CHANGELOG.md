@@ -67,6 +67,15 @@ details, release history over commit history.
   bundle files), and every historical export now classifies artifacts under
   the bundles pinned at that revision rather than the working tree's, so a
   broken working-tree pin no longer blocks exporting history.
+- Hardened spec-bundle input: a bundle type classifies a document only when
+  no built-in qualifies, so a bundle can no longer take a built-in artifact's
+  type; a config that declares `artifact_types` but cannot be parsed is a hard
+  error instead of silently dropping the pin; a long multibyte bundle path is
+  an error instead of a crash; `okf_type` and `display` must be single-line,
+  `okf_type` may not claim a built-in OKF type and is written as a safe YAML
+  scalar; a type name may not overwrite an existing `stats --json` key; and
+  ill-typed `descriptions`, `starter_bodies`, and `guidance` values are skipped
+  with `artifact-spec-skipped` instead of being admitted as empty.
 - `decided new` and `decided migrate` in a repository with a version-2
   federation manifest, which failed with `federated-corpus-snapshot-failed`
   because the identifier-collision scan composed the repository root, a path
