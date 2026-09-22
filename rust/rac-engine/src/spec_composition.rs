@@ -179,13 +179,10 @@ fn in_source<T>(
     }
 }
 
-/// The source's stanza. A config the loader cannot read has no readable
-/// stanza and is inert, exactly as `sync_registry` treats the local config.
+/// The source's stanza, read exactly as `sync_registry` reads the local one:
+/// an unreadable config that mentions `artifact_types` is a hard error.
 fn stanza_for(node: &SourceSpecInput) -> Result<SpecStanza, SpecBundleError> {
-    let Ok(text) = std::str::from_utf8(&node.config_bytes) else {
-        return Ok(SpecStanza::default());
-    };
-    let Ok(config) = crate::frontmatter::yaml_load_config(text) else {
+    let Some(config) = in_source(node, spec::parse_config_bytes(&node.config_bytes))? else {
         return Ok(SpecStanza::default());
     };
     in_source(node, spec::spec_stanza_from_config(&config)).map(Option::unwrap_or_default)

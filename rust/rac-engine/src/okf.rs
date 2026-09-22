@@ -94,6 +94,25 @@ fn yaml_string(value: &str) -> String {
     serde_json::to_string(value).expect("serializing a Rust string cannot fail")
 }
 
+/// A plain YAML scalar when the value is a simple word or phrase (every
+/// built-in OKF type is, so their output is unchanged), else a quoted one, so
+/// a bundle's `okf_type` can never inject frontmatter keys.
+fn yaml_scalar(value: &str) -> String {
+    let plain = value
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic())
+        && value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, ' ' | '.' | '_' | '-'))
+        && !value.ends_with(' ');
+    if plain {
+        value.to_string()
+    } else {
+        yaml_string(value)
+    }
+}
+
 fn okf_status(status: &str) -> Option<&'static str> {
     match status.trim().to_ascii_lowercase().as_str() {
         "" | "unknown" => None,
@@ -112,7 +131,7 @@ fn artifact_file(
 ) -> String {
     let mut lines = vec![
         "---".to_string(),
-        format!("type: {}", okf_type(&art.artifact_type)),
+        format!("type: {}", yaml_scalar(&okf_type(&art.artifact_type))),
         format!("id: {}", yaml_string(&art.id)),
         format!("title: {}", yaml_string(&art.title)),
     ];

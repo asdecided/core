@@ -239,6 +239,47 @@ pub const CODE_TYPE_CONFLICT: &str = "corpus-federation-artifact-type-conflict";
 /// decision 3): the same finding the artifact-override family uses.
 pub const CODE_INVALID_TYPE_OVERRIDE: &str = crate::graph_composition::FINDING_INVALID_OVERRIDE;
 
+/// Type names a bundle may not declare because they are keys the engine
+/// already emits beside per-type families (`stats --json` top-level keys) or
+/// the reserved `unknown`; a bundle type with one of these names would
+/// overwrite an existing field.
+const RESERVED_TYPE_NAMES: &[&str] = &[
+    "unknown",
+    "directory",
+    "empty",
+    "features",
+    "valid_features",
+    "invalid_features",
+    "requirements",
+    "metrics",
+    "risks",
+    "features_missing_metrics",
+    "features_missing_risks",
+    "missing_metrics",
+    "missing_risks",
+    "average_requirements_per_feature",
+    "largest_feature",
+    "requirements_by_feature",
+    "invalid",
+    "decisions",
+    "roadmaps",
+    "prompts",
+    "designs",
+    "unrecognized",
+    "relationships",
+];
+
+/// The OKF types the five built-ins export under (the fixed profile table).
+/// A bundle type may not export under one of them: an OKF consumer could not
+/// tell it from the built-in (ADR-083 decision 6, ADR-122).
+const BUILTIN_OKF_TYPES: &[&str] = &["Requirement", "ADR", "Design", "Roadmap", "Prompt"];
+
+/// A label that is safe to render in headings and frontmatter: one line, no
+/// control characters, no surrounding whitespace, non-empty.
+fn single_line_label(value: &str) -> bool {
+    !value.is_empty() && value.trim() == value && !value.chars().any(char::is_control)
+}
+
 /// The literal `prefer` value naming the declaring corpus itself.
 pub const OVERRIDE_PREFER_LOCAL: &str = "local";
 
@@ -910,7 +951,7 @@ fn resolve_bundle_path(repository_root: &Path, declared: &str) -> Result<PathBuf
     if declared.len() > 4_096 {
         return Err(SpecBundleError::InvalidPath(format!(
             "bundle path exceeds 4096 bytes: {}",
-            &declared[..64]
+            declared.chars().take(64).collect::<String>()
         )));
     }
     if declared.contains('\\') || declared.starts_with('/') || declared.contains(':') {
@@ -1192,7 +1233,14 @@ fn admit_element(element: &Value, taken: &[ArtifactSpec]) -> Result<ArtifactSpec
     let Some(name) = map.get("name").and_then(Value::as_str) else {
         return Err("'name' must be a string".to_string());
     };
-    if name == "unknown" || !valid_type_name(name) {
+    if RESERVED_TYPE_NAMES.contains(&name) {
+        return Err(format!(
+            "name {} is reserved: it is a field the engine already emits beside the \
+             per-type families",
+            crate::pycompat::py_repr_str(name)
+        ));
+    }
+    if !valid_type_name(name) {
         return Err(format!(
             "name {} is not a valid type name (^[a-z][a-z0-9_-]{{1,31}}$, not 'unknown')",
             crate::pycompat::py_repr_str(name)
@@ -1211,8 +1259,14 @@ fn admit_element(element: &Value, taken: &[ArtifactSpec]) -> Result<ArtifactSpec
         ));
     }
     match map.get("display").and_then(Value::as_str) {
-        Some(display) if !display.trim().is_empty() => {}
-        _ => return Err("'display' must be a non-empty string".to_string()),
+        Some(display) if single_line_label(display) => {}
+        _ => {
+            return Err(
+                "'display' must be a non-empty single-line string without surrounding \
+                 whitespace"
+                    .to_string(),
+            )
+        }
     }
     check_str_list(
         map.get("required").unwrap_or(&Value::Null),
@@ -1284,6 +1338,23 @@ fn admit_element(element: &Value, taken: &[ArtifactSpec]) -> Result<ArtifactSpec
         map.get("starter_bodies").unwrap_or(&Value::Null),
         "starter_bodies",
     )?;
+    // Values, not only keys: an ill-typed value would otherwise be admitted
+    // and silently turned into an empty string or list.
+    for field in ["descriptions", "starter_bodies"] {
+        if let Some(Value::Object(entries)) = map.get(field) {
+            if let Some((key, _)) = entries.iter().find(|(_, v)| !v.is_string()) {
+                return Err(format!("'{field}.{key}' must be a string"));
+            }
+        }
+    }
+    if let Some(Value::Object(entries)) = map.get("guidance") {
+        if let Some((key, _)) = entries.iter().find(|(_, v)| {
+            !v.as_array()
+                .is_some_and(|items| items.iter().all(Value::is_string))
+        }) {
+            return Err(format!("'guidance.{key}' must be a list of strings"));
+        }
+    }
     match map.get("synonyms") {
         None | Some(Value::Null) => {}
         Some(Value::Object(pairs)) => {
@@ -1313,13 +1384,57 @@ fn admit_element(element: &Value, taken: &[ArtifactSpec]) -> Result<ArtifactSpec
     }
     match map.get("okf_type") {
         None | Some(Value::Null) => {}
-        Some(Value::String(s)) if !s.trim().is_empty() => {}
-        Some(_) => return Err("'okf_type' must be a non-empty string when present".to_string()),
+        Some(Value::String(s)) if single_line_label(s) => {
+            if BUILTIN_OKF_TYPES
+                .iter()
+                .any(|builtin| builtin.eq_ignore_ascii_case(s))
+            {
+                return Err(format!(
+                    "'okf_type' {} is a built-in OKF type; a bundle type must export under \
+                     its own",
+                    crate::pycompat::py_repr_str(s)
+                ));
+            }
+        }
+        Some(_) => {
+            return Err(
+                "'okf_type' must be a non-empty single-line string without surrounding \
+                 whitespace when present"
+                    .to_string(),
+            )
+        }
     }
     Ok(build_spec(element))
 }
 
 // --- process synchronisation -------------------------------------------------
+
+/// Parse governing config bytes. `Ok(None)` for a config the loader cannot
+/// read that says nothing about artifact types: it has no stanza, and every
+/// other reader of the file degrades the same way. A config that mentions
+/// `artifact_types` but cannot be parsed is a hard error, because its pin can
+/// be neither honoured nor ignored (ADR-083 decision 2).
+pub(crate) fn parse_config_bytes(bytes: &[u8]) -> Result<Option<Yaml>, SpecBundleError> {
+    let mentions_stanza = bytes
+        .windows(b"artifact_types".len())
+        .any(|window| window == b"artifact_types");
+    let unreadable = |problem: String| {
+        if mentions_stanza {
+            Err(SpecBundleError::Config(format!(
+                ".decided/config.yaml declares artifact_types but cannot be parsed: {problem}"
+            )))
+        } else {
+            Ok(None)
+        }
+    };
+    let Ok(text) = std::str::from_utf8(bytes) else {
+        return unreadable("it is not valid UTF-8".to_string());
+    };
+    match crate::frontmatter::yaml_load_config(text) {
+        Ok(config) => Ok(Some(config)),
+        Err(problem) => unreadable(problem),
+    }
+}
 
 /// The local corpus source named by a governing config, when it declares one.
 fn local_source(config_path: &Path, text: &str) -> Option<String> {
@@ -1366,16 +1481,15 @@ pub fn sync_registry(start_dir: &str) -> Result<(), SpecBundleError> {
             return Ok(());
         }
     }
-    let Ok(text) = std::str::from_utf8(&bytes) else {
-        install(None);
-        return Ok(());
+    let config = match parse_config_bytes(&bytes) {
+        Ok(Some(config)) => config,
+        Ok(None) => {
+            install(None);
+            return Ok(());
+        }
+        Err(error) => return Err(error),
     };
-    let Ok(config) = crate::frontmatter::yaml_load_config(text) else {
-        // A config the loader cannot read has no readable stanza; every other
-        // reader of this file already degrades the same way.
-        install(None);
-        return Ok(());
-    };
+    let text = std::str::from_utf8(&bytes).unwrap_or_default();
     let Some(stanza) = spec_stanza_from_config(&config)? else {
         install(None);
         return Ok(());
@@ -1527,7 +1641,7 @@ mod tests {
             ),
             (
                 r#"{"name":"unknown","display":"x","required":["a"]}"#,
-                "valid type name",
+                "reserved",
             ),
             (
                 r#"{"name":"nodisplay","display":"","required":["a"]}"#,
@@ -1554,6 +1668,34 @@ mod tests {
                 "'retired_status'",
             ),
             (r#"[]"#, "not a JSON object"),
+            (
+                r#"{"name":"decisions","display":"x","required":["a"]}"#,
+                "reserved",
+            ),
+            (
+                r#"{"name":"twolines","display":"A\nB","required":["a"]}"#,
+                "'display'",
+            ),
+            (
+                r#"{"name":"injected","display":"x","required":["a"],"okf_type":"Runbook\nid: FORGED"}"#,
+                "'okf_type'",
+            ),
+            (
+                r#"{"name":"spoof","display":"x","required":["a"],"okf_type":"adr"}"#,
+                "built-in OKF type",
+            ),
+            (
+                r#"{"name":"baddesc","display":"x","required":["a"],"descriptions":{"a":42}}"#,
+                "'descriptions.a'",
+            ),
+            (
+                r#"{"name":"badbody","display":"x","required":["a"],"starter_bodies":{"a":{"x":1}}}"#,
+                "'starter_bodies.a'",
+            ),
+            (
+                r#"{"name":"badguide","display":"x","required":["a"],"guidance":{"a":"Ask why"}}"#,
+                "'guidance.a'",
+            ),
         ];
         let elements: Vec<&str> = cases.iter().map(|(json, _)| *json).collect();
         let pin = write_bundle(
@@ -1574,6 +1716,28 @@ mod tests {
             assert_eq!(warning.code, CODE_SPEC_SKIPPED);
         }
         assert_eq!(registry.specs().len(), 5);
+    }
+
+    #[test]
+    fn a_long_multibyte_bundle_path_is_an_error_not_a_panic() {
+        let root = scratch("multibyte");
+        let declared = format!("{}{}", "a/".repeat(21), "€".repeat(1400));
+        let pin = BundlePin {
+            path: declared,
+            digest: format!("sha256:{}", "0".repeat(64)),
+        };
+        let error = load_bundle(&root, &pin).unwrap_err();
+        assert_eq!(error.stable_code(), "artifact-spec-bundle-path-invalid");
+    }
+
+    #[test]
+    fn an_unparseable_config_that_mentions_the_stanza_is_a_hard_error() {
+        let error = parse_config_bytes(b"artifact_types: [unclosed\n").unwrap_err();
+        assert_eq!(error.stable_code(), "artifact-spec-bundle-config-invalid");
+        let error = parse_config_bytes(b"artifact_types:\xff\n").unwrap_err();
+        assert_eq!(error.stable_code(), "artifact-spec-bundle-config-invalid");
+        // Without the stanza an unreadable config stays inert, as released.
+        assert!(parse_config_bytes(b"extra: [unclosed\n").unwrap().is_none());
     }
 
     #[test]
