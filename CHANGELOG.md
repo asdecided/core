@@ -19,6 +19,19 @@ details, release history over commit history.
   an `artifact-spec-skipped` warning; a bundle whose bytes do not match the pin
   is a hard error (`artifact-spec-bundle-digest-mismatch`), as a federation pin
   failure is. Repositories without the stanza are byte-for-byte unchanged.
+- Added inherited artifact types across a federation (ADR-150): a child
+  composes its parents' admitted bundle types after its own, bottom-up in the
+  manifest's canonical parent order, so a parent's runbooks are runbooks in
+  every child under the pin the child already holds. Identical declarations
+  are silent; a same-name, different-content declaration fails every command
+  and MCP tool with `corpus-federation-artifact-type-conflict`, resolved only
+  by a Decision-backed `artifact_types.overrides` entry (`name`, `prefer`,
+  `rationale`); a defective override is `corpus-federation-invalid-override`.
+  A parent's bundle is re-verified against the digest in its captured config
+  on every command. `decided validate --json` gains `artifact_spec_bundles`,
+  one entry per contributing source; the corpus hash folds every effective
+  bundle digest. A closure in which no source pins a bundle is byte-for-byte
+  unchanged.
 - Added deterministic point-in-time JSON exports with `decided export --at
   <revision>` for the viewer, documents, and graph projections. Historical
   exports materialise the bounded configured corpus and federation closure so
