@@ -367,8 +367,8 @@ the rationale check after; `decided-mcp` re-verifies and recomposes on every
 request, so a parent re-pin lands on the next call. `decided new` and
 single-file `validate` inside a federated repository compose the closure
 first so an inherited type scaffolds and validates; `schema` and `templates`
-take no corpus directory and list the local registry, which the CLI reference
-records.
+list the effective registry of the corpus given with `--corpus <dir>` and the
+local registry without it, which the CLI reference records.
 
 **Provenance and keys.** `validate --json` gains `artifact_spec_bundles`: one
 entry per source that pinned a bundle, in composition order, each with
@@ -460,9 +460,6 @@ documentation follows the repository's readable-prose conventions.
   `&Registry` owned by the serving generation. The leak is now bounded to one
   registry per distinct pin a process has served (registries are memoised by
   pin), so the remaining cost is the `&'static` shape, not growth.
-- Whether `schema --list` and `templates` should accept a corpus directory
-  so they can show the effective registry of a federated child; today they
-  list the local registry because they take no corpus context.
 - The trigger that schedules implementation, and the separate GATE-2 trigger
   for any public ecosystem invitation.
 
