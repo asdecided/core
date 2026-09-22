@@ -16,7 +16,8 @@ a second precedence rule), so the implementation (asdecided/core #487) composes
 in that canonical order and decision 1 now says so. Identity of a duplicate is
 the admitted element's content, not its bytes, so key order and whitespace
 cannot manufacture a conflict. Order never changes which types exist or their
-content.
+content; it fixes registry order, which is the classification tie-break
+(ADR-083 decision 8).
 
 **Accepted 2026-09-22.** Accepted ahead of implementation, unlike ADR-083,
 whose revision held at Proposed until the mechanism shipped: the decisions
@@ -70,9 +71,11 @@ already invalidates the child's serving generation.
    fixes (sorted by source; the raw declaration order is authenticated but not
    semantic, so every consumer of the manifest reads the same order), that
    parent's effective registry beyond the built-ins, recursively. Composition
-   is bottom-up, mirroring ADR-147: a node unions its parents' type sets, then
-   adds its own. A name already present is skipped; an element whose admitted
-   content is identical to the one already present is a silent duplicate.
+   is bottom-up, mirroring ADR-147: every parent's effective registry is
+   computed before the node that inherits it, and the node's own elements
+   come first in its registry. An element whose admitted content is identical
+   to one already present is a silent duplicate; the same name with different
+   content is decision 2's conflict, never a skip.
 
 2. **A same-name, different-content collision is a composition error.** Two
    sources declaring the same type name with different element content stop
@@ -118,9 +121,10 @@ already invalidates the child's serving generation.
    invoking corpus's; the serving generation is already keyed to parent config
    bytes (ADR-148) and gains nothing new.
 
-6. **Provenance is per element.** `validate --json` reports one
-   `artifact_spec_bundles` entry per source that contributed types, each with
-   its source, pin, admitted names, and warnings; the ADR-083 single
+6. **Provenance is per source.** `validate --json` reports one
+   `artifact_spec_bundles` entry per source that pins a bundle, whether or not
+   its elements survive composition, each with its source, pin, admitted
+   names, and warnings; the ADR-083 single
    `artifact_spec_bundle` key stays for the local corpus so existing readers
    are unchanged (ADR-007). MCP provenance stays bounded to what ADR-141
    already carries; artifacts carry source, types do not need to.
@@ -147,10 +151,12 @@ duplicates, conflicting duplicates, an override with and without a valid
 rationale, and a parent bundle that fails its own digest.
 
 Trade-offs accepted: the effective registry becomes closure-dependent, so a
-child's `schema --list` differs from its parent's by design; the type-override
+child's `schema --list --corpus <dir>` differs from its parent's by design
+(without `--corpus` it lists the local registry only); the type-override
 stanza is a second override surface beside `## overrides` in `.decided/corpus.md`,
 kept in config because it governs the registry, not an artifact; and a
-descendant cannot un-inherit a type short of overriding it.
+descendant cannot un-inherit a type at all: an override only settles a
+collision, so a type no other source contests is inherited as declared.
 
 ## Alternatives Considered
 

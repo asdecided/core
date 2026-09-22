@@ -31,6 +31,15 @@ from starter bodies, and the `okf_type` export mapping, with the
 `rust/fixtures/spec-bundle/` corpus and CLI and MCP suites as the executable
 record. Decision 9's federation deferral is taken up by ADR-150.
 
+**Amended 2026-09-22.** ADR-150 replaces decision 9's federation scoping: a
+child composes its parents' admitted types after its own, a same-name,
+different-content declaration is `corpus-federation-artifact-type-conflict`
+unless a Decision-backed type override settles it, and the local corpus hash
+folds every effective bundle digest. The rest of decision 9 stands.
+`decided-mcp` meets its "watched" clause by re-syncing the registry on every
+tool call and rebuilding its served model when the registry changes, rather
+than through the file-freshness watch list.
+
 ## Category
 
 Architecture
@@ -218,7 +227,8 @@ Three facts fix the shape now.
    decision 2, and stays explainable through `decided inspect`'s scored
    breakdown (ADR-002).
 
-9. **The bundle is governing config: hashed, watched, per-corpus.** The bundle
+9. **The bundle is governing config: hashed, watched, per-corpus.**
+   *(Federation scope amended by ADR-150; see Status.)* The bundle
    bytes join the config bytes in every fingerprint that already covers them —
    the validation-store fingerprint, the derived-cache generation key
    (ADR-148), and the serving freshness watch list — so a re-pinned bundle
@@ -343,6 +353,7 @@ graph), and 6 (determinism caveat) are carried forward as decisions 2–4 and 8.
 - adr-120
 - adr-122
 - adr-145
+- adr-150
 
 ## Related Requirements
 
