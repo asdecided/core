@@ -2493,17 +2493,20 @@ fn run_schema(rest: &[&String]) -> u8 {
     let mut list = false;
     let mut json = false;
     let mut template = false;
+    let mut corpus: Option<String> = None;
     let mut extras: Vec<String> = Vec::new();
     let mut positional_only = false;
 
-    for arg in rest {
-        let arg = arg.as_str();
+    let mut i = 0;
+    while i < rest.len() {
+        let arg = rest[i].as_str();
         if positional_only || !arg.starts_with('-') {
             if schema.is_none() {
                 schema = Some(arg.to_string());
             } else {
                 extras.push(arg.to_string());
             }
+            i += 1;
             continue;
         }
         match arg {
@@ -2521,8 +2524,15 @@ fn run_schema(rest: &[&String]) -> u8 {
                 }
                 template = true;
             }
+            other if other == "--corpus" || other.starts_with("--corpus=") => {
+                match take_opt_value(prog, "--corpus", other, rest, &mut i) {
+                    Ok(value) => corpus = Some(value),
+                    Err(code) => return code,
+                }
+            }
             other => extras.push(other.to_string()),
         }
+        i += 1;
     }
 
     if !extras.is_empty() {
@@ -2534,32 +2544,44 @@ fn run_schema(rest: &[&String]) -> u8 {
         list,
         json,
         template,
+        corpus,
     }) as u8
 }
 
 fn run_templates(rest: &[&String]) -> u8 {
+    let prog = "decided templates";
     let mut json = false;
+    let mut corpus: Option<String> = None;
     let mut extras: Vec<String> = Vec::new();
     let mut positional_only = false;
 
-    for arg in rest {
-        let arg = arg.as_str();
+    let mut i = 0;
+    while i < rest.len() {
+        let arg = rest[i].as_str();
         if positional_only || !arg.starts_with('-') {
             extras.push(arg.to_string());
+            i += 1;
             continue;
         }
         match arg {
             "--" => positional_only = true,
             "--json" => json = true,
+            other if other == "--corpus" || other.starts_with("--corpus=") => {
+                match take_opt_value(prog, "--corpus", other, rest, &mut i) {
+                    Ok(value) => corpus = Some(value),
+                    Err(code) => return code,
+                }
+            }
             other => extras.push(other.to_string()),
         }
+        i += 1;
     }
 
     if !extras.is_empty() {
         return unrecognized(&extras);
     }
 
-    cmd_templates(&TemplatesArgs { json }) as u8
+    cmd_templates(&TemplatesArgs { json, corpus }) as u8
 }
 
 fn run_new(rest: &[&String]) -> u8 {

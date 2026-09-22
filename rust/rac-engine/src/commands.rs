@@ -2452,10 +2452,27 @@ pub struct SchemaArgs {
     pub list: bool,
     pub json: bool,
     pub template: bool,
+    /// The corpus whose effective registry to list (ADR-150): its own bundle
+    /// and, in a federated repository, every inherited type. Absent, the
+    /// registry governing the working directory is listed as released.
+    pub corpus: Option<String>,
+}
+
+/// Bring the registry in line with `--corpus` when given (the composed
+/// closure of that directory), else with the working directory (the local
+/// pin only, as released).
+fn registry_sync_for_listing(corpus: Option<&str>) -> Option<i32> {
+    match corpus {
+        Some(corpus) if !Path::new(corpus).is_dir() => Some(usage_error(&format!(
+            "--corpus is not a directory: {corpus}"
+        ))),
+        Some(corpus) => spec_sync_closure_or_exit(corpus),
+        None => spec_sync_or_exit("."),
+    }
 }
 
 pub fn cmd_schema(args: &SchemaArgs) -> i32 {
-    if let Some(code) = spec_sync_or_exit(".") {
+    if let Some(code) = registry_sync_for_listing(args.corpus.as_deref()) {
         return code;
     }
     let names = crate::spec::available_schemas();
@@ -2496,10 +2513,12 @@ pub fn cmd_schema(args: &SchemaArgs) -> i32 {
 
 pub struct TemplatesArgs {
     pub json: bool,
+    /// As for `schema`: the corpus whose effective registry to list.
+    pub corpus: Option<String>,
 }
 
 pub fn cmd_templates(args: &TemplatesArgs) -> i32 {
-    if let Some(code) = spec_sync_or_exit(".") {
+    if let Some(code) = registry_sync_for_listing(args.corpus.as_deref()) {
         return code;
     }
     let names = crate::spec::available_schemas();
