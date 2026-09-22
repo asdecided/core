@@ -1,0 +1,11 @@
+repository_key: SPC
+corpus:
+  source: asdecided/fixtures-spec-child
+
+# ADR-083: the child pins its own bundle (policy). ADR-150: it also inherits
+# runbook from the standards parent declared in .decided/corpus.md.
+artifact_types:
+  version: 1
+  bundle:
+    path: .decided/artifact-specs.json
+    digest: sha256:0a75005ce32c967415b2d8999ea4ac05af61b80bece09f9a8177167b2d66f1ea

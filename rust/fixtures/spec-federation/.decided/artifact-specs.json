@@ -1,0 +1,55 @@
+{
+  "_meta": {
+    "role": "Spec bundle of the child in the spec-federation fixture (ADR-150): it declares policy; runbook is inherited from the standards parent."
+  },
+  "artifact_specs": [
+    {
+      "name": "policy",
+      "display": "Policy",
+      "required": [
+        "statement",
+        "scope"
+      ],
+      "recommended": [
+        "exceptions"
+      ],
+      "optional": [
+        "related decisions",
+        "related requirements"
+      ],
+      "metadata": {
+        "status": [
+          "Proposed",
+          "Accepted",
+          "Superseded"
+        ]
+      },
+      "retired_status": [
+        "Superseded"
+      ],
+      "descriptions": {
+        "statement": "The rule this policy imposes",
+        "scope": "Who and what the policy applies to",
+        "exceptions": "Recorded exceptions and who may grant them"
+      },
+      "guidance": {
+        "statement": [
+          "State the rule in one normative sentence."
+        ],
+        "scope": [
+          "Which teams, systems, or data does it cover?"
+        ],
+        "exceptions": [
+          "Who can grant an exception, and how is it recorded?"
+        ]
+      },
+      "synonyms": {},
+      "id_field": null,
+      "starter_bodies": {
+        "statement": "TODO: state the rule.",
+        "scope": "TODO: describe the scope.",
+        "exceptions": "TODO: describe exceptions."
+      }
+    }
+  ]
+}
