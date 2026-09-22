@@ -61,6 +61,12 @@ details, release history over commit history.
   parent bundle edited without a re-pin fails the next call, and cached stores
   written before inherited types existed are no longer served for a closure
   that pins a bundle.
+- `decided export --at <revision>` works in a federated repository whose
+  corpus or parents pin a spec bundle (it failed with
+  `artifact-spec-bundle-missing` because the historical snapshot omitted the
+  bundle files), and every historical export now classifies artifacts under
+  the bundles pinned at that revision rather than the working tree's, so a
+  broken working-tree pin no longer blocks exporting history.
 - `decided new` and `decided migrate` in a repository with a version-2
   federation manifest, which failed with `federated-corpus-snapshot-failed`
   because the identifier-collision scan composed the repository root, a path
