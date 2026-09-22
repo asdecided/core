@@ -54,6 +54,13 @@ details, release history over commit history.
   version 1, so inherited types classify, and read stdin (`-`) with the
   working directory's registry. The `decided-mcp` startup probe no longer
   warns that a corpus holding only bundle types is empty.
+- A running `decided-mcp` with the cache on (the default) now follows the
+  artifact-type registry: a re-pinned bundle or a removed `artifact_types`
+  stanza lands on the next tool call instead of after a restart. On a
+  version-1 federation the warm path re-verifies every pinned bundle, so a
+  parent bundle edited without a re-pin fails the next call, and cached stores
+  written before inherited types existed are no longer served for a closure
+  that pins a bundle.
 - `decided new` and `decided migrate` in a repository with a version-2
   federation manifest, which failed with `federated-corpus-snapshot-failed`
   because the identifier-collision scan composed the repository root, a path
