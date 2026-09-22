@@ -393,8 +393,10 @@ A repository that pins a spec bundle in `.decided/config.yaml` (see
 lists its declared types after the built-ins; `schema <type> --template` and
 `decided new <type>` render them from the bundle's starter bodies. In a
 federated repository `decided new` also sees the types inherited from parents
-(ADR-150), because it composes the closure first; `schema` and `templates`
-take no corpus directory and list the local registry only.
+(ADR-150), because it composes the closure first, and its identifier-collision
+scan covers the composed closure of the top-level corpus directory holding
+the target; `schema` and `templates` take no corpus directory and list the
+local registry only.
 
 ---
 
