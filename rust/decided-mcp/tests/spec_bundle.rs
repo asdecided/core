@@ -135,3 +135,38 @@ fn corpus_without_the_stanza_sees_only_the_builtins() {
     // an unknown document — exactly as before bundles existed.
     assert_eq!(by_type["unknown"], 1);
 }
+
+#[test]
+fn startup_probe_counts_bundle_type_artifacts() {
+    let root = common::scratch("spec-bundle-startup");
+    let digest = rac_engine::sha256::hexdigest(BUNDLE.as_bytes());
+    for (name, contents) in [
+        (".decided/config.yaml", config(&digest)),
+        (".decided/artifact-specs.json", BUNDLE.to_string()),
+        ("runbooks/deploy.md", RUNBOOK.to_string()),
+    ] {
+        let path = root.join(name);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, contents).unwrap();
+    }
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_decided-mcp"))
+        .arg("--root")
+        .arg(&root)
+        .arg("--no-cache")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .and_then(|mut child| {
+            use std::io::Write;
+            writeln!(child.stdin.take().unwrap(), "{}", initialize()).unwrap();
+            child.wait_with_output()
+        })
+        .unwrap();
+    assert!(output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("no AsDecided artifacts found"),
+        "a corpus holding only bundle types is not empty: {stderr}"
+    );
+}

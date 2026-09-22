@@ -425,3 +425,144 @@ fn a_bundle_type_does_not_misclassify_as_a_builtin_and_vice_versa() {
     assert_eq!(inspect["type"], "runbook");
     assert_eq!(inspect["confidence"], 1.0);
 }
+
+/// Break the fixture runbook (drop its required `## Steps`).
+fn drop_runbook_steps(root: &Path) {
+    let path = root.join("decisions/runbooks/deploy-search-service.md");
+    let text = fs::read_to_string(&path).unwrap();
+    let start = text.find("## Steps").unwrap();
+    let end = text.find("## Rollback").unwrap();
+    fs::write(&path, format!("{}{}", &text[..start], &text[end..])).unwrap();
+}
+
+/// Change the bundle bytes without re-pinning them.
+fn tamper_bundle(root: &Path) {
+    let path = root.join(".decided/artifact-specs.json");
+    let mut bytes = fs::read(&path).unwrap();
+    bytes.extend_from_slice(b" \n");
+    fs::write(path, bytes).unwrap();
+}
+
+#[test]
+fn gate_sentry_and_rename_load_the_bundle_and_refuse_a_broken_pin() {
+    let root = fixture_copy("every-command");
+    drop_runbook_steps(&root);
+    // The gate sees what validate sees: the runbook is a runbook, and invalid.
+    let gate = run_in(&root, &["gate", "decisions", "--json"]);
+    assert_eq!(gate.status.code(), Some(1), "{}", stdout(&gate));
+    assert!(stdout(&gate).contains("missing-steps"), "{}", stdout(&gate));
+
+    tamper_bundle(&root);
+    for args in [
+        ["gate", "decisions"].as_slice(),
+        ["sentry", "decisions", "--full"].as_slice(),
+        [
+            "rename",
+            "SPB-000000000003",
+            "SPB-000000000099",
+            "decisions",
+        ]
+        .as_slice(),
+        ["watchkeeper", "decisions", "--base", "decisions"].as_slice(),
+    ] {
+        let output = run_in(&root, args);
+        assert_eq!(
+            output.status.code(),
+            Some(1),
+            "{args:?}: {}",
+            stdout(&output)
+        );
+        assert!(
+            stderr(&output).starts_with("decided: artifact-spec-bundle-digest-mismatch: "),
+            "{args:?}: {}",
+            stderr(&output)
+        );
+    }
+}
+
+#[test]
+fn rename_rewrites_references_held_by_bundle_type_artifacts() {
+    let root = fixture_copy("rename");
+    for relative in [
+        "decisions/runbooks/deploy-search-service.md",
+        "decisions/policies/data-retention.md",
+    ] {
+        let path = root.join(relative);
+        let text = fs::read_to_string(&path)
+            .unwrap()
+            .replace("- adr-001-example\n", "- SPB-000000000003\n");
+        fs::write(path, text).unwrap();
+    }
+    let applied = run_in(
+        &root,
+        &[
+            "rename",
+            "SPB-000000000003",
+            "SPB-000000000099",
+            "decisions",
+            "--apply",
+        ],
+    );
+    assert_eq!(applied.status.code(), Some(0), "{}", stderr(&applied));
+    assert!(
+        stdout(&applied).contains("Applied: 2 reference(s)"),
+        "{}",
+        stdout(&applied)
+    );
+    let check = run_in(&root, &["relationships", "decisions", "--validate"]);
+    assert_eq!(check.status.code(), Some(0), "{}", stdout(&check));
+    for relative in [
+        "decisions/runbooks/deploy-search-service.md",
+        "decisions/policies/data-retention.md",
+    ] {
+        assert!(fs::read_to_string(root.join(relative))
+            .unwrap()
+            .contains("- SPB-000000000099"));
+    }
+}
+
+#[test]
+fn watchkeeper_compares_bundle_types_under_the_working_tree_registry() {
+    let root = fixture_copy("watchkeeper");
+    let base = scratch("watchkeeper-base");
+    copy_dir(&root.join("decisions"), &base);
+    drop_runbook_steps(&root);
+    let output = run_in(
+        &root,
+        &["watchkeeper", "decisions", "--base", base.to_str().unwrap()],
+    );
+    let text = stdout(&output);
+    assert!(
+        text.contains("runbooks/deploy-search-service.md  (runbook)"),
+        "{text}"
+    );
+    assert!(text.contains("Invalid:  0 → 1"), "{text}");
+}
+
+#[test]
+fn stdin_inspect_and_improve_see_the_bundle_types() {
+    let root = fixture();
+    let runbook = fs::read(root.join("decisions/runbooks/deploy-search-service.md")).unwrap();
+    for command in ["inspect", "improve"] {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_decided"))
+            .args([command, "-"])
+            .current_dir(&root)
+            .env("DECIDED_NO_CACHE", "1")
+            .env("LC_ALL", "C")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        {
+            use std::io::Write;
+            child.stdin.take().unwrap().write_all(&runbook).unwrap();
+        }
+        let output = child.wait_with_output().unwrap();
+        assert!(
+            stdout(&output).starts_with("Artifact Type: Runbook"),
+            "{command}: {}",
+            stdout(&output)
+        );
+    }
+}
