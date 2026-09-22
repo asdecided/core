@@ -793,6 +793,30 @@ fn a_version_one_parent_bundle_is_inherited_and_scaffolds_in_the_child() {
     assert_eq!(root_file.status.code(), Some(0), "{}", stdout(&root_file));
     assert_eq!(json(&root_file)["valid"], true);
 
+    // inspect and improve compose the version-1 closure too.
+    repo.write(
+        "decisions/runbooks/local.md",
+        "---\nschema_version: 1\nid: APP-000000000008\ntype: runbook\n---\n# Local Runbook\n\n## Status\n\nActive\n\n## Purpose\n\nRoll a build.\n\n## Steps\n\n1. Deploy.\n",
+    );
+    for args in [
+        ["inspect", "decisions/runbooks/local.md"].as_slice(),
+        ["improve", "decisions/runbooks/local.md"].as_slice(),
+    ] {
+        let output = repo.run(args);
+        assert!(
+            stdout(&output).starts_with("Artifact Type: Runbook"),
+            "{args:?}: {}",
+            stdout(&output)
+        );
+    }
+    let inspected = repo.run(&["inspect", "decisions"]);
+    assert!(
+        stdout(&inspected).contains("Runbooks: 1"),
+        "{}",
+        stdout(&inspected)
+    );
+    fs::remove_file(repo.root().join("decisions/runbooks/local.md")).unwrap();
+
     // `new` composes the closure first, so an inherited type scaffolds.
     fs::create_dir_all(repo.root().join("decisions/runbooks")).unwrap();
     let created = repo.run(&["new", "runbook", "decisions/runbooks/rotate-keys.md"]);
