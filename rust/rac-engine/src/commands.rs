@@ -1984,7 +1984,37 @@ fn materialize_node_metadata(
             )
             .map_err(HistoricalExportError::from)?;
     }
+    // A node that pins a spec bundle at this revision needs the bundle too:
+    // composition verifies it against the pin (ADR-083, ADR-150). A pin the
+    // snapshot cannot honour is left for composition to report with its
+    // stable code, exactly as a working-tree read would.
+    if let Some(pin) = historical_bundle_pin(snapshot.root(), node) {
+        snapshot
+            .materialize_path(
+                node_path(node, &pin),
+                crate::revisions::MissingPathPolicy::Ignore,
+            )
+            .map_err(HistoricalExportError::from)?;
+    }
     Ok(())
+}
+
+/// The bundle path a node's materialised config pins, when it is a plain
+/// contained relative path; anything else is composition's to reject.
+fn historical_bundle_pin(snapshot_root: &Path, node: &Path) -> Option<String> {
+    let config = snapshot_root.join(node_path(node, crate::federation::CONFIG_RELATIVE_PATH));
+    let text = std::fs::read_to_string(config).ok()?;
+    let yaml = crate::frontmatter::yaml_load_config(&text).ok()?;
+    let pin = crate::spec::bundle_pin_from_config(&yaml).ok()??;
+    let contained = !pin.path.is_empty()
+        && !pin.path.starts_with('/')
+        && !pin.path.contains('\\')
+        && !pin.path.contains(':')
+        && pin
+            .path
+            .split('/')
+            .all(|segment| !segment.is_empty() && segment != "." && segment != "..");
+    contained.then_some(pin.path)
 }
 
 fn materialize_ancestor_metadata(
@@ -2201,7 +2231,9 @@ pub(crate) fn cmd_export_at(args: &ExportArgs, at: Option<&str>) -> i32 {
     if args.schema.is_none() && at.is_none() && !Path::new(&args.directory).is_dir() {
         return usage_error(&format!("not a directory: {}", args.directory));
     }
-    if args.schema.is_none() {
+    // A historical export syncs from its snapshot below, so a revision is
+    // classified under the bundle it pinned, not the working tree's.
+    if args.schema.is_none() && at.is_none() {
         if let Some(code) = spec_sync_or_exit(&args.directory) {
             return code;
         }
@@ -2270,6 +2302,11 @@ pub(crate) fn cmd_export_at(args: &ExportArgs, at: Option<&str>) -> i32 {
         .map_or(args.directory.as_str(), |snapshot| {
             snapshot.directory.as_str()
         });
+    if historical.is_some() {
+        if let Some(code) = spec_sync_or_exit(export_directory) {
+            return code;
+        }
+    }
     let identity_directory = args.directory.as_str();
     let snapshot_boundary = historical
         .as_ref()
