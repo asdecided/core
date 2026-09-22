@@ -322,8 +322,9 @@ memo:
    source).
 3. Group candidates by name in order of first appearance. One distinct
    content per name is admitted as is; elements that compare equal as
-   admitted elements are silent duplicates, so key order and whitespace in a
-   bundle file cannot manufacture a conflict. Two or more distinct contents
+   admitted data are silent duplicates (map-like fields compare as maps, lists
+   in order, because list order is rendered order), so key order and
+   whitespace in a bundle file cannot manufacture a conflict. Two or more distinct contents
    are a collision: with no override at this source the composition stops
    with `corpus-federation-artifact-type-conflict`, naming the type and every
    declaring source; with an override, the candidate declared by `prefer`
@@ -335,14 +336,23 @@ memo:
    family already uses for a malformed ADR-137 declaration.
 5. The effective registry is the built-ins in registry order followed by the
    surviving elements in first-appearance order. The winner of a collision is
-   what descendants inherit; a descendant that declares yet another content
-   for the name collides afresh and needs its own override, mirroring the
-   override chains of ADR-147.
+   what descendants inherit through this source; a descendant that declares
+   yet another content for the name, or that reaches a losing declaration
+   again through another parent (a diamond), collides afresh and needs its
+   own override, mirroring the override chains and explicit diamond
+   convergence of ADR-147. A middle node's resolution governs its own view
+   only; it is not carried past a sibling path.
 
 **Rationale check.** `rationale` must resolve to exactly one live local
 Decision of the declaring source: one item whose origin is that source and
-whose canonical identifier matches, classified `decision`, and live by the
-same predicate the artifact overrides use. Items only exist after the
+whose canonical identifier matches ignoring case (as ADR-137 rationales do),
+classified `decision`, and live by the same predicate the artifact overrides
+use. An inherited source's corpus is captured whole; the root's captured
+files may be only the command's directory or `--top-level` scope, so a
+root-owned rationale not found there is resolved over a walk of the root's
+working tree with every materialised parent excluded. An override is
+config-level policy, so its validity cannot depend on the directory a
+command names. Items only exist after the
 closure's files are parsed, so this check runs immediately after parsing in
 both composition functions; a failure is `corpus-federation-invalid-override`
 and fails the composition like any other override defect. The registry is
@@ -350,10 +360,13 @@ installed before parsing so inherited types classify; a failed rationale
 check stops the run before anything is served, so the ordering is not
 observable.
 
-**Process slot.** Built registries are memoised by a key over every source's
-`(source, config bytes)` in composition order, which fixes the pins and the
-overrides; the local-only registry of section 1 uses the same key shape with
-one frame. Bundle bytes are re-read and re-hashed against their pin on every
+**Process slot.** Composed registries are memoised by a key over the root
+source and, per source in source order, its identity, layer, config bytes,
+and canonical parent list: the configs fix the pins and the overrides, and
+the parent lists fix the topology, which the manifests carry rather than the
+configs, so a changed graph under byte-identical configs recomposes. The
+local-only registry of section 1 keys on its one `(source, config bytes)`
+frame. Bundle bytes are re-read and re-hashed against their pin on every
 sync before the memo is consulted, so a bundle edited without a re-pin fails
 closed on the next command or request rather than serving the previous
 registry. `sync_registry` keeps an installed federated registry while the

@@ -146,7 +146,9 @@ carry the bundle's own digest, so no new pin is needed and a parent cannot
 change its types without changing the digest the child verifies.
 
 - **Identical declarations are silent; different ones are an error.** Two
-  sources declaring the same element content are one type. Two sources
+  sources declaring the same element content are one type; content is
+  compared as data, so JSON key order does not matter while list order (the
+  rendered order of sections and values) does. Two sources
   declaring the same name with different content stop every command and MCP
   tool with `corpus-federation-artifact-type-conflict`, naming the type and
   the sources, in the same failure class as a duplicate parent or a cycle.
@@ -166,20 +168,26 @@ change its types without changing the digest the child verifies.
         rationale: APP-KWJ9D3C1S10N   # a live local Decision
   ```
 
-  `rationale` must resolve to exactly one Accepted, unretired Decision of the
-  declaring corpus; a name may be overridden at most once; an override for a
+  `rationale` must resolve, ignoring case, to exactly one Accepted, unretired
+  Decision of the declaring corpus. An override is config-level policy, so the
+  Decision is looked up across that whole corpus (a materialised parent's tree
+  excluded) whatever directory or `--top-level` scope a command names. A name
+  may be overridden at most once; an override for a
   name that does not collide, a `prefer` outside the corpus's transitive
   parents, or a preferred source that declares no candidate is
   `corpus-federation-invalid-override`, the finding artifact overrides already
-  use. The winner is what the corpus's descendants inherit; a descendant that
-  declares yet another content collides afresh and needs its own override.
+  use. The winner is what the corpus's descendants inherit through it; a
+  descendant that declares yet another content, or that reaches the losing
+  declaration again through another parent (a diamond), collides afresh and
+  needs its own override, which may prefer any source in its inherited view.
 - **A parent's bundle is verified on every command.** Its bytes are checked
   against the digest in the parent's captured config before any element is
   admitted; a mismatch is the parent-side `artifact-spec-bundle-digest-mismatch`,
   reported with the parent's source, and fails composition.
 - **Provenance is per source.** `decided validate --json` gains
   `artifact_spec_bundles`: one entry per source that pinned a bundle, in
-  composition order, with `source`, `layer`, `path`, `digest`, `admitted`, and
+  composition order, with `source` (`null` for a local bundle whose config
+  declares no `corpus.source`), `layer`, `path`, `digest`, `admitted`, and
   `warnings`. The single `artifact_spec_bundle` object stays for the local
   bundle. The human output adds one `WARN` block per inherited bundle with
   skipped elements, and `decided doctor` names the source in each inherited
