@@ -668,14 +668,58 @@ fn py_parent(p: &str) -> String {
 /// oracle-crash class); the native walk is total, so hostile files simply
 /// contribute whatever identifier they still yield (RAC-KXBPS7SRM6ZB
 /// REQ-002: creation must succeed).
-fn issued_ids(repository_root: &str) -> Result<HashSet<String>, ScaffoldError> {
-    Ok(local_items(repository_root, true)?
+fn issued_ids(repository_root: &str, target_dir: &str) -> Result<HashSet<String>, ScaffoldError> {
+    let items = match graph_collision_scope(repository_root, target_dir)? {
+        // A version-2 graph rejects the repository root as a corpus path, so
+        // the collision set is the composed closure of the top-level corpus
+        // directory holding the target, inherited layer included: an
+        // identifier a parent already issued is not free either.
+        Some(directory) => crate::federated_corpus::load_composed_corpus(&directory, true)
+            .map_err(|error| ScaffoldError::MalformedRepositoryConfig(error.to_string()))?
+            .map(|corpus| corpus.effective().cloned().collect::<Vec<_>>())
+            .unwrap_or_default(),
+        None => local_items(repository_root, true)?,
+    };
+    Ok(items
         .iter()
         .map(|item| {
             crate::identity::artifact_identifier(&item.artifact, item.spec, &item.path)
                 .to_uppercase()
         })
         .collect())
+}
+
+/// For a repository with a version-2 federation manifest, the top-level
+/// directory below the repository root that holds `target_dir` (the
+/// `decisions/` of a standard layout). `None` for an unconfigured or
+/// version-1 repository, whose released root walk stays as it is, and for a
+/// target directly at the repository root.
+fn graph_collision_scope(
+    repository_root: &str,
+    target_dir: &str,
+) -> Result<Option<String>, ScaffoldError> {
+    let root = Path::new(repository_root);
+    if crate::federation::load_graph_manifest(root)
+        .map_err(|error| ScaffoldError::MalformedRepositoryConfig(error.to_string()))?
+        .is_none()
+    {
+        return Ok(None);
+    }
+    let root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let mut candidate = crate::validate::resolve_path(target_dir);
+    if let Ok(canonical) = std::fs::canonicalize(&candidate) {
+        candidate = canonical;
+    }
+    if candidate == root || !candidate.starts_with(&root) {
+        return Ok(None);
+    }
+    while candidate.parent().is_some_and(|parent| parent != root) {
+        match candidate.parent() {
+            Some(parent) => candidate = parent.to_path_buf(),
+            None => return Ok(None),
+        }
+    }
+    Ok(Some(candidate.to_string_lossy().into_owned()))
 }
 
 /// `_assign_id` / migrate's `_next_id` — generate, check, retry bounded.
@@ -720,7 +764,7 @@ pub fn create_artifact(
         .and_then(Path::parent)
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_else(|| ".".to_string());
-    let mut issued = issued_ids(&repository_root)?;
+    let mut issued = issued_ids(&repository_root, &parent)?;
     let artifact_id = assign_id(&config.repository_key, &mut issued)?;
     let content = format!("{}{body}", render_frontmatter(&artifact_id, artifact_type));
     std::fs::write(output_path, content.as_bytes()).map_err(|e| {
@@ -853,7 +897,7 @@ pub fn migrate_metadata(
         .and_then(Path::parent)
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_else(|| ".".to_string());
-    let mut issued = issued_ids(&repository_root)?;
+    let mut issued = issued_ids(&repository_root, directory)?;
 
     let mut files = Vec::new();
     for item in local_items(directory, recursive)? {
