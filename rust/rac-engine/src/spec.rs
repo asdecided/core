@@ -646,6 +646,13 @@ pub fn active_registry() -> Option<&'static Registry> {
     active()
 }
 
+/// A stable identity for the installed registry: its address, which never
+/// changes because registries are leaked once and memoised; 0 for the
+/// embedded built-ins. Long-lived servers compare it across requests.
+pub fn active_registry_identity() -> usize {
+    active().map_or(0, |registry| registry as *const Registry as usize)
+}
+
 /// The local corpus's bundle behind the active registry, when it pins one.
 pub fn active_bundle() -> Option<&'static SpecBundle> {
     active().and_then(|r| r.bundle.as_ref())

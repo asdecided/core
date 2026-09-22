@@ -361,12 +361,11 @@ fn validate_parent(
     Ok(())
 }
 
-/// Compose and install the effective artifact-type registry of a version-1
-/// child and its one parent (ADR-150).
-fn install_parent_registry(
+/// The composer's view of a version-1 child and its one parent.
+pub(crate) fn parent_spec_inputs(
     verified: &VerifiedParent,
-) -> Result<Option<&'static crate::spec::Registry>, FederatedCorpusError> {
-    let nodes = [
+) -> [crate::spec_composition::SourceSpecInput; 2] {
+    [
         crate::spec_composition::SourceSpecInput {
             source: verified.child_source.clone(),
             layer: Layer::Local,
@@ -381,8 +380,25 @@ fn install_parent_registry(
             config_bytes: verified.config_bytes.clone(),
             parents: Vec::new(),
         },
-    ];
+    ]
+}
+
+/// Compose and install the effective artifact-type registry of a version-1
+/// child and its one parent (ADR-150).
+fn install_parent_registry(
+    verified: &VerifiedParent,
+) -> Result<Option<&'static crate::spec::Registry>, FederatedCorpusError> {
+    let nodes = parent_spec_inputs(verified);
     crate::spec_composition::install_effective_registry(&verified.child_source, &nodes)
+        .map_err(|error| spec_error(verified, error))
+}
+
+/// Verify the version-1 closure's pinned bundles without composing; `true`
+/// when either source declares an `artifact_types` stanza.
+pub(crate) fn verify_parent_bundles(
+    verified: &VerifiedParent,
+) -> Result<bool, FederatedCorpusError> {
+    crate::spec_composition::verify_pinned_bundles(&parent_spec_inputs(verified))
         .map_err(|error| spec_error(verified, error))
 }
 

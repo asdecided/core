@@ -39,6 +39,39 @@ pub(crate) struct ServerState {
     >,
     graph_tracker: rac_engine::derived_cache::GraphFederatedCacheTracker,
     graph_cache: graph::GraphCache,
+    /// Identity of the artifact-type registry the resident models were built
+    /// under (ADR-083, ADR-150). A different registry means every cached
+    /// classification may be wrong, so the trackers are rebuilt.
+    registry_identity: usize,
+}
+
+impl ServerState {
+    /// Drop every resident model built under a different registry. Stores on
+    /// disk stay: their keys fold the effective bundle digests, so a rebuilt
+    /// tracker opens only a store written under the current registry.
+    fn follow_registry(&mut self, root: &str) {
+        let identity = rac_engine::spec::active_registry_identity();
+        if identity == self.registry_identity {
+            return;
+        }
+        let cache_dir = rac_engine::derived_cache::default_cache_dir;
+        if self.tracker.is_some() {
+            self.tracker = Some(rac_engine::freshness::FreshnessTracker::new(
+                cache_dir(),
+                root,
+                None,
+            ));
+        }
+        if self.federated_tracker.is_some() {
+            self.federated_tracker = Some(rac_engine::derived_cache::FederatedCacheTracker::new(
+                cache_dir(),
+            ));
+        }
+        self.graph_tracker =
+            rac_engine::derived_cache::GraphFederatedCacheTracker::new(cache_dir());
+        self.graph_cache = graph::GraphCache::default();
+        self.registry_identity = identity;
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -237,6 +270,7 @@ fn main() {
             rac_engine::derived_cache::default_cache_dir(),
         ),
         graph_cache: graph::GraphCache::default(),
+        registry_identity: rac_engine::spec::active_registry_identity(),
     };
     // Audit recorder (ADR-084): built from the `.decided/config.yaml` audit stanza,
     // default-absent for stdio (byte-unchanged when off), mandatory for HTTP.
@@ -764,7 +798,45 @@ fn read_request<'a>(
     }
 }
 
+/// Serve one tool call under the registry governing `root`, rebuilding the
+/// resident models when the registry changed since the last call, and record
+/// the registry the call left installed (a federated composition installs its
+/// own) so the next call compares against it.
 fn dispatch(
+    root: &str,
+    state: &mut ServerState,
+    name: &str,
+    arguments: &Value,
+    recorder: Option<&mut audit::Recorder>,
+    principal: Option<&str>,
+    server_budget: i64,
+) -> Result<String, String> {
+    if matches!(
+        name,
+        "get_artifact"
+            | "search_artifacts"
+            | "retrieve_grounding"
+            | "find_decisions"
+            | "get_related"
+            | "get_summary"
+    ) {
+        rac_engine::spec::sync_registry(root).map_err(|error| error.to_string())?;
+        state.follow_registry(root);
+    }
+    let result = dispatch_tool(
+        root,
+        state,
+        name,
+        arguments,
+        recorder,
+        principal,
+        server_budget,
+    );
+    state.registry_identity = rac_engine::spec::active_registry_identity();
+    result
+}
+
+fn dispatch_tool(
     root: &str,
     state: &mut ServerState,
     name: &str,
@@ -784,10 +856,7 @@ fn dispatch(
     ) {
         return Err(format!("Unknown tool: {name}"));
     }
-    // A pinned spec bundle (ADR-083) is governing config: re-read the pin on
-    // every call so a re-pin lands on the next request, and refuse to serve
-    // when the pin cannot be honoured, exactly as a federation pin failure.
-    rac_engine::spec::sync_registry(root).map_err(|error| error.to_string())?;
+    // The registry was synced by `dispatch` (ADR-083, ADR-150).
     let ServerState {
         repository_root,
         root_corpus_relative,
@@ -797,6 +866,7 @@ fn dispatch(
         federated_tracker,
         graph_tracker,
         graph_cache,
+        registry_identity: _,
     } = state;
     // Audit args mirror server.py's per-tool `observed(...)` shapes exactly
     // (insertion order = recorded key order): non-default arguments ride the
@@ -1235,6 +1305,7 @@ mod tests {
                 PathBuf::from("/definitely-not-a-decided-cache"),
             ),
             graph_cache: graph::GraphCache::default(),
+            registry_identity: rac_engine::spec::active_registry_identity(),
         };
         let result = dispatch(
             "/definitely-not-a-decided-corpus",
@@ -1275,6 +1346,7 @@ mod tests {
                 cache.clone(),
             ),
             graph_cache: graph::GraphCache::default(),
+            registry_identity: rac_engine::spec::active_registry_identity(),
         };
         let arguments = json!({"id": "FIX-0DEC1GRAPH00", "depth": 2});
 
