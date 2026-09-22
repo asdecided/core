@@ -350,6 +350,20 @@ fn is_graph_federation(repository_root: &Path) -> bool {
     )
 }
 
+/// Where a command reading one input syncs the registry from: the working
+/// directory for stdin (`-`), the directory itself for a directory, else the
+/// file's parent — so stdin, a file, and a directory all see the same
+/// registry `validate` would use for them.
+fn registry_start_for_input(input: &str) -> String {
+    if input == "-" {
+        ".".to_string()
+    } else if Path::new(input).is_dir() {
+        input.to_string()
+    } else {
+        py_path_parent(input)
+    }
+}
+
 fn load_composed_or_exit(
     directory: &str,
     recursive: bool,
@@ -1014,10 +1028,8 @@ pub struct InspectArgs {
 }
 
 pub fn cmd_inspect(args: &InspectArgs) -> i32 {
-    if args.file != "-" {
-        if let Some(code) = spec_sync_or_exit(&py_path_parent(&args.file)) {
-            return code;
-        }
+    if let Some(code) = spec_sync_closure_or_exit(&registry_start_for_input(&args.file)) {
+        return code;
     }
     if args.file != "-" {
         match crate::federated_corpus::is_read_only_graph_materialised_path(&args.file) {
@@ -1121,10 +1133,8 @@ pub struct ImproveArgs {
 }
 
 pub fn cmd_improve(args: &ImproveArgs) -> i32 {
-    if args.file != "-" {
-        if let Some(code) = spec_sync_or_exit(&py_path_parent(&args.file)) {
-            return code;
-        }
+    if let Some(code) = spec_sync_closure_or_exit(&registry_start_for_input(&args.file)) {
+        return code;
     }
     let text = match read_markdown_input(&args.file, "improve") {
         Ok(t) => t,
@@ -1432,6 +1442,11 @@ pub fn cmd_gate(args: &GateArgs) -> i32 {
     if !Path::new(&args.directory).is_dir() {
         return usage_error(&format!("not a directory: {}", args.directory));
     }
+    // The registry must be the one `validate` uses, or bundle-type artifacts
+    // escape the gate as unknown documents and a broken pin passes (ADR-083).
+    if let Some(code) = spec_sync_or_exit(&args.directory) {
+        return code;
+    }
     if args.code && !args.full && args.base.is_none() {
         return usage_error("a diff base is required for --code unless --full is supplied");
     }
@@ -1493,6 +1508,9 @@ pub struct SentryArgs {
 pub fn cmd_sentry(args: &SentryArgs) -> i32 {
     if !Path::new(&args.directory).is_dir() {
         return usage_error(&format!("not a directory: {}", args.directory));
+    }
+    if let Some(code) = spec_sync_or_exit(&args.directory) {
+        return code;
     }
     let composed = match load_composed_or_exit(&args.directory, !args.top_level) {
         Ok(composed) => composed,
@@ -1647,6 +1665,13 @@ pub fn cmd_watchkeeper(args: &WatchkeeperArgs) -> i32 {
     };
     if !Path::new(&directory).is_dir() {
         return usage_error(&format!("not a directory: {directory}"));
+    }
+    // Both sides are compared under the working tree's registry: a base
+    // revision is materialised from the corpus path only, so it carries no
+    // config or bundle of its own, and one registry keeps a type from
+    // appearing to change merely because a side could not load the bundle.
+    if let Some(code) = spec_sync_or_exit(&directory) {
+        return code;
     }
     let report = match crate::watchkeeper::build_watchkeeper_report(
         &directory,
@@ -3827,6 +3852,11 @@ pub fn cmd_rename(args: &RenameArgs) -> i32 {
         return usage_error(&format!("not a directory: {}", args.directory));
     }
     if let Some(code) = refuse_read_only_target(&args.directory) {
+        return code;
+    }
+    // A rename that cannot classify bundle-type artifacts would skip their
+    // references and leave them dangling (ADR-083).
+    if let Some(code) = spec_sync_or_exit(&args.directory) {
         return code;
     }
     let composed = match load_composed_or_exit(&args.directory, !args.top_level) {
