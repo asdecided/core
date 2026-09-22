@@ -26,6 +26,10 @@ const INVALID_OVERRIDE: &str = "corpus-federation-invalid-override";
 /// A `runbook` element that differs from the standards declaration.
 const RUNBOOK_ALT: &str = r#"{"name":"runbook","display":"Run Book","required":["purpose"],"recommended":[],"optional":[],"metadata":{"status":["Active"]},"retired_status":[],"descriptions":{},"guidance":{},"synonyms":{},"id_field":null,"starter_bodies":{"purpose":"TODO"}}"#;
 
+/// One override-defect case: tag, `(name, prefer, rationale)` entries, the
+/// expected stable code, and a fragment of its message.
+type OverrideCase<'a> = (&'a str, &'a [(&'a str, &'a str, &'a str)], &'a str, &'a str);
+
 fn fixture() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../fixtures/spec-federation")
@@ -478,7 +482,7 @@ fn override_defects_fail_with_one_stable_code_each() {
                 .unwrap();
         policy["artifact_specs"][0].to_string()
     };
-    let cases: [(&str, &[(&str, &str, &str)], &str, &str); 6] = [
+    let cases: [OverrideCase; 6] = [
         (
             "proposed",
             &[("runbook", "local", PROPOSED_RATIONALE)],
