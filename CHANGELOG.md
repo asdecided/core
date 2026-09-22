@@ -76,6 +76,16 @@ details, release history over commit history.
   scalar; a type name may not overwrite an existing `stats --json` key; and
   ill-typed `descriptions`, `starter_bodies`, and `guidance` values are skipped
   with `artifact-spec-skipped` instead of being admitted as empty.
+- ADR-150 composition correctness: a type override's rationale resolves
+  across the declaring corpus instead of only the directory or `--top-level`
+  scope a command names, and ignores case as ADR-137 rationales do; two
+  declarations that differ only in JSON key order are one type instead of a
+  `corpus-federation-artifact-type-conflict`; the composed-registry memo is
+  keyed on the federation topology as well as the configs, so a long-running
+  process sees a changed parent graph; `decided new` and `decided migrate` in a
+  version-2 repository again count identifiers in sibling top-level
+  directories as issued; and `artifact_spec_bundles` reports `source: null`,
+  not the `prefer: local` keyword, for a local bundle without `corpus.source`.
 - `decided new` and `decided migrate` in a repository with a version-2
   federation manifest, which failed with `federated-corpus-snapshot-failed`
   because the identifier-collision scan composed the repository root, a path
