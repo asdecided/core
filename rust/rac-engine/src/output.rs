@@ -374,6 +374,32 @@ pub fn render_validate_dir_human(result: &DirectoryValidation) -> String {
             lines.push(String::new());
         }
     }
+    // Skipped elements of an inherited source's bundle (ADR-150 decision 6):
+    // one block per inherited source, labelled with it.
+    for source in result
+        .bundles
+        .iter()
+        .filter(|s| s.layer == crate::corpus::Layer::Inherited && !s.bundle.warnings.is_empty())
+    {
+        lines.push(format!(
+            "WARN  {}:{}  (artifact spec bundle, inherited)",
+            source.source, source.bundle.pin.path
+        ));
+        for warning in &source.bundle.warnings {
+            let label = match &warning.name {
+                Some(name) => format!("element {name}"),
+                None => format!("element #{}", warning.index),
+            };
+            push_issue_lines(
+                &mut lines,
+                "warning",
+                warning.code,
+                &label,
+                &warning.message,
+            );
+        }
+        lines.push(String::new());
+    }
 
     if let Some(okf) = &result.okf {
         if !okf.findings.is_empty() {
@@ -498,6 +524,40 @@ pub fn render_validate_dir_json(result: &DirectoryValidation) -> String {
         b.insert("admitted".into(), json!(bundle.admitted));
         b.insert("warnings".into(), Value::Array(warnings));
         payload.insert("artifact_spec_bundle".into(), Value::Object(b));
+    }
+    // One entry per source that contributed a bundle, in composition order
+    // (ADR-150 decision 6); the single-object key above stays for the local
+    // bundle so existing readers are unchanged (ADR-007).
+    if !result.bundles.is_empty() {
+        let entries: Vec<Value> = result
+            .bundles
+            .iter()
+            .map(|source| {
+                let warnings: Vec<Value> = source
+                    .bundle
+                    .warnings
+                    .iter()
+                    .map(|w| {
+                        let mut m = Map::new();
+                        m.insert("code".into(), json!(w.code));
+                        m.insert("index".into(), json!(w.index));
+                        m.insert("name".into(), json!(w.name));
+                        m.insert("message".into(), json!(w.message));
+                        m.insert("severity".into(), json!("warning"));
+                        Value::Object(m)
+                    })
+                    .collect();
+                let mut m = Map::new();
+                m.insert("source".into(), json!(source.source));
+                m.insert("layer".into(), json!(source.layer.as_str()));
+                m.insert("path".into(), json!(source.bundle.pin.path));
+                m.insert("digest".into(), json!(source.bundle.pin.digest));
+                m.insert("admitted".into(), json!(source.bundle.admitted));
+                m.insert("warnings".into(), Value::Array(warnings));
+                Value::Object(m)
+            })
+            .collect();
+        payload.insert("artifact_spec_bundles".into(), Value::Array(entries));
     }
     if let Some(okf) = &result.okf {
         let findings: Vec<Value> = okf

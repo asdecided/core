@@ -28,6 +28,11 @@
 //! located, read, or parsed — is a hard error, matching the federation pin.
 //! With no `artifact_types` stanza nothing here is consulted and every
 //! consumer sees exactly the embedded five.
+//!
+//! ADR-150: in a federated closure the effective registry also carries every
+//! parent's admitted bundle types, composed bottom-up by `spec_composition`;
+//! the stanza's optional `overrides` list adjudicates a name two sources
+//! declare differently.
 
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Mutex, OnceLock, RwLock};
@@ -40,7 +45,7 @@ use crate::frontmatter::Yaml;
 const SPEC_JSON: &str = include_str!("../assets/spec/artifact-specs.json");
 
 /// One artifact type's schema. Field names/order mirror the Python dataclass.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArtifactSpec {
     /// Canonical key, e.g. `"requirement"`.
     pub name: String,
@@ -226,6 +231,17 @@ fn data() -> &'static SpecData {
 /// Warning code for one skipped bundle element.
 pub const CODE_SPEC_SKIPPED: &str = "artifact-spec-skipped";
 
+/// Two sources declare one type name with different content and the
+/// composing corpus records no override (ADR-150 decision 2).
+pub const CODE_TYPE_CONFLICT: &str = "corpus-federation-artifact-type-conflict";
+
+/// An `artifact_types.overrides` entry the engine cannot honour (ADR-150
+/// decision 3): the same finding the artifact-override family uses.
+pub const CODE_INVALID_TYPE_OVERRIDE: &str = crate::graph_composition::FINDING_INVALID_OVERRIDE;
+
+/// The literal `prefer` value naming the declaring corpus itself.
+pub const OVERRIDE_PREFER_LOCAL: &str = "local";
+
 /// Maximum bundle size in bytes (the ADR-145 bounded-parse posture).
 pub const MAX_BUNDLE_BYTES: u64 = 1_048_576;
 /// Maximum JSON nodes in a bundle (objects, arrays, and scalars).
@@ -274,12 +290,49 @@ pub struct BundlePin {
 }
 
 /// A verified, parsed, admitted bundle: what `validate` and `doctor` report.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpecBundle {
     pub pin: BundlePin,
     /// Admitted type names in bundle order.
     pub admitted: Vec<String>,
     pub warnings: Vec<BundleWarning>,
+}
+
+/// One entry of `artifact_types.overrides` (ADR-150 decision 3): which
+/// source's element wins a named collision, backed by a local Decision.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypeOverride {
+    pub name: String,
+    /// [`OVERRIDE_PREFER_LOCAL`] or a global corpus source in the declaring
+    /// corpus's inherited view.
+    pub prefer: String,
+    /// Canonical identifier of a live local Decision of the declaring corpus.
+    pub rationale: String,
+}
+
+/// The parsed `artifact_types` stanza: a pin, overrides, or both.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SpecStanza {
+    pub pin: Option<BundlePin>,
+    pub overrides: Vec<TypeOverride>,
+}
+
+/// One source's contribution to the effective registry (ADR-150 decision 6).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceSpecBundle {
+    pub source: String,
+    pub layer: crate::corpus::Layer,
+    pub bundle: SpecBundle,
+}
+
+/// An override applied while composing the effective registry, kept so its
+/// rationale can be checked once the closure's artifacts are parsed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AppliedOverride {
+    pub owner: String,
+    pub name: String,
+    pub prefer: String,
+    pub rationale: String,
 }
 
 /// Why a pinned bundle could not be loaded. Every variant is a hard error:
@@ -304,6 +357,24 @@ pub enum SpecBundleError {
     DigestMismatch { expected: String, actual: String },
     /// The file is not a JSON object with an `artifact_specs` array.
     Parse(String),
+    /// Two sources declare `name` with different content and `owner`, the
+    /// corpus composing them, records no override for it.
+    TypeConflict {
+        owner: String,
+        name: String,
+        sources: Vec<String>,
+    },
+    /// An `artifact_types.overrides` entry of `owner` that cannot be honoured.
+    InvalidOverride {
+        owner: String,
+        name: String,
+        reason: String,
+    },
+    /// A bundle failure in an inherited source, reported with that source.
+    InSource {
+        source: String,
+        error: Box<SpecBundleError>,
+    },
 }
 
 impl SpecBundleError {
@@ -319,6 +390,18 @@ impl SpecBundleError {
             Self::InvalidDigest(_) => "artifact-spec-bundle-digest-invalid",
             Self::DigestMismatch { .. } => "artifact-spec-bundle-digest-mismatch",
             Self::Parse(_) => "artifact-spec-bundle-parse-failed",
+            Self::TypeConflict { .. } => CODE_TYPE_CONFLICT,
+            Self::InvalidOverride { .. } => CODE_INVALID_TYPE_OVERRIDE,
+            Self::InSource { error, .. } => error.stable_code(),
+        }
+    }
+
+    /// The source the failure belongs to, when it is not the local corpus.
+    pub fn source(&self) -> Option<&str> {
+        match self {
+            Self::InSource { source, .. } => Some(source),
+            Self::TypeConflict { owner, .. } | Self::InvalidOverride { owner, .. } => Some(owner),
+            _ => None,
         }
     }
 }
@@ -340,6 +423,28 @@ impl SpecBundleError {
                 "artifact spec bundle bytes hash to {actual}, but .decided/config.yaml pins \
                  {expected}; re-pin the bundle after reviewing the change"
             ),
+            Self::TypeConflict {
+                owner,
+                name,
+                sources,
+            } => format!(
+                "artifact type '{name}' is declared with different content by {}; '{owner}' \
+                 must record a Decision and select one under artifact_types.overrides \
+                 (ADR-150)",
+                sources
+                    .iter()
+                    .map(|s| format!("'{s}'"))
+                    .collect::<Vec<_>>()
+                    .join(" and ")
+            ),
+            Self::InvalidOverride {
+                owner,
+                name,
+                reason,
+            } => format!("artifact_types.overrides entry '{name}' in '{owner}': {reason}"),
+            Self::InSource { source, error } => {
+                format!("inherited source '{source}': {}", error.detail())
+            }
         }
     }
 }
@@ -352,11 +457,23 @@ impl std::fmt::Display for SpecBundleError {
 
 impl std::error::Error for SpecBundleError {}
 
-/// The merged registry: built-ins first, then admitted bundle elements.
+/// The merged registry: built-ins first, then admitted bundle elements — the
+/// local corpus's own, then (ADR-150) every inherited element in composition
+/// order.
 #[derive(Debug)]
 pub struct Registry {
     specs: Vec<ArtifactSpec>,
+    /// The local corpus's own bundle, when it pins one (the ADR-083 report).
     bundle: Option<SpecBundle>,
+    /// Every source that pinned a bundle, in composition order.
+    sources: Vec<SourceSpecBundle>,
+    /// Overrides applied while composing, in composition order.
+    overrides: Vec<AppliedOverride>,
+    /// Built from a verified federation rather than the local config alone.
+    federated: bool,
+    /// SHA-256 of the local governing config bytes this registry was built
+    /// under; `sync_registry` keeps the registry while they are unchanged.
+    local_config_digest: String,
 }
 
 impl Registry {
@@ -365,6 +482,29 @@ impl Registry {
         Registry {
             specs: data().specs.clone(),
             bundle: None,
+            sources: Vec::new(),
+            overrides: Vec::new(),
+            federated: false,
+            local_config_digest: String::new(),
+        }
+    }
+
+    /// Assemble a registry from its parts (the composer's constructor).
+    pub(crate) fn from_parts(
+        specs: Vec<ArtifactSpec>,
+        bundle: Option<SpecBundle>,
+        sources: Vec<SourceSpecBundle>,
+        overrides: Vec<AppliedOverride>,
+        federated: bool,
+        local_config_digest: String,
+    ) -> Registry {
+        Registry {
+            specs,
+            bundle,
+            sources,
+            overrides,
+            federated,
+            local_config_digest,
         }
     }
 
@@ -379,19 +519,49 @@ impl Registry {
     pub fn bundle(&self) -> Option<&SpecBundle> {
         self.bundle.as_ref()
     }
+
+    pub fn sources(&self) -> &[SourceSpecBundle] {
+        &self.sources
+    }
+
+    pub fn overrides(&self) -> &[AppliedOverride] {
+        &self.overrides
+    }
+
+    pub fn is_federated(&self) -> bool {
+        self.federated
+    }
 }
 
 /// The process slot. `None` means the embedded registry (no bundle pinned):
 /// every reader then touches exactly the same data as before bundles existed.
 static ACTIVE: RwLock<Option<&'static Registry>> = RwLock::new(None);
 
-/// Every registry this process has built, keyed by the pin that produced it.
-/// A registry is leaked once so `&'static` keeps every consumer signature
-/// intact; a later sync that observes a pin already here reuses its registry
-/// instead of leaking another copy. The process therefore holds at most one
-/// registry per distinct pin it has served, however often a long-running
-/// server flips between pins.
-static BUILT: Mutex<Vec<(BundlePin, &'static Registry)>> = Mutex::new(Vec::new());
+/// Every registry this process has built, keyed by the governing config bytes
+/// that produced it (every source's, in composition order — the pins and the
+/// overrides are inside them). A registry is leaked once so `&'static` keeps
+/// every consumer signature intact; a later sync that observes a key already
+/// here reuses its registry instead of leaking another copy. The process
+/// therefore holds at most one registry per distinct key it has served,
+/// however often a long-running server flips between pins.
+static BUILT: Mutex<Vec<(String, &'static Registry)>> = Mutex::new(Vec::new());
+
+const REGISTRY_KEY_DOMAIN: &[u8] = b"asdecided-spec-registry-key-v1\0";
+
+/// The memo key for a registry: a digest over `(source, config bytes)` frames
+/// in composition order. Bundle bytes are not framed; they are re-verified
+/// against their pin before the memo is consulted.
+pub(crate) fn registry_key(frames: &[(&str, &[u8])]) -> String {
+    let mut hasher = crate::sha256::Sha256::new();
+    hasher.update(REGISTRY_KEY_DOMAIN);
+    for (source, config) in frames {
+        hasher.update(&(source.len() as u64).to_be_bytes());
+        hasher.update(source.as_bytes());
+        hasher.update(&(config.len() as u64).to_be_bytes());
+        hasher.update(config);
+    }
+    hasher.hexdigest()
+}
 
 fn active() -> Option<&'static Registry> {
     *ACTIVE
@@ -400,26 +570,26 @@ fn active() -> Option<&'static Registry> {
 }
 
 /// Point the slot at `registry` for the rest of the process (or until the
-/// next [`sync_registry`] observes a different pin).
-fn install(registry: Option<&'static Registry>) {
+/// next [`sync_registry`] or composition observes a different key).
+pub(crate) fn install(registry: Option<&'static Registry>) {
     *ACTIVE
         .write()
         .unwrap_or_else(|poisoned| poisoned.into_inner()) = registry;
 }
 
-/// The registry for `pin`: the one already built for it, else `build` it once
-/// and keep it for the life of the process. The pin is the identity because
-/// its digest covers the bundle bytes; a bundle edited without a re-pin fails
-/// verification in `build` rather than silently replacing a kept registry.
-fn registry_for_pin(
-    pin: &BundlePin,
+/// The registry for `key`: the one already built for it, else `build` it once
+/// and keep it for the life of the process. Callers verify every bundle's
+/// bytes against its pin before asking, so a bundle edited without a re-pin
+/// fails closed rather than reaching a kept registry.
+pub(crate) fn registry_for_key(
+    key: &str,
     build: impl FnOnce() -> Result<Registry, SpecBundleError>,
 ) -> Result<&'static Registry, SpecBundleError> {
     {
         let built = BUILT
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if let Some((_, registry)) = built.iter().find(|(known, _)| known == pin) {
+        if let Some((_, registry)) = built.iter().find(|(known, _)| known == key) {
             return Ok(registry);
         }
     }
@@ -427,11 +597,11 @@ fn registry_for_pin(
     let mut built = BUILT
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    // Another thread may have built the same pin meanwhile; keep the first.
-    if let Some((_, existing)) = built.iter().find(|(known, _)| known == pin) {
+    // Another thread may have built the same key meanwhile; keep the first.
+    if let Some((_, existing)) = built.iter().find(|(known, _)| known == key) {
         return Ok(existing);
     }
-    built.push((pin.clone(), registry));
+    built.push((key.to_string(), registry));
     Ok(registry)
 }
 
@@ -471,15 +641,36 @@ pub fn relationship_descriptions() -> &'static [(String, String)] {
     &data().relationship_descriptions
 }
 
-/// The bundle behind the active registry, when one is pinned.
+/// The active registry, when one other than the embedded five is installed.
+pub fn active_registry() -> Option<&'static Registry> {
+    active()
+}
+
+/// The local corpus's bundle behind the active registry, when it pins one.
 pub fn active_bundle() -> Option<&'static SpecBundle> {
     active().and_then(|r| r.bundle.as_ref())
 }
 
-/// The active bundle's pinned digest, folded into cache generation keys so a
-/// re-pin invalidates classification cached under the previous registry.
+/// Every source contributing a bundle to the active registry, in composition
+/// order; empty when nothing is pinned anywhere in the closure.
+pub fn active_sources() -> &'static [SourceSpecBundle] {
+    active().map_or(&[], |r| r.sources.as_slice())
+}
+
+/// The local bundle's pinned digest.
 pub fn active_bundle_digest() -> Option<&'static str> {
     active_bundle().map(|b| b.pin.digest.as_str())
+}
+
+/// Every effective bundle digest in composition order (ADR-150 decision 5),
+/// folded into cache generation keys so a re-pin anywhere in the closure
+/// invalidates classification cached under the previous registry. With one
+/// local bundle this is exactly the ADR-083 single digest.
+pub fn active_bundle_digests() -> Vec<&'static str> {
+    active_sources()
+        .iter()
+        .map(|s| s.bundle.pin.digest.as_str())
+        .collect()
 }
 
 /// Plural heading for a bundle-declared type's display name (`Runbooks`,
@@ -525,9 +716,15 @@ fn yaml_get<'a>(pairs: &'a [(Yaml, Yaml)], key: &str) -> Option<&'a Yaml> {
     })
 }
 
+/// Read the bundle pin from a parsed `.decided/config.yaml`. `Ok(None)` when
+/// the stanza is absent or declares only overrides.
+pub fn bundle_pin_from_config(config: &Yaml) -> Result<Option<BundlePin>, SpecBundleError> {
+    Ok(spec_stanza_from_config(config)?.and_then(|stanza| stanza.pin))
+}
+
 /// Read the `artifact_types` stanza from a parsed `.decided/config.yaml`.
 /// `Ok(None)` when the stanza is absent (the inert case).
-pub fn bundle_pin_from_config(config: &Yaml) -> Result<Option<BundlePin>, SpecBundleError> {
+pub fn spec_stanza_from_config(config: &Yaml) -> Result<Option<SpecStanza>, SpecBundleError> {
     let Yaml::Map(root) = config else {
         return Ok(None);
     };
@@ -539,6 +736,17 @@ pub fn bundle_pin_from_config(config: &Yaml) -> Result<Option<BundlePin>, SpecBu
             "'artifact_types' must be a mapping with 'version' and 'bundle'".to_string(),
         ));
     };
+    for (key, _) in stanza {
+        match key {
+            Yaml::Str(k) if k == "version" || k == "bundle" || k == "overrides" => {}
+            other => {
+                return Err(SpecBundleError::Config(format!(
+                    "'artifact_types' has an unknown key {}",
+                    yaml_repr(other)
+                )))
+            }
+        }
+    }
     match yaml_get(stanza, "version") {
         Some(Yaml::Int(1)) => {}
         Some(other) => {
@@ -553,10 +761,23 @@ pub fn bundle_pin_from_config(config: &Yaml) -> Result<Option<BundlePin>, SpecBu
             ))
         }
     }
-    let Some(Yaml::Map(bundle)) = yaml_get(stanza, "bundle") else {
-        return Err(SpecBundleError::Config(
-            "'artifact_types.bundle' must be a mapping with 'path' and 'digest'".to_string(),
-        ));
+    let overrides = match yaml_get(stanza, "overrides") {
+        None => Vec::new(),
+        Some(value) => type_overrides_from_yaml(value)?,
+    };
+    let bundle = match yaml_get(stanza, "bundle") {
+        Some(Yaml::Map(bundle)) => bundle,
+        None if !overrides.is_empty() => {
+            return Ok(Some(SpecStanza {
+                pin: None,
+                overrides,
+            }))
+        }
+        _ => {
+            return Err(SpecBundleError::Config(
+                "'artifact_types.bundle' must be a mapping with 'path' and 'digest'".to_string(),
+            ));
+        }
     };
     for (key, _) in bundle {
         match key {
@@ -585,7 +806,83 @@ pub fn bundle_pin_from_config(config: &Yaml) -> Result<Option<BundlePin>, SpecBu
             ))
         }
     };
-    Ok(Some(BundlePin { path, digest }))
+    Ok(Some(SpecStanza {
+        pin: Some(BundlePin { path, digest }),
+        overrides,
+    }))
+}
+
+/// The `overrides` list (ADR-150 decision 3): each entry exactly `name`,
+/// `prefer`, and `rationale`, all non-empty strings; `prefer` is `local` or a
+/// well-formed global corpus source; a name appears at most once.
+fn type_overrides_from_yaml(value: &Yaml) -> Result<Vec<TypeOverride>, SpecBundleError> {
+    let Yaml::List(items) = value else {
+        return Err(SpecBundleError::Config(
+            "'artifact_types.overrides' must be a non-empty list of mappings".to_string(),
+        ));
+    };
+    if items.is_empty() {
+        return Err(SpecBundleError::Config(
+            "'artifact_types.overrides' must be a non-empty list of mappings".to_string(),
+        ));
+    }
+    let mut overrides: Vec<TypeOverride> = Vec::with_capacity(items.len());
+    for (index, item) in items.iter().enumerate() {
+        let Yaml::Map(fields) = item else {
+            return Err(SpecBundleError::Config(format!(
+                "'artifact_types.overrides[{index}]' must be a mapping with 'name', 'prefer', \
+                 and 'rationale'"
+            )));
+        };
+        for (key, _) in fields {
+            match key {
+                Yaml::Str(k) if k == "name" || k == "prefer" || k == "rationale" => {}
+                other => {
+                    return Err(SpecBundleError::Config(format!(
+                        "'artifact_types.overrides[{index}]' has an unknown key {}",
+                        yaml_repr(other)
+                    )))
+                }
+            }
+        }
+        let field = |name: &str| -> Result<String, SpecBundleError> {
+            match yaml_get(fields, name) {
+                Some(Yaml::Str(s)) if !s.trim().is_empty() => Ok(s.clone()),
+                _ => Err(SpecBundleError::Config(format!(
+                    "'artifact_types.overrides[{index}].{name}' must be a non-empty string"
+                ))),
+            }
+        };
+        let name = field("name")?;
+        if !valid_type_name(&name) {
+            return Err(SpecBundleError::Config(format!(
+                "'artifact_types.overrides[{index}].name' {} is not a valid type name",
+                crate::pycompat::py_repr_str(&name)
+            )));
+        }
+        let prefer = field("prefer")?;
+        if prefer != OVERRIDE_PREFER_LOCAL && !crate::scaffold::valid_corpus_source(&prefer) {
+            return Err(SpecBundleError::Config(format!(
+                "'artifact_types.overrides[{index}].prefer' must be 'local' or a global corpus \
+                 source, got {}",
+                crate::pycompat::py_repr_str(&prefer)
+            )));
+        }
+        let rationale = field("rationale")?;
+        if overrides.iter().any(|o| o.name == name) {
+            return Err(SpecBundleError::Config(format!(
+                "'artifact_types.overrides' names {} more than once; a name may be overridden \
+                 at most once per corpus",
+                crate::pycompat::py_repr_str(&name)
+            )));
+        }
+        overrides.push(TypeOverride {
+            name,
+            prefer,
+            rationale,
+        });
+    }
+    Ok(overrides)
 }
 
 fn yaml_repr(value: &Yaml) -> String {
@@ -695,6 +992,16 @@ fn count_nodes(value: &Value, budget: &mut usize) -> bool {
 /// Load, verify, parse, and admit the pinned bundle into a merged registry.
 /// Hard failures are errors; per-element failures are warnings on the result.
 pub fn load_bundle(repository_root: &Path, pin: &BundlePin) -> Result<Registry, SpecBundleError> {
+    let (path, bytes) = read_verified_bundle(repository_root, pin)?;
+    admit_bundle(&path, &bytes, pin)
+}
+
+/// Locate the pinned bundle under `repository_root`, read it within bounds,
+/// and verify its bytes against the pin. Nothing is parsed here.
+pub fn read_verified_bundle(
+    repository_root: &Path,
+    pin: &BundlePin,
+) -> Result<(PathBuf, Vec<u8>), SpecBundleError> {
     if !valid_digest_literal(&pin.digest) {
         return Err(SpecBundleError::InvalidDigest(format!(
             "'artifact_types.bundle.digest' must be sha256: followed by 64 lowercase hex \
@@ -722,7 +1029,16 @@ pub fn load_bundle(repository_root: &Path, pin: &BundlePin) -> Result<Registry, 
             actual,
         });
     }
-    let root: Value = serde_json::from_slice(&bytes).map_err(|error| {
+    Ok((path, bytes))
+}
+
+/// Parse verified bundle bytes and admit their elements after the built-ins.
+pub fn admit_bundle(
+    path: &Path,
+    bytes: &[u8],
+    pin: &BundlePin,
+) -> Result<Registry, SpecBundleError> {
+    let root: Value = serde_json::from_slice(bytes).map_err(|error| {
         SpecBundleError::Parse(format!(
             "artifact spec bundle {} is not valid JSON: {error}",
             path.display()
@@ -783,6 +1099,10 @@ pub fn load_bundle(repository_root: &Path, pin: &BundlePin) -> Result<Registry, 
             admitted,
             warnings,
         }),
+        sources: Vec::new(),
+        overrides: Vec::new(),
+        federated: false,
+        local_config_digest: String::new(),
     })
 }
 
@@ -994,42 +1314,98 @@ fn admit_element(element: &Value, taken: &[ArtifactSpec]) -> Result<ArtifactSpec
 
 // --- process synchronisation -------------------------------------------------
 
+/// The local corpus source named by a governing config, when it declares one.
+fn local_source(config_path: &Path, text: &str) -> Option<String> {
+    crate::scaffold::parse_identity_config(&config_path.display().to_string(), text)
+        .ok()
+        .and_then(|identity| identity.corpus_source)
+}
+
 /// Bring the process registry in line with the corpus at or above `start_dir`.
 ///
 /// No governing config, an unparseable config, or a config without an
 /// `artifact_types` stanza installs the embedded registry — the inert case.
-/// A stanza installs the pinned bundle's merged registry, reloading only when
-/// the pin differs from the one already active. A malformed stanza, a missing
-/// or unreadable bundle, or a digest mismatch is a hard error the caller
-/// surfaces exactly as it surfaces a federation pin failure.
+/// A stanza installs the pinned bundle's merged registry, rebuilding only when
+/// the governing config bytes differ from the ones the active registry was
+/// built under; a registry composed from a verified federation (ADR-150) is
+/// kept on the same terms while the manifest is still present. The local
+/// bundle's bytes are re-verified against the pin on every sync. A malformed
+/// stanza, a missing or unreadable bundle, or a digest mismatch is a hard
+/// error the caller surfaces exactly as it surfaces a federation pin failure.
 pub fn sync_registry(start_dir: &str) -> Result<(), SpecBundleError> {
     let Some(config_path) = crate::validate::find_config_file(start_dir) else {
         install(None);
         return Ok(());
     };
-    let Ok(text) = std::fs::read_to_string(&config_path) else {
+    let Ok(bytes) = std::fs::read(&config_path) else {
         install(None);
         return Ok(());
     };
-    let Ok(config) = crate::frontmatter::yaml_load_config(&text) else {
-        // A config the loader cannot read has no readable stanza; every other
-        // reader of this file already degrades the same way.
-        install(None);
-        return Ok(());
-    };
-    let Some(pin) = bundle_pin_from_config(&config)? else {
-        install(None);
-        return Ok(());
-    };
-    if active_bundle().is_some_and(|b| b.pin == pin) {
-        return Ok(());
-    }
     let repository_root = config_path
         .parent()
         .and_then(Path::parent)
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("."));
-    let registry = registry_for_pin(&pin, || load_bundle(&repository_root, &pin))?;
+    let manifest_present =
+        std::fs::symlink_metadata(repository_root.join(crate::federation::MANIFEST_RELATIVE_PATH))
+            .is_ok();
+    let config_digest = crate::sha256::hexdigest(&bytes);
+    if let Some(current) = active() {
+        if current.local_config_digest == config_digest && (!current.federated || manifest_present)
+        {
+            if let Some(bundle) = &current.bundle {
+                read_verified_bundle(&repository_root, &bundle.pin)?;
+            }
+            return Ok(());
+        }
+    }
+    let Ok(text) = std::str::from_utf8(&bytes) else {
+        install(None);
+        return Ok(());
+    };
+    let Ok(config) = crate::frontmatter::yaml_load_config(text) else {
+        // A config the loader cannot read has no readable stanza; every other
+        // reader of this file already degrades the same way.
+        install(None);
+        return Ok(());
+    };
+    let Some(stanza) = spec_stanza_from_config(&config)? else {
+        install(None);
+        return Ok(());
+    };
+    let source = local_source(&config_path, text).unwrap_or_else(|| OVERRIDE_PREFER_LOCAL.into());
+    if !manifest_present {
+        if let Some(first) = stanza.overrides.first() {
+            // Nothing can collide in a corpus that declares no parents.
+            return Err(SpecBundleError::InvalidOverride {
+                owner: source,
+                name: first.name.clone(),
+                reason: "the corpus declares no parents, so no artifact type can collide"
+                    .to_string(),
+            });
+        }
+    }
+    let Some(pin) = stanza.pin else {
+        // Overrides without a bundle: nothing local to admit. Composition of
+        // the federated closure applies them (ADR-150).
+        install(None);
+        return Ok(());
+    };
+    let (path, bundle_bytes) = read_verified_bundle(&repository_root, &pin)?;
+    let key = registry_key(&[(source.as_str(), bytes.as_slice())]);
+    let registry = registry_for_key(&key, || {
+        let mut registry = admit_bundle(&path, &bundle_bytes, &pin)?;
+        registry.sources = vec![SourceSpecBundle {
+            source: source.clone(),
+            layer: crate::corpus::Layer::Local,
+            bundle: registry
+                .bundle
+                .clone()
+                .expect("an admitted bundle carries its report"),
+        }];
+        registry.local_config_digest = config_digest.clone();
+        Ok(registry)
+    })?;
     install(Some(registry));
     Ok(())
 }
@@ -1299,16 +1675,17 @@ mod tests {
     }
 
     #[test]
-    fn a_pin_is_built_and_leaked_at_most_once() {
+    fn a_key_is_built_and_leaked_at_most_once() {
         let root = scratch("memo");
         let pin = write_bundle(&root, &format!("{{\"artifact_specs\":[{RUNBOOK}]}}"));
+        let key = registry_key(&[("acme/memo", pin.digest.as_bytes())]);
         let mut builds = 0;
-        let first = registry_for_pin(&pin, || {
+        let first = registry_for_key(&key, || {
             builds += 1;
             load_bundle(&root, &pin)
         })
         .unwrap();
-        let second = registry_for_pin(&pin, || {
+        let second = registry_for_key(&key, || {
             builds += 1;
             load_bundle(&root, &pin)
         })
@@ -1316,12 +1693,19 @@ mod tests {
         assert!(std::ptr::eq(first, second));
         assert_eq!(builds, 1);
         assert_eq!(first.spec_for("runbook").unwrap().display, "Runbook");
-        // A different pin is its own registry; a failing build keeps nothing.
+        // A different key is its own registry; a failing build keeps nothing.
         let mut other = pin.clone();
         other.digest = format!("sha256:{}", "1".repeat(64));
-        assert!(registry_for_pin(&other, || load_bundle(&root, &other)).is_err());
-        let third = registry_for_pin(&pin, || unreachable!("memoised")).unwrap();
+        let other_key = registry_key(&[("acme/memo", other.digest.as_bytes())]);
+        assert!(registry_for_key(&other_key, || load_bundle(&root, &other)).is_err());
+        let third = registry_for_key(&key, || unreachable!("memoised")).unwrap();
         assert!(std::ptr::eq(first, third));
+        // The key frames source and bytes in order; neither is interchangeable.
+        assert_ne!(key, registry_key(&[("acme/other", pin.digest.as_bytes())]));
+        assert_ne!(
+            registry_key(&[("a", b"x"), ("b", b"y")]),
+            registry_key(&[("b", b"y"), ("a", b"x")])
+        );
     }
 
     #[test]

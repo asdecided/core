@@ -238,7 +238,14 @@ pub fn compose_verified_federation(
         let topology = topology(&federation);
         let aliases = alias_tables(&topology);
         let lifted = lift_overrides(&federation, &aliases)?;
+        // The effective artifact-type registry (ADR-150) is installed before
+        // any file is classified, so inherited types classify as themselves.
+        let registry = install_closure_registry(&federation)?;
         let parsed = parse_and_validate_snapshots(&federation)?;
+        if let Some(registry) = registry {
+            crate::spec_composition::verify_override_rationales(registry, parsed.items.iter())
+                .map_err(|error| spec_error(&federation, error))?;
+        }
 
         validate_nested_v1(
             &federation,
@@ -656,6 +663,70 @@ fn parse_source(
 
 fn repository_root_for_node(node: &VerifiedFederationNode) -> Option<&Path> {
     node.config_path.parent()?.parent()
+}
+
+/// Compose and install the effective artifact-type registry of the verified
+/// closure (ADR-150): the root's own bundle, then every parent's, bottom-up in
+/// the canonical parent order the manifest loader fixes.
+fn install_closure_registry(
+    federation: &VerifiedFederation,
+) -> Result<Option<&'static crate::spec::Registry>, GraphFederatedCorpusError> {
+    let parents_of = |owner: &str| -> Vec<String> {
+        let mut parents: Vec<String> = Vec::new();
+        for edge in federation
+            .edges
+            .iter()
+            .filter(|edge| edge.owner_source == owner)
+        {
+            if !parents.contains(&edge.target_source) {
+                parents.push(edge.target_source.clone());
+            }
+        }
+        parents
+    };
+    let mut nodes = Vec::with_capacity(federation.nodes.len() + 1);
+    nodes.push(crate::spec_composition::SourceSpecInput {
+        source: federation.root_source.clone(),
+        layer: Layer::Local,
+        repository_root: federation.repository_root.clone(),
+        config_bytes: federation.root_config_bytes.clone(),
+        parents: parents_of(&federation.root_source),
+    });
+    for node in &federation.nodes {
+        let repository_root = repository_root_for_node(node).ok_or_else(|| {
+            GraphFederatedCorpusError::sourced(
+                GRAPH_CORPUS_INVALID_NODE,
+                &node.source,
+                ".decided/config.yaml",
+                "verified config path has no repository parent",
+            )
+        })?;
+        nodes.push(crate::spec_composition::SourceSpecInput {
+            source: node.source.clone(),
+            layer: Layer::Inherited,
+            repository_root: repository_root.to_path_buf(),
+            config_bytes: node.config_bytes.clone(),
+            parents: parents_of(&node.source),
+        });
+    }
+    crate::spec_composition::install_effective_registry(&federation.root_source, &nodes)
+        .map_err(|error| spec_error(federation, error))
+}
+
+fn spec_error(
+    federation: &VerifiedFederation,
+    error: crate::spec::SpecBundleError,
+) -> GraphFederatedCorpusError {
+    let source = error
+        .source()
+        .map(str::to_string)
+        .unwrap_or_else(|| federation.root_source.clone());
+    GraphFederatedCorpusError::sourced(
+        error.stable_code(),
+        source,
+        crate::federation::CONFIG_RELATIVE_PATH,
+        error.detail(),
+    )
 }
 
 fn yaml_string(value: &serde_yaml::Value) -> Option<String> {

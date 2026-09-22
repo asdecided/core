@@ -98,6 +98,7 @@ pub mod sentry;
 pub mod sha256;
 pub mod skill;
 pub mod spec;
+pub mod spec_composition;
 pub mod stats;
 pub mod telemetry;
 pub mod timing;
