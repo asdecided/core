@@ -841,3 +841,99 @@ fn a_version_one_parent_bundle_is_inherited_and_scaffolds_in_the_child() {
     assert_eq!(scaffolded["artifact_type"], "runbook");
     assert_eq!(scaffolded["provenance"]["source"], CHILD_SOURCE);
 }
+
+fn git(root: &Path, args: &[&str]) {
+    let status = Command::new("git")
+        .args(["-c", "user.name=t", "-c", "user.email=t@example.invalid"])
+        .args(args)
+        .current_dir(root)
+        .status()
+        .unwrap();
+    assert!(status.success(), "git {args:?}");
+}
+
+fn exported_types(output: &Output) -> Vec<String> {
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(output));
+    let mut types: Vec<String> = json(output)["artifacts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a["type"].as_str().unwrap().to_string())
+        .collect();
+    types.sort();
+    types.dedup();
+    types
+}
+
+#[test]
+fn historical_exports_classify_under_the_bundles_pinned_at_that_revision() {
+    let root = fixture_copy("export-at");
+    git(&root, &["init", "-q"]);
+    git(&root, &["add", "-A"]);
+    git(&root, &["commit", "-qm", "one"]);
+
+    // Commit two: the parent drops `runbook` and the child re-pins the parent.
+    let parent_bundle: serde_json::Value = serde_json::from_slice(
+        &fs::read(root.join("vendor/standards/.decided/artifact-specs.json")).unwrap(),
+    )
+    .unwrap();
+    let kept: Vec<String> = parent_bundle["artifact_specs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["name"] != "runbook")
+        .map(|e| e.to_string())
+        .collect();
+    let kept: Vec<&str> = kept.iter().map(String::as_str).collect();
+    write_and_repin(
+        &root,
+        "vendor/standards/.decided/artifact-specs.json",
+        "vendor/standards/.decided/config.yaml",
+        &kept,
+    );
+    let digest = run_in(
+        &root,
+        &[
+            "corpus",
+            "digest",
+            "--root",
+            "vendor/standards",
+            "--corpus",
+            "decisions",
+            "--version",
+            "2",
+        ],
+    );
+    let digest = stdout(&digest).trim().to_string();
+    let manifest = root.join(".decided/corpus.md");
+    let text = fs::read_to_string(&manifest).unwrap();
+    let start = text.find("digest: sha256-v2:").unwrap();
+    let end = start + "digest: sha256-v2:".len() + 64;
+    fs::write(
+        &manifest,
+        format!("{}digest: {digest}{}", &text[..start], &text[end..]),
+    )
+    .unwrap();
+    git(&root, &["commit", "-qam", "two"]);
+
+    let then = exported_types(&run_in(
+        &root,
+        &["export", "decisions", "--at", "HEAD~1", "--json"],
+    ));
+    assert_eq!(then, ["decision", "policy", "runbook"]);
+    let now = exported_types(&run_in(
+        &root,
+        &["export", "decisions", "--at", "HEAD", "--json"],
+    ));
+    assert_eq!(now, ["decision", "policy"]);
+
+    // History does not depend on the working tree's pin.
+    let mut bytes = fs::read(root.join(".decided/artifact-specs.json")).unwrap();
+    bytes.extend_from_slice(b" \n");
+    fs::write(root.join(".decided/artifact-specs.json"), bytes).unwrap();
+    let then = exported_types(&run_in(
+        &root,
+        &["export", "decisions", "--at", "HEAD~1", "--json"],
+    ));
+    assert_eq!(then, ["decision", "policy", "runbook"]);
+}
