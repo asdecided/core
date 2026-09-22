@@ -70,7 +70,9 @@ tags: ["interoperability"]
 
 The five built-in rows are fixed and a bundle cannot override them. A type a
 repository declares through a pinned spec bundle is exported under the
-`okf_type` its element declares (defaulting to the element's `display`) and
+`okf_type` its element declares (defaulting to the element's `display`; never
+one of the five built-in OKF types, and written as a quoted scalar whenever it
+is not a plain word or phrase) and
 gets its own section in `index.md` after the five fixed ones. Unknown documents
 remain outside the derived export. OKF consumers must tolerate unknown types;
 that permissive read rule does not expand the built-in registry — a pinned
