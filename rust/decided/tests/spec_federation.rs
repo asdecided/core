@@ -545,6 +545,80 @@ fn overrides_in_an_unfederated_corpus_are_rejected() {
 }
 
 #[test]
+fn new_scaffolds_inherited_and_builtin_types_in_a_version_two_child() {
+    // The version-2 graph rejects the repository root as a corpus path, so
+    // the scaffold's identifier-collision scan composes the top-level corpus
+    // directory holding the target instead (local and inherited layers).
+    let root = fixture_copy("new-v2");
+    fs::create_dir_all(root.join("decisions/runbooks")).unwrap();
+    let created = run_in(
+        &root,
+        &["new", "runbook", "decisions/runbooks/rotate-keys.md"],
+    );
+    assert_eq!(created.status.code(), Some(0), "{}", stderr(&created));
+    let body = fs::read_to_string(root.join("decisions/runbooks/rotate-keys.md")).unwrap();
+    assert!(body.contains("type: runbook"), "{body}");
+    assert!(body.contains("## Purpose"), "{body}");
+    let created = run_in(
+        &root,
+        &[
+            "new",
+            "decision",
+            "decisions/decisions/adr-004-new.md",
+            "--json",
+        ],
+    );
+    assert_eq!(created.status.code(), Some(0), "{}", stderr(&created));
+    let id = json(&created)["id"].as_str().unwrap().to_string();
+    assert!(id.starts_with("SPC-"), "{id}");
+
+    let corpus = json(&run_in(&root, &["validate", "decisions", "--json"]));
+    assert_eq!(corpus["valid"], true, "{corpus}");
+    let rows: Vec<(&str, &str)> = corpus["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|f| {
+            f["path"] == "runbooks/rotate-keys.md" || f["path"] == "decisions/adr-004-new.md"
+        })
+        .map(|f| {
+            (
+                f["artifact_type"].as_str().unwrap(),
+                f["provenance"]["source"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(rows, [("decision", CHILD), ("runbook", CHILD)]);
+
+    // A missing target directory is still the released usage error, and a
+    // target inside the read-only parent is still refused.
+    let missing = run_in(&root, &["new", "runbook", "decisions/absent/x.md"]);
+    assert_eq!(missing.status.code(), Some(2));
+    assert!(stderr(&missing).contains("directory does not exist"));
+    let refused = run_in(
+        &root,
+        &["new", "runbook", "vendor/standards/decisions/runbooks/x.md"],
+    );
+    assert_eq!(refused.status.code(), Some(1));
+    assert!(
+        stderr(&refused).contains("read-only"),
+        "{}",
+        stderr(&refused)
+    );
+
+    // A version-2 root with no bundle anywhere scaffolds a built-in too.
+    let plain = scratch("new-v2-plain");
+    copy_dir(&eval_fixture(), &plain);
+    let created = run_in(
+        &plain,
+        &["new", "decision", "graph-decisions/new-decision.md"],
+    );
+    assert_eq!(created.status.code(), Some(0), "{}", stderr(&created));
+    let validated = run_in(&plain, &["validate", "graph-decisions"]);
+    assert_eq!(validated.status.code(), Some(0), "{}", stderr(&validated));
+}
+
+#[test]
 fn a_version_one_parent_bundle_is_inherited_and_scaffolds_in_the_child() {
     let repo = FederationRepo::new("spec-bundle-v-one");
     let runbook = standards_runbook(&fixture());
