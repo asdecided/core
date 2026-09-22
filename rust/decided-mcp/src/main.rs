@@ -273,6 +273,9 @@ fn main() {
 
 /// Startup diagnostic (stderr only; declared-normalized in parity, §0).
 fn check_corpus(root: &str, topology: &RepositoryTopology) {
+    // The startup probe classifies with the registry the first tool call will
+    // use; a pin that cannot be honoured is reported by that call, not here.
+    let _ = rac_engine::spec::sync_registry(root);
     let has_artifacts = if topology.federation_mode == Some(FederationMode::V2) {
         let verified = rac_engine::federation::verify_federation(
             &topology.repository_root,
