@@ -8,7 +8,15 @@ tags: [federation, extensibility, schema, spec, architecture]
 
 ## Status
 
-Proposed
+Accepted
+
+**Accepted 2026-09-22.** Accepted ahead of implementation, unlike ADR-083,
+whose revision held at Proposed until the mechanism shipped: the decisions
+here follow the federation rules ADR-137, ADR-144, ADR-146, and ADR-147
+already fix, so the design question is settled by those decisions rather
+than by a shipped increment. The engine change, the fixture corpus, and the
+update to the `third-party-artifact-extensibility` design follow under the
+`deterministic-substrate` roadmap (Tranche C).
 
 ## Category
 
