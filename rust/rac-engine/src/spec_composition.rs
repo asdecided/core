@@ -96,6 +96,22 @@ pub fn install_effective_registry(
     Ok(Some(registry))
 }
 
+/// Verify every pinned bundle in the closure against its pin without
+/// composing, and report whether any source declares an `artifact_types`
+/// stanza. Cache layers call this on paths that reuse a generation without
+/// recomposing, so a bundle edited without a re-pin still fails closed there.
+pub fn verify_pinned_bundles(nodes: &[SourceSpecInput]) -> Result<bool, SpecBundleError> {
+    let mut any_stanza = false;
+    for node in nodes {
+        let stanza = stanza_for(node)?;
+        if let Some(pin) = &stanza.pin {
+            in_source(node, spec::read_verified_bundle(&node.repository_root, pin))?;
+        }
+        any_stanza |= stanza.pin.is_some() || !stanza.overrides.is_empty();
+    }
+    Ok(any_stanza)
+}
+
 /// Check every applied override's rationale against the parsed closure: it
 /// must resolve to exactly one live local Decision of the declaring source.
 pub fn verify_override_rationales<'a>(

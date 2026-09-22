@@ -669,6 +669,19 @@ fn capture_federated_generation(
     child_corpus: &str,
     recursive: bool,
 ) -> Result<LogicalGeneration, FederatedCacheError> {
+    // Pinned spec bundles are verified on every capture, including the warm
+    // reuse that never recomposes, so an edit without a re-pin fails closed
+    // here too (ADR-150 decision 4).
+    let bundles_pinned =
+        crate::federated_corpus::verify_parent_bundles(&parent).map_err(|error| {
+            let code = error.stable_code().to_string();
+            let text = error.to_string();
+            let message = text
+                .strip_prefix(&format!("{code}: "))
+                .unwrap_or(&text)
+                .to_string();
+            FederatedCacheError::composition(code, message)
+        })?;
     let child_files = capture_child_snapshot(child_corpus, recursive, &parent)?;
     let child_hash = child_snapshot_hash(&child_files);
     let child_corpus_path =
@@ -704,6 +717,13 @@ fn capture_federated_generation(
     generation_frame(&mut hasher, 0x0b, inherited_layer.layer.as_str().as_bytes());
     generation_frame(&mut hasher, 0x0c, &[u8::from(recursive)]);
     generation_frame(&mut hasher, 0x0d, child_corpus_path.as_bytes());
+    // A closure that declares spec bundles classifies under a composed
+    // registry; stores written before inheritance existed (ADR-150) keyed the
+    // same config bytes without it, so the frame keeps them from being
+    // served. Closures without a stanza keep their released key.
+    if bundles_pinned {
+        generation_frame(&mut hasher, 0x0e, b"artifact-spec-registry/composed-v1");
+    }
     let cache_key = hasher.hexdigest();
 
     let mut watched_files = Vec::with_capacity(parent.files.len() + child_files.len() + 3);
