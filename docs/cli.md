@@ -376,27 +376,31 @@ decided improve login-flow.md --template  # emit Markdown stubs to paste in
 
 Show registered artifact schemas and starter templates.
 
-- **Input:** `decided schema [name]` — `requirement`, `decision`, `roadmap`, `prompt`, or `design`.
+- **Input:** `decided schema [name]` — `requirement`, `decision`, `roadmap`, `prompt`, or `design`, or a type a pinned spec bundle declares.
 - **Options:** `--list` (list all schema names) · `--json` *or* `--template`
-  (mutually exclusive) · `--list` cannot be combined with a schema name
-- **Exit codes:** `0` success · `2` unknown schema name or flag misuse
+  (mutually exclusive) · `--corpus <dir>` (list the effective registry of that
+  corpus, inherited types included) · `--list` cannot be combined with a schema name
+- **Exit codes:** `0` success · `1` the corpus's federation or spec bundle cannot be composed · `2` unknown schema name, `--corpus` not a directory, or flag misuse
 
 ```bash
 decided schema --list                  # the five artifact types (plus the local corpus's pinned bundle types)
+decided schema --list --corpus decisions   # the same plus every type inherited from a federation parent
 decided schema requirement             # required / recommended / optional sections
 decided schema decision --template     # starter Markdown for a decision
 decided schema roadmap --json          # machine-readable schema
+decided schema runbook --corpus decisions  # a type declared by a parent's bundle
 ```
 
 A repository that pins a spec bundle in `.decided/config.yaml` (see
 [Custom artifact types](validation.md#custom-artifact-types-spec-bundles))
 lists its declared types after the built-ins; `schema <type> --template` and
 `decided new <type>` render them from the bundle's starter bodies. In a
-federated repository `decided new` also sees the types inherited from parents
-(ADR-150), because it composes the closure first, and its identifier-collision
-scan covers the composed closure of the top-level corpus directory holding
-the target; `schema` and `templates` take no corpus directory and list the
-local registry only.
+federated repository the types inherited from parents (ADR-150) are part of
+the effective registry: `decided new` composes the closure first and its
+identifier-collision scan covers the composed closure of the top-level corpus
+directory holding the target; `schema` and `templates` list them when given
+`--corpus <dir>`, which composes that directory's closure, and list the
+local registry only when run without it.
 
 ---
 
@@ -1195,12 +1199,14 @@ artifact spec registry itself — the same source that drives classification and
 validation.
 
 - **Input:** `decided templates`
-- **Options:** `--json`
-- **Exit codes:** `0` success
+- **Options:** `--json` · `--corpus <dir>` (list the effective registry of that
+  corpus, inherited types included)
+- **Exit codes:** `0` success · `1` the corpus's federation or spec bundle cannot be composed · `2` `--corpus` not a directory
 
 ```bash
 decided templates
 decided templates --json
+decided templates --corpus decisions
 ```
 
 ```json

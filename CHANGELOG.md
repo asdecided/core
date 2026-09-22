@@ -37,6 +37,13 @@ details, release history over commit history.
   exports materialise the bounded configured corpus and federation closure so
   identity and inherited records match that revision without changing `.git`.
 
+- Added `--corpus <dir>` to `decided schema` and `decided templates`: the
+  listing is the effective registry of that corpus, so in a federated
+  repository the types inherited from parents (ADR-150) appear after the
+  corpus's own bundle types, and `schema <type>` and `schema <type>
+  --template` render an inherited type. Without the flag both commands list
+  the local registry exactly as before.
+
 ### Fixed
 
 - `decided new` and `decided migrate` in a repository with a version-2
