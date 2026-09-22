@@ -126,6 +126,11 @@ What the engine does with it:
   not relationship targets and add no edge kinds (ADR-055): a built-in
   `## Related Decisions` reference to a custom-type artifact still reports
   `relationship-target-type-mismatch`.
+- **`validate --json` reports the bundle.** `artifact_spec_bundle` carries the
+  local bundle's `path`, `digest`, `admitted` names, and `warnings`, and
+  `artifact_spec_bundles` lists one entry per source that pins a bundle, with
+  its `source` and `layer`: in an unfederated corpus, the local bundle alone.
+  Both keys are absent without a stanza.
 - **Without the stanza nothing changes.** Every command's bytes, exit codes,
   and cache keys are identical to an engine with no bundle support.
 
@@ -194,12 +199,14 @@ change its types without changing the digest the child verifies.
   `artifact-spec-skipped` finding.
 - **Cache keys follow the effective registry.** The corpus hash folds every
   effective bundle digest in composition order, so a re-pin anywhere in the
-  closure rebuilds cached classification; a running `decided-mcp` recomposes
-  on every request.
+  closure rebuilds cached classification. A running `decided-mcp` re-verifies
+  every pinned bundle in the closure on each request and rebuilds its served
+  model when the registry changes, so a re-pin lands on the next call.
 - **Unchanged boundaries.** Inherited types are structural only, are not
   relationship targets, and add no edge kinds; a parent's bundle cannot
-  override a built-in. `decided schema --list` and `decided templates` take no
-  corpus directory and list the local registry only; `decided new` and
+  override a built-in. `decided schema --list` and `decided templates` list
+  the local registry, or the effective registry of the corpus given with
+  `--corpus <dir>` (see the CLI reference); `decided new` and
   single-file `decided validate` compose the closure of the top-level
   directory that holds their target first, so an inherited type scaffolds and
   validates. A closure in which no source pins a bundle is byte-for-byte

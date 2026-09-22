@@ -86,6 +86,10 @@ details, release history over commit history.
   version-2 repository again count identifiers in sibling top-level
   directories as issued; and `artifact_spec_bundles` reports `source: null`,
   not the `prefer: local` keyword, for a local bundle without `corpus.source`.
+- `decided-mcp` named the stable code twice when a federation composition
+  failed mid-session, with or without the cache (for example
+  `corpus-federation-artifact-type-conflict: corpus-federation-artifact-type-conflict: …`);
+  it now names it once, as the CLI does.
 - `decided new` and `decided migrate` in a repository with a version-2
   federation manifest, which failed with `federated-corpus-snapshot-failed`
   because the identifier-collision scan composed the repository root, a path
