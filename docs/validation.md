@@ -119,6 +119,74 @@ What the engine does with it:
 The repository's own `rust/fixtures/spec-bundle/` is a worked example with a
 `runbook`, a `policy`, and a deliberately colliding element.
 
+### Inherited types across a federation (ADR-150)
+
+In a federated repository a child inherits its parents' admitted bundle
+types. The effective registry is the five built-ins, then the child's own
+bundle elements in file order, then, for each parent in the manifest's
+canonical `parents` order, that parent's effective registry beyond the
+built-ins, recursively. A parent that declares `runbook` and publishes
+runbooks therefore has them classified, validated, searched, exported, and
+served as runbooks in every child, under the pin the child already holds: the
+parent's `.decided/config.yaml` bytes are framed in the federation digest and
+carry the bundle's own digest, so no new pin is needed and a parent cannot
+change its types without changing the digest the child verifies.
+
+- **Identical declarations are silent; different ones are an error.** Two
+  sources declaring the same element content are one type. Two sources
+  declaring the same name with different content stop every command and MCP
+  tool with `corpus-federation-artifact-type-conflict`, naming the type and
+  the sources, in the same failure class as a duplicate parent or a cycle.
+  Nearest-wins, first-wins, and field merging are all refused.
+- **The only resolution is a Decision-backed override.** The composing corpus
+  records which declaration wins in its own stanza:
+
+  ```yaml
+  artifact_types:
+    version: 1
+    bundle:                      # optional when only overrides are declared
+      path: .decided/artifact-specs.json
+      digest: sha256:...
+    overrides:
+      - name: runbook
+        prefer: acme/standards   # `local`, or a parent in the inherited view
+        rationale: APP-KWJ9D3C1S10N   # a live local Decision
+  ```
+
+  `rationale` must resolve to exactly one Accepted, unretired Decision of the
+  declaring corpus; a name may be overridden at most once; an override for a
+  name that does not collide, a `prefer` outside the corpus's transitive
+  parents, or a preferred source that declares no candidate is
+  `corpus-federation-invalid-override`, the finding artifact overrides already
+  use. The winner is what the corpus's descendants inherit; a descendant that
+  declares yet another content collides afresh and needs its own override.
+- **A parent's bundle is verified on every command.** Its bytes are checked
+  against the digest in the parent's captured config before any element is
+  admitted; a mismatch is the parent-side `artifact-spec-bundle-digest-mismatch`,
+  reported with the parent's source, and fails composition.
+- **Provenance is per source.** `decided validate --json` gains
+  `artifact_spec_bundles`: one entry per source that pinned a bundle, in
+  composition order, with `source`, `layer`, `path`, `digest`, `admitted`, and
+  `warnings`. The single `artifact_spec_bundle` object stays for the local
+  bundle. The human output adds one `WARN` block per inherited bundle with
+  skipped elements, and `decided doctor` names the source in each inherited
+  `artifact-spec-skipped` finding.
+- **Cache keys follow the effective registry.** The corpus hash folds every
+  effective bundle digest in composition order, so a re-pin anywhere in the
+  closure rebuilds cached classification; a running `decided-mcp` recomposes
+  on every request.
+- **Unchanged boundaries.** Inherited types are structural only, are not
+  relationship targets, and add no edge kinds; a parent's bundle cannot
+  override a built-in. `decided schema --list` and `decided templates` take no
+  corpus directory and list the local registry only; `decided new` and
+  single-file `decided validate` compose the closure of the top-level
+  directory that holds their target first, so an inherited type scaffolds and
+  validates. A closure in which no source pins a bundle is byte-for-byte
+  unchanged.
+
+`rust/fixtures/spec-federation/` is the worked example: a child that declares
+`policy` and inherits `runbook` from a pinned `standards` parent.
+
 ## SARIF output for GitHub Code Scanning
 
 `decided validate <dir> --sarif` emits a [SARIF 2.1.0](https://json-schema.org/)
