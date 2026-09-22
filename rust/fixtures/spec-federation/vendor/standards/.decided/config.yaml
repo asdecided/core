@@ -1,0 +1,10 @@
+repository_key: SPS
+corpus:
+  source: asdecided/fixtures-spec-standards
+
+# ADR-083: the standards corpus pins a bundle declaring the runbook type.
+artifact_types:
+  version: 1
+  bundle:
+    path: .decided/artifact-specs.json
+    digest: sha256:b69034c8b16f47a547d6794c275a4cd640191f5cfc38d4f894da842a86b2543b

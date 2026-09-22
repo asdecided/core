@@ -1,0 +1,71 @@
+{
+  "_meta": {
+    "role": "Spec bundle of the standards parent in the spec-federation fixture (ADR-150): it declares the runbook type the child inherits."
+  },
+  "artifact_specs": [
+    {
+      "name": "runbook",
+      "display": "Runbook",
+      "required": [
+        "purpose",
+        "steps"
+      ],
+      "recommended": [
+        "rollback",
+        "verification"
+      ],
+      "optional": [
+        "related decisions",
+        "related requirements",
+        "related tickets"
+      ],
+      "metadata": {
+        "status": [
+          "Draft",
+          "Active",
+          "Retired"
+        ]
+      },
+      "retired_status": [
+        "Retired"
+      ],
+      "descriptions": {
+        "purpose": "What this runbook achieves and when to run it",
+        "steps": "The ordered operator steps",
+        "rollback": "How to undo the change if a step fails",
+        "verification": "How to confirm the outcome",
+        "related decisions": "Decision artifacts this runbook references",
+        "related requirements": "Requirement artifacts this runbook references",
+        "related tickets": "External tickets this runbook traces to"
+      },
+      "guidance": {
+        "purpose": [
+          "What outcome does this runbook produce?",
+          "When should it be run?"
+        ],
+        "steps": [
+          "List each step in order.",
+          "Name the system each step touches."
+        ],
+        "rollback": [
+          "What undoes each step?"
+        ],
+        "verification": [
+          "What observable state confirms success?"
+        ]
+      },
+      "synonyms": {
+        "procedure": "steps",
+        "runbook steps": "steps"
+      },
+      "id_field": null,
+      "starter_bodies": {
+        "purpose": "TODO: describe what this runbook achieves.",
+        "steps": "TODO: list the ordered steps.",
+        "rollback": "TODO: describe how to roll back.",
+        "verification": "TODO: describe how to verify the result."
+      },
+      "okf_type": "Runbook"
+    }
+  ]
+}

@@ -1,0 +1,604 @@
+//! Inherited spec bundles across the federation graph (ADR-150): the
+//! `rust/fixtures/spec-federation/` corpus is a version-2 child pinning one
+//! parent (`standards`) that declares `runbook`; the child declares `policy`.
+//! These tests pin the effective registry's behaviour end to end through the
+//! CLI, the collision and override rules, the parent-side pin check, and the
+//! golden guard: a federated closure in which no source pins a bundle is
+//! unchanged.
+
+#[allow(dead_code)]
+mod federation_support;
+
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Output};
+
+use federation_support::{FederationRepo, CHILD_SOURCE, PARENT_SOURCE};
+
+const CHILD: &str = "asdecided/fixtures-spec-child";
+const STANDARDS: &str = "asdecided/fixtures-spec-standards";
+const LIVE_RATIONALE: &str = "SPC-000000000002";
+const PROPOSED_RATIONALE: &str = "SPC-000000000003";
+const POLICY_ID: &str = "SPC-000000000001";
+const CONFLICT: &str = "corpus-federation-artifact-type-conflict";
+const INVALID_OVERRIDE: &str = "corpus-federation-invalid-override";
+
+/// A `runbook` element that differs from the standards declaration.
+const RUNBOOK_ALT: &str = r#"{"name":"runbook","display":"Run Book","required":["purpose"],"recommended":[],"optional":[],"metadata":{"status":["Active"]},"retired_status":[],"descriptions":{},"guidance":{},"synonyms":{},"id_field":null,"starter_bodies":{"purpose":"TODO"}}"#;
+
+fn fixture() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../fixtures/spec-federation")
+        .canonicalize()
+        .expect("spec-federation fixture exists")
+}
+
+fn eval_fixture() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../fixtures/eval/federation")
+        .canonicalize()
+        .expect("eval federation fixture exists")
+}
+
+fn scratch(tag: &str) -> PathBuf {
+    let root = std::env::temp_dir().join(format!(
+        "asdecided-spec-federation-{tag}-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    root
+}
+
+fn copy_dir(from: &Path, to: &Path) {
+    fs::create_dir_all(to).unwrap();
+    for entry in fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        let target = to.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_dir(&entry.path(), &target);
+        } else {
+            fs::copy(entry.path(), target).unwrap();
+        }
+    }
+}
+
+fn fixture_copy(tag: &str) -> PathBuf {
+    let root = scratch(tag);
+    copy_dir(&fixture(), &root);
+    root
+}
+
+fn run_in(cwd: &Path, args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_decided"))
+        .args(args)
+        .current_dir(cwd)
+        .env("DECIDED_NO_CACHE", "1")
+        .env("LC_ALL", "C")
+        .env("TZ", "UTC")
+        .output()
+        .expect("run decided")
+}
+
+fn stdout(output: &Output) -> String {
+    String::from_utf8(output.stdout.clone()).expect("UTF-8 stdout")
+}
+
+fn stderr(output: &Output) -> String {
+    String::from_utf8(output.stderr.clone()).expect("UTF-8 stderr")
+}
+
+fn json(output: &Output) -> serde_json::Value {
+    serde_json::from_str(&stdout(output)).unwrap_or_else(|e| {
+        panic!(
+            "stdout is not JSON: {e}\n{}\n{}",
+            stdout(output),
+            stderr(output)
+        )
+    })
+}
+
+fn sha256(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    format!("{:x}", hasher.finalize())
+}
+
+/// Replace the bundle at `bundle` with `elements` and re-pin it in `config`.
+fn write_and_repin(root: &Path, bundle: &str, config: &str, elements: &[&str]) {
+    let json = format!("{{\"artifact_specs\":[{}]}}\n", elements.join(","));
+    fs::write(root.join(bundle), &json).unwrap();
+    let path = root.join(config);
+    let text = fs::read_to_string(&path).unwrap();
+    let start = text.find("digest: sha256:").expect("config pins a bundle");
+    let end = start + "digest: sha256:".len() + 64;
+    let repinned = format!(
+        "{}digest: sha256:{}{}",
+        &text[..start],
+        sha256(json.as_bytes()),
+        &text[end..]
+    );
+    fs::write(path, repinned).unwrap();
+}
+
+/// The standards runbook element exactly as the parent bundle declares it.
+fn standards_runbook(root: &Path) -> String {
+    let bundle: serde_json::Value = serde_json::from_slice(
+        &fs::read(root.join("vendor/standards/.decided/artifact-specs.json")).unwrap(),
+    )
+    .unwrap();
+    bundle["artifact_specs"][0].to_string()
+}
+
+fn append_overrides(root: &Path, entries: &[(&str, &str, &str)]) {
+    let path = root.join(".decided/config.yaml");
+    let mut text = fs::read_to_string(&path).unwrap();
+    text.push_str("  overrides:\n");
+    for (name, prefer, rationale) in entries {
+        text.push_str(&format!(
+            "    - name: {name}\n      prefer: {prefer}\n      rationale: {rationale}\n"
+        ));
+    }
+    fs::write(path, text).unwrap();
+}
+
+fn manifest_failure(output: &Output, code: &str) -> serde_json::Value {
+    assert_eq!(output.status.code(), Some(1), "{}", stderr(output));
+    let payload = json(output);
+    assert_eq!(payload["valid"], false);
+    let row = &payload["files"][0];
+    assert_eq!(row["path"], ".decided/corpus.md");
+    assert_eq!(row["artifact_type"], "corpus-manifest");
+    assert_eq!(row["issues"][0]["code"], code, "{row}");
+    row.clone()
+}
+
+#[test]
+fn a_child_inherits_the_parent_runbook_type_with_per_source_provenance() {
+    let root = fixture();
+    let output = run_in(&root, &["validate", "decisions", "--json"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    let payload = json(&output);
+    assert_eq!(payload["valid"], true);
+    let runbook = payload["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["path"] == "runbooks/deploy-search-service.md")
+        .expect("the parent's runbook is validated in the child");
+    assert_eq!(runbook["artifact_type"], "runbook");
+    assert_eq!(runbook["status"], "valid");
+    assert_eq!(runbook["provenance"]["source"], STANDARDS);
+    assert_eq!(runbook["provenance"]["layer"], "inherited");
+
+    // The ADR-083 key stays for the local bundle; the ADR-150 list carries
+    // every contributing source in composition order.
+    assert_eq!(
+        payload["artifact_spec_bundle"]["admitted"],
+        serde_json::json!(["policy"])
+    );
+    let bundles = payload["artifact_spec_bundles"].as_array().unwrap();
+    let summary: Vec<(String, String, Vec<String>)> = bundles
+        .iter()
+        .map(|b| {
+            (
+                b["source"].as_str().unwrap().to_string(),
+                b["layer"].as_str().unwrap().to_string(),
+                b["admitted"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|v| v.as_str().unwrap().to_string())
+                    .collect(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        summary,
+        [
+            (
+                CHILD.to_string(),
+                "local".to_string(),
+                vec!["policy".to_string()]
+            ),
+            (
+                STANDARDS.to_string(),
+                "inherited".to_string(),
+                vec!["runbook".to_string()]
+            ),
+        ]
+    );
+    assert!(bundles[1]["digest"]
+        .as_str()
+        .unwrap()
+        .starts_with("sha256:"));
+    assert_eq!(bundles[1]["warnings"], serde_json::json!([]));
+
+    let human = run_in(&root, &["validate", "decisions"]);
+    assert_eq!(human.status.code(), Some(0));
+    assert!(
+        stdout(&human).starts_with("PASS  decisions"),
+        "{}",
+        stdout(&human)
+    );
+
+    let stats = json(&run_in(&root, &["stats", "decisions", "--json"]));
+    assert_eq!(stats["runbook"]["count"], 1);
+    assert_eq!(stats["policy"]["count"], 1);
+
+    let export = json(&run_in(&root, &["export", "decisions", "--json"]));
+    let inherited_runbook = export["artifacts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["type"] == "runbook")
+        .expect("the export carries the inherited runbook");
+    assert_eq!(inherited_runbook["provenance"]["source"], STANDARDS);
+}
+
+#[test]
+fn golden_guard_a_closure_without_bundles_is_unchanged() {
+    let root = eval_fixture();
+    let output = run_in(&root, &["validate", "graph-decisions", "--json"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    let payload = json(&output);
+    assert!(payload.get("artifact_spec_bundle").is_none());
+    assert!(payload.get("artifact_spec_bundles").is_none());
+    let keys: Vec<&str> = payload
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert_eq!(
+        keys,
+        [
+            "schema_version",
+            "directory",
+            "recursive",
+            "summary",
+            "valid",
+            "files",
+            "okf"
+        ]
+    );
+    let stats = json(&run_in(&root, &["stats", "graph-decisions", "--json"]));
+    assert!(stats.get("runbook").is_none());
+}
+
+#[test]
+fn identical_declarations_by_child_and_parent_are_silent() {
+    let root = fixture_copy("identical");
+    let runbook = standards_runbook(&root);
+    let policy: serde_json::Value =
+        serde_json::from_slice(&fs::read(root.join(".decided/artifact-specs.json")).unwrap())
+            .unwrap();
+    let policy = policy["artifact_specs"][0].to_string();
+    write_and_repin(
+        &root,
+        ".decided/artifact-specs.json",
+        ".decided/config.yaml",
+        &[&policy, &runbook],
+    );
+    let output = run_in(&root, &["validate", "decisions", "--json"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    let payload = json(&output);
+    assert_eq!(payload["valid"], true);
+    assert_eq!(
+        payload["artifact_spec_bundle"]["admitted"],
+        serde_json::json!(["policy", "runbook"])
+    );
+    assert_eq!(
+        payload["artifact_spec_bundles"][1]["admitted"],
+        serde_json::json!(["runbook"])
+    );
+    let stats = json(&run_in(&root, &["stats", "decisions", "--json"]));
+    assert_eq!(stats["runbook"]["count"], 1);
+}
+
+#[test]
+fn different_content_for_one_name_is_a_composition_error_everywhere() {
+    let root = fixture_copy("conflict");
+    let policy: serde_json::Value =
+        serde_json::from_slice(&fs::read(root.join(".decided/artifact-specs.json")).unwrap())
+            .unwrap();
+    let policy = policy["artifact_specs"][0].to_string();
+    write_and_repin(
+        &root,
+        ".decided/artifact-specs.json",
+        ".decided/config.yaml",
+        &[&policy, RUNBOOK_ALT],
+    );
+
+    let row = manifest_failure(
+        &run_in(&root, &["validate", "decisions", "--json"]),
+        CONFLICT,
+    );
+    let message = row["issues"][0]["message"].as_str().unwrap();
+    assert!(message.contains("'runbook'"), "{message}");
+    assert!(
+        message.contains(&format!("'{CHILD}' and '{STANDARDS}'")),
+        "{message}"
+    );
+    assert_eq!(row["provenance"]["source"], CHILD);
+
+    let human = run_in(&root, &["validate", "decisions"]);
+    assert_eq!(human.status.code(), Some(1));
+    assert!(
+        stdout(&human).contains(&format!("[{CONFLICT}]")),
+        "{}",
+        stdout(&human)
+    );
+    let sarif = run_in(&root, &["validate", "decisions", "--sarif"]);
+    assert!(stdout(&sarif).contains(CONFLICT));
+
+    for args in [
+        ["stats", "decisions"].as_slice(),
+        ["find", "deploy", "decisions"].as_slice(),
+        ["export", "decisions", "--json"].as_slice(),
+        ["doctor", "decisions"].as_slice(),
+    ] {
+        let output = run_in(&root, args);
+        assert_eq!(
+            output.status.code(),
+            Some(1),
+            "{args:?}: {}",
+            stderr(&output)
+        );
+        assert!(
+            stderr(&output).starts_with(&format!("decided: {CONFLICT}: ")),
+            "{args:?}: {}",
+            stderr(&output)
+        );
+    }
+}
+
+#[test]
+fn a_decision_backed_override_selects_the_preferred_declaration() {
+    let root = fixture_copy("override");
+    let policy: serde_json::Value =
+        serde_json::from_slice(&fs::read(root.join(".decided/artifact-specs.json")).unwrap())
+            .unwrap();
+    let policy = policy["artifact_specs"][0].to_string();
+    write_and_repin(
+        &root,
+        ".decided/artifact-specs.json",
+        ".decided/config.yaml",
+        &[&policy, RUNBOOK_ALT],
+    );
+    append_overrides(&root, &[("runbook", "local", LIVE_RATIONALE)]);
+
+    let output = run_in(&root, &["validate", "decisions", "--json"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    let payload = json(&output);
+    assert_eq!(payload["valid"], true);
+    let runbook = payload["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["path"] == "runbooks/deploy-search-service.md")
+        .unwrap();
+    assert_eq!(runbook["artifact_type"], "runbook");
+    // The local declaration governs the whole closure, the parent's included.
+    let schema = run_in(&root, &["validate", "decisions", "--json"]);
+    assert_eq!(schema.status.code(), Some(0));
+    let stats = json(&run_in(&root, &["stats", "decisions", "--json"]));
+    assert_eq!(stats["runbook"]["count"], 1);
+    let export = json(&run_in(&root, &["export", "decisions", "--json"]));
+    let runbook = export["artifacts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["type"] == "runbook")
+        .unwrap();
+    assert_eq!(runbook["provenance"]["source"], STANDARDS);
+
+    // Preferring the parent keeps its declaration instead.
+    let config = root.join(".decided/config.yaml");
+    let text = fs::read_to_string(&config)
+        .unwrap()
+        .replace("prefer: local", &format!("prefer: {STANDARDS}"));
+    fs::write(&config, text).unwrap();
+    let output = run_in(&root, &["validate", "decisions", "--json"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    assert_eq!(json(&output)["valid"], true);
+}
+
+#[test]
+fn override_defects_fail_with_one_stable_code_each() {
+    let policy_of = |root: &Path| -> String {
+        let policy: serde_json::Value =
+            serde_json::from_slice(&fs::read(root.join(".decided/artifact-specs.json")).unwrap())
+                .unwrap();
+        policy["artifact_specs"][0].to_string()
+    };
+    let cases: [(&str, &[(&str, &str, &str)], &str, &str); 6] = [
+        (
+            "proposed",
+            &[("runbook", "local", PROPOSED_RATIONALE)],
+            INVALID_OVERRIDE,
+            "is not a live Decision",
+        ),
+        (
+            "missing",
+            &[("runbook", "local", "SPC-000000000099")],
+            INVALID_OVERRIDE,
+            "does not resolve to a local artifact",
+        ),
+        (
+            "not-a-decision",
+            &[("runbook", "local", POLICY_ID)],
+            INVALID_OVERRIDE,
+            "is not a Decision",
+        ),
+        (
+            "outside-view",
+            &[("runbook", "acme/elsewhere", LIVE_RATIONALE)],
+            INVALID_OVERRIDE,
+            "is not a parent in the inherited view",
+        ),
+        (
+            "no-collision",
+            &[
+                ("runbook", "local", LIVE_RATIONALE),
+                ("policy", "local", LIVE_RATIONALE),
+            ],
+            INVALID_OVERRIDE,
+            "does not collide",
+        ),
+        (
+            "duplicate-name",
+            &[
+                ("runbook", "local", LIVE_RATIONALE),
+                ("runbook", STANDARDS, LIVE_RATIONALE),
+            ],
+            "artifact-spec-bundle-config-invalid",
+            "more than once",
+        ),
+    ];
+    for (tag, overrides, code, fragment) in cases {
+        let root = fixture_copy(&format!("defect-{tag}"));
+        let policy = policy_of(&root);
+        write_and_repin(
+            &root,
+            ".decided/artifact-specs.json",
+            ".decided/config.yaml",
+            &[&policy, RUNBOOK_ALT],
+        );
+        append_overrides(&root, overrides);
+        let output = run_in(&root, &["validate", "decisions", "--json"]);
+        assert_eq!(output.status.code(), Some(1), "{tag}: {}", stderr(&output));
+        let payload = json(&output);
+        let row = &payload["files"][0];
+        assert_eq!(row["issues"][0]["code"], code, "{tag}: {row}");
+        let message = row["issues"][0]["message"].as_str().unwrap();
+        assert!(message.contains(fragment), "{tag}: {message}");
+    }
+}
+
+#[test]
+fn a_parent_bundle_edited_without_a_repin_fails_closed_with_its_source() {
+    let root = fixture_copy("tamper");
+    let path = root.join("vendor/standards/.decided/artifact-specs.json");
+    let mut bundle: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    bundle["artifact_specs"][0]["display"] = serde_json::json!("Tampered");
+    fs::write(&path, serde_json::to_string_pretty(&bundle).unwrap()).unwrap();
+
+    let row = manifest_failure(
+        &run_in(&root, &["validate", "decisions", "--json"]),
+        "artifact-spec-bundle-digest-mismatch",
+    );
+    let message = row["issues"][0]["message"].as_str().unwrap();
+    assert!(
+        message.contains(&format!("inherited source '{STANDARDS}'")),
+        "{message}"
+    );
+    assert_eq!(row["provenance"]["source"], STANDARDS);
+    assert_eq!(row["provenance"]["layer"], "inherited");
+    assert_eq!(
+        row["provenance"]["source_route"],
+        serde_json::json!([CHILD, STANDARDS])
+    );
+    let output = run_in(&root, &["stats", "decisions"]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(stderr(&output).starts_with("decided: artifact-spec-bundle-digest-mismatch: "));
+}
+
+#[test]
+fn overrides_in_an_unfederated_corpus_are_rejected() {
+    let root = scratch("unfederated");
+    copy_dir(
+        &Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../fixtures/spec-bundle")
+            .canonicalize()
+            .unwrap(),
+        &root,
+    );
+    append_overrides(&root, &[("runbook", "local", "SPB-000000000003")]);
+    let output = run_in(&root, &["stats", "decisions"]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        stderr(&output).starts_with(&format!("decided: {INVALID_OVERRIDE}: ")),
+        "{}",
+        stderr(&output)
+    );
+    assert!(stderr(&output).contains("declares no parents"));
+    let output = run_in(&root, &["validate", "decisions", "--json"]);
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(
+        json(&output)["files"][0]["issues"][0]["code"],
+        INVALID_OVERRIDE
+    );
+
+    // An unknown key under the stanza is a config error, as under `bundle`.
+    let config = root.join(".decided/config.yaml");
+    let text = fs::read_to_string(&config)
+        .unwrap()
+        .replace("  overrides:\n", "  extra: 1\n  overrides:\n");
+    fs::write(&config, text).unwrap();
+    let output = run_in(&root, &["stats", "decisions"]);
+    assert!(stderr(&output).starts_with("decided: artifact-spec-bundle-config-invalid: "));
+}
+
+#[test]
+fn a_version_one_parent_bundle_is_inherited_and_scaffolds_in_the_child() {
+    let repo = FederationRepo::new("spec-bundle-v-one");
+    let runbook = standards_runbook(&fixture());
+    let bundle = format!("{{\"artifact_specs\":[{runbook}]}}\n");
+    repo.write("vendor/standards/.decided/artifact-specs.json", &bundle);
+    repo.write(
+        "vendor/standards/.decided/config.yaml",
+        &format!(
+            "repository_key: STD\ncorpus:\n  source: {PARENT_SOURCE}\nartifact_types:\n  version: 1\n  bundle:\n    path: .decided/artifact-specs.json\n    digest: sha256:{}\n",
+            sha256(bundle.as_bytes())
+        ),
+    );
+    repo.write(
+        "vendor/standards/decisions/runbooks/deploy.md",
+        "---\nschema_version: 1\nid: STD-000000000009\ntype: runbook\n---\n# Deploy\n\n## Status\n\nActive\n\n## Purpose\n\nRoll a build.\n\n## Steps\n\n1. Drain.\n2. Deploy.\n",
+    );
+    repo.activate();
+
+    let output = repo.run(&["validate", "decisions", "--json"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    let payload = json(&output);
+    let runbook = payload["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["artifact_type"] == "runbook")
+        .expect("the parent's runbook classifies in the child");
+    assert_eq!(runbook["status"], "valid");
+    assert_eq!(runbook["provenance"]["source"], PARENT_SOURCE);
+    assert!(payload.get("artifact_spec_bundle").is_none());
+    assert_eq!(payload["artifact_spec_bundles"][0]["source"], PARENT_SOURCE);
+    assert_eq!(payload["artifact_spec_bundles"][0]["layer"], "inherited");
+
+    // `new` composes the closure first, so an inherited type scaffolds.
+    fs::create_dir_all(repo.root().join("decisions/runbooks")).unwrap();
+    let created = repo.run(&["new", "runbook", "decisions/runbooks/rotate-keys.md"]);
+    assert_eq!(created.status.code(), Some(0), "{}", stderr(&created));
+    let body = fs::read_to_string(repo.root().join("decisions/runbooks/rotate-keys.md")).unwrap();
+    assert!(body.contains("type: runbook"), "{body}");
+    assert!(body.contains("## Purpose"), "{body}");
+    let validated = repo.run(&["validate", "decisions/runbooks/rotate-keys.md", "--json"]);
+    assert_eq!(validated.status.code(), Some(0), "{}", stderr(&validated));
+    let payload = json(&validated);
+    assert_eq!(payload["valid"], true, "{payload}");
+    assert_eq!(payload["errors"], serde_json::json!([]));
+    // Without the inherited type the same file would be an unknown document;
+    // the classification is proven by the corpus-level row.
+    let corpus = json(&repo.run(&["validate", "decisions", "--json"]));
+    let scaffolded = corpus["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["path"] == "runbooks/rotate-keys.md")
+        .expect("the scaffolded runbook is a corpus row");
+    assert_eq!(scaffolded["artifact_type"], "runbook");
+    assert_eq!(scaffolded["provenance"]["source"], CHILD_SOURCE);
+}
