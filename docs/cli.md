@@ -398,7 +398,9 @@ lists its declared types after the built-ins; `schema <type> --template` and
 federated repository the types inherited from parents (ADR-150) are part of
 the effective registry: `decided new` composes the closure first and its
 identifier-collision scan covers the composed closure of the top-level corpus
-directory holding the target; `schema` and `templates` list them when given
+directory holding the target plus every other file in the repository, so an
+identifier issued in a sibling directory or by a replaced parent artifact is
+not reused; `schema` and `templates` list them when given
 `--corpus <dir>`, which composes that directory's closure, and list the
 local registry only when run without it. `--corpus` names a corpus directory;
 the root of a version-1 child is its corpus, while the root of a version-2
