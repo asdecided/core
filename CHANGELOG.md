@@ -37,6 +37,16 @@ details, release history over commit history.
   exports materialise the bounded configured corpus and federation closure so
   identity and inherited records match that revision without changing `.git`.
 
+### Fixed
+
+- `decided new` and `decided migrate` in a repository with a version-2
+  federation manifest, which failed with `federated-corpus-snapshot-failed`
+  because the identifier-collision scan composed the repository root, a path
+  the version-2 graph rejects. The scan now composes the top-level corpus
+  directory holding the target, inherited layer included, so an identifier a
+  parent already issued is not reused; unconfigured and version-1
+  repositories keep their released root walk.
+
 ## v0.29.0 — 2026-08-30
 
 ### Graph-complete corpus federation
