@@ -693,6 +693,25 @@ fn schema_and_templates_list_the_effective_registry_of_a_given_corpus() {
         "runbook"
     );
 
+    // The repository root of a version-2 graph is not a corpus path: it is
+    // refused exactly as `validate <root>` refuses it, never silently listed
+    // without its inherited types.
+    let root_listing = run_in(&root, &["schema", "--list", "--corpus", "."]);
+    assert_eq!(
+        root_listing.status.code(),
+        Some(1),
+        "{}",
+        stdout(&root_listing)
+    );
+    assert!(
+        stderr(&root_listing).starts_with("decided: federated-corpus-snapshot-failed: "),
+        "{}",
+        stderr(&root_listing)
+    );
+    let root_validate = run_in(&root, &["validate", "."]);
+    assert_eq!(root_validate.status.code(), Some(1));
+    assert!(stdout(&root_validate).contains("federated-corpus-snapshot-failed"));
+
     // A directory that is not a corpus is a usage error; a closure that
     // cannot be composed is the composition failure, exit 1.
     let missing = run_in(&root, &["templates", "--corpus", "absent"]);
@@ -751,6 +770,28 @@ fn a_version_one_parent_bundle_is_inherited_and_scaffolds_in_the_child() {
     assert!(payload.get("artifact_spec_bundle").is_none());
     assert_eq!(payload["artifact_spec_bundles"][0]["source"], PARENT_SOURCE);
     assert_eq!(payload["artifact_spec_bundles"][0]["layer"], "inherited");
+
+    // The root of a version-1 child is its corpus: `--corpus .` composes it
+    // and lists the inherited type, and a root-level artifact of that type
+    // validates, rather than the walk climbing above the repository root.
+    let listing = json(&repo.run(&["schema", "--list", "--json", "--corpus", "."]));
+    assert_eq!(
+        listing["schemas"].as_array().unwrap().last().unwrap(),
+        "runbook",
+        "{listing}"
+    );
+    let listing = json(&repo.run(&["templates", "--json", "--corpus", "decisions"]));
+    assert_eq!(
+        listing["templates"].as_array().unwrap().last().unwrap(),
+        "runbook"
+    );
+    repo.write(
+        "root-runbook.md",
+        "---\nschema_version: 1\nid: APP-000000000009\ntype: runbook\n---\n# Root Runbook\n\n## Status\n\nActive\n\n## Purpose\n\nRoll a build.\n\n## Steps\n\n1. Deploy.\n",
+    );
+    let root_file = repo.run(&["validate", "root-runbook.md", "--json"]);
+    assert_eq!(root_file.status.code(), Some(0), "{}", stdout(&root_file));
+    assert_eq!(json(&root_file)["valid"], true);
 
     // `new` composes the closure first, so an inherited type scaffolds.
     fs::create_dir_all(repo.root().join("decisions/runbooks")).unwrap();

@@ -308,24 +308,46 @@ fn spec_sync_closure_or_exit(directory: &str) -> Option<i32> {
     {
         return None;
     }
-    // Compose the corpus rooted at the top-level directory that holds
-    // `directory` (the `decisions/` of a standard layout): a nested directory
-    // is not a corpus of its own, and a directory that does not exist yet
-    // still sees the inherited types before `new` reports it missing.
+    let scope = closure_scope(directory, &repository_root)?;
+    load_composed_or_exit(&scope.display().to_string(), true).err()
+}
+
+/// The corpus directory whose closure governs `directory`: the top-level
+/// directory below the repository root that holds it (the `decisions/` of a
+/// standard layout), because a nested directory is not a corpus of its own.
+/// The walk never climbs above the repository root. The root itself is the
+/// corpus of a version-1 child; a version-2 graph rejects the root as a
+/// corpus path, so a root-level target there has no closure to compose and
+/// keeps the released behaviour. `None` also for a directory outside the
+/// repository or one that does not exist yet (`new` then reports it).
+fn closure_scope(directory: &str, repository_root: &Path) -> Option<PathBuf> {
     let mut candidate = crate::validate::resolve_path(directory);
-    if !candidate.starts_with(&repository_root) {
+    if !candidate.starts_with(repository_root) {
         return None;
     }
-    while candidate
-        .parent()
-        .is_some_and(|parent| parent != repository_root)
-    {
-        candidate = candidate.parent().map(Path::to_path_buf)?;
+    while let Some(parent) = candidate.parent() {
+        if parent == repository_root || !parent.starts_with(repository_root) {
+            break;
+        }
+        candidate = parent.to_path_buf();
     }
-    if candidate == repository_root || !candidate.is_dir() {
+    if !candidate.is_dir() {
         return None;
     }
-    load_composed_or_exit(&candidate.display().to_string(), true).err()
+    if candidate == repository_root && is_graph_federation(repository_root) {
+        return None;
+    }
+    Some(candidate)
+}
+
+/// Whether `repository_root` declares a version-2 federation graph. A
+/// manifest the loader cannot read counts as not-a-graph here so that the
+/// composition itself reports the defect.
+fn is_graph_federation(repository_root: &Path) -> bool {
+    matches!(
+        crate::federation::load_graph_manifest(repository_root),
+        Ok(Some(_))
+    )
 }
 
 fn load_composed_or_exit(
@@ -2466,7 +2488,21 @@ fn registry_sync_for_listing(corpus: Option<&str>) -> Option<i32> {
         Some(corpus) if !Path::new(corpus).is_dir() => Some(usage_error(&format!(
             "--corpus is not a directory: {corpus}"
         ))),
-        Some(corpus) => spec_sync_closure_or_exit(corpus),
+        Some(corpus) => {
+            // `--corpus` names a corpus explicitly, so the repository root of
+            // a version-2 graph is refused exactly as `validate <root>`
+            // refuses it, rather than silently listing only local types.
+            let repository_root = crate::validate::repository_root(corpus);
+            if crate::validate::resolve_path(corpus) == repository_root
+                && is_graph_federation(&repository_root)
+            {
+                if let Some(code) = spec_sync_or_exit(corpus) {
+                    return Some(code);
+                }
+                return load_composed_or_exit(corpus, true).err();
+            }
+            spec_sync_closure_or_exit(corpus)
+        }
         None => spec_sync_or_exit("."),
     }
 }
