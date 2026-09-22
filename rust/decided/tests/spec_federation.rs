@@ -619,6 +619,106 @@ fn new_scaffolds_inherited_and_builtin_types_in_a_version_two_child() {
 }
 
 #[test]
+fn schema_and_templates_list_the_effective_registry_of_a_given_corpus() {
+    let root = fixture();
+    // Without a corpus the working directory's local registry is listed, as
+    // released: the child's own bundle, nothing inherited.
+    let local = json(&run_in(&root, &["schema", "--list", "--json"]));
+    let names: Vec<&str> = local["schemas"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert_eq!(
+        names,
+        [
+            "requirement",
+            "decision",
+            "roadmap",
+            "prompt",
+            "design",
+            "policy"
+        ]
+    );
+    let absent = run_in(&root, &["schema", "runbook"]);
+    assert_eq!(absent.status.code(), Some(2));
+
+    // With --corpus the composed closure is listed: own types, then inherited.
+    let effective = json(&run_in(
+        &root,
+        &["schema", "--list", "--json", "--corpus", "decisions"],
+    ));
+    let names: Vec<&str> = effective["schemas"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert_eq!(
+        names,
+        [
+            "requirement",
+            "decision",
+            "roadmap",
+            "prompt",
+            "design",
+            "policy",
+            "runbook"
+        ]
+    );
+    let inherited = run_in(&root, &["schema", "runbook", "--corpus=decisions"]);
+    assert_eq!(inherited.status.code(), Some(0), "{}", stderr(&inherited));
+    assert!(
+        stdout(&inherited).contains("Runbook"),
+        "{}",
+        stdout(&inherited)
+    );
+    let template = run_in(
+        &root,
+        &["schema", "runbook", "--template", "--corpus", "decisions"],
+    );
+    assert_eq!(template.status.code(), Some(0));
+    assert!(
+        stdout(&template).contains("## Purpose"),
+        "{}",
+        stdout(&template)
+    );
+    let templates = json(&run_in(
+        &root,
+        &["templates", "--json", "--corpus", "decisions"],
+    ));
+    assert_eq!(
+        templates["templates"].as_array().unwrap().last().unwrap(),
+        "runbook"
+    );
+
+    // A directory that is not a corpus is a usage error; a closure that
+    // cannot be composed is the composition failure, exit 1.
+    let missing = run_in(&root, &["templates", "--corpus", "absent"]);
+    assert_eq!(missing.status.code(), Some(2));
+    assert!(stderr(&missing).contains("--corpus is not a directory"));
+    let conflict = fixture_copy("schema-conflict");
+    let policy: serde_json::Value =
+        serde_json::from_slice(&fs::read(conflict.join(".decided/artifact-specs.json")).unwrap())
+            .unwrap();
+    let policy = policy["artifact_specs"][0].to_string();
+    write_and_repin(
+        &conflict,
+        ".decided/artifact-specs.json",
+        ".decided/config.yaml",
+        &[&policy, RUNBOOK_ALT],
+    );
+    let failed = run_in(&conflict, &["schema", "--list", "--corpus", "decisions"]);
+    assert_eq!(failed.status.code(), Some(1));
+    assert!(
+        stderr(&failed).starts_with(&format!("decided: {CONFLICT}: ")),
+        "{}",
+        stderr(&failed)
+    );
+}
+
+#[test]
 fn a_version_one_parent_bundle_is_inherited_and_scaffolds_in_the_child() {
     let repo = FederationRepo::new("spec-bundle-v-one");
     let runbook = standards_runbook(&fixture());
