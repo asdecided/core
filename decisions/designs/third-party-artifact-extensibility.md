@@ -216,9 +216,13 @@ config file plus, when pinned, the bundle file. Concretely:
   the derived store and the freshness tracker's generation, so a re-pin
   rebuilds the read model on the next request. The built-in registry is
   installed for a corpus with no pin.
-- The federation digest preimage (ADR-134, ADR-145) is unchanged: the
-  effective registry is the invoking corpus's own bundle, so a parent's
-  bundle does not influence the child's read model and needs no pin.
+- The federation digest preimage (ADR-134, ADR-145) is unchanged. A
+  parent's raw `.decided/config.yaml` bytes are already framed in it, and
+  that config pins the parent's bundle digest, so a parent cannot change its
+  types without changing the digest the child pinned. In a federated closure
+  the corpus hash folds every effective bundle digest in composition order
+  (section 10), not only the local one; the closure generation is already
+  keyed to every node's config bytes (ADR-148) and needs nothing new.
 
 ### 8. Sequencing and the smallest reversible step
 
@@ -266,6 +270,115 @@ rest.
 - **Freshness**: re-pinning the bundle flips the validation-store fingerprint
   and the derived-cache generation; a running `decided-mcp` rebuilds its
   generation and `get_summary` reflects the new registry.
+- **Federated composition (section 10)**: a child with a parent that declares
+  `runbook` classifies, validates, exports, and serves the parent's runbooks
+  as runbooks; an identical element declared by two sources is silent; a
+  same-name, different-content element is
+  `corpus-federation-artifact-type-conflict` on every command and MCP tool;
+  a Decision-backed override resolves it and a missing, inherited, retired,
+  or non-Decision rationale, a duplicate name, a `prefer` outside the
+  inherited view, and an override for a name that does not collide each fail
+  with `corpus-federation-invalid-override`; a parent bundle whose bytes no
+  longer match the digest in the parent's captured config fails composition
+  with the parent's source in the message; a closure in which no source pins
+  a bundle is byte-identical to before.
+
+### 10. Federated registry composition (ADR-150)
+
+ADR-150 makes the effective registry closure-dependent. The mechanism is one
+function over the verified federation, called from the two places the engine
+already composes a closure, so the CLI and `decided-mcp` cannot disagree.
+
+**Inputs.** For every source in the verified closure (the root and each
+`VerifiedFederationNode`, or the child and its one `VerifiedParent` on the
+version-1 path): its global source, layer, repository root, captured config
+bytes, and its direct parents in the canonical order the manifest loader
+fixes for `parents`. That canonical order is the order every other consumer
+of the manifest already uses; the raw byte order is authenticated but not
+semantic, so the ADR's "declaration order" is realised as the loader's
+canonical order rather than a second ordering rule. Order never changes which
+types exist or their content (a different-content duplicate is an error), only
+the registry order of inherited types and the listing order of provenance.
+
+**Stanza.** `artifact_types` gains an optional `overrides` list beside
+`bundle`; `bundle` becomes optional when `overrides` is present, so a child
+that pins nothing of its own can still adjudicate between its parents. Unknown
+keys under `artifact_types` are `artifact-spec-bundle-config-invalid`, as they
+already are under `bundle`. Each override is `{name, prefer, rationale}`:
+`name` a type name, `prefer` the literal `local` or a global source, and
+`rationale` a canonical Decision identifier.
+
+**Composition.** `effective(source)` is computed bottom-up with a per-source
+memo:
+
+1. Parse the source's stanza from its captured config bytes. A pin is read and
+   verified (path containment, size, digest, node budget) and admitted
+   exactly as section 2 and 3 do for the local corpus; the admitted elements
+   are tagged with the source that declared them. A parent-side failure keeps
+   its `artifact-spec-bundle-*` code and reports the parent's source.
+2. Candidates are the source's own admitted elements, then, for each direct
+   parent in canonical order, that parent's effective elements (recursively;
+   an element inherited through a parent keeps its original declaring
+   source).
+3. Group candidates by name in order of first appearance. One distinct
+   content per name is admitted as is; elements that compare equal as
+   admitted elements are silent duplicates, so key order and whitespace in a
+   bundle file cannot manufacture a conflict. Two or more distinct contents
+   are a collision: with no override at this source the composition stops
+   with `corpus-federation-artifact-type-conflict`, naming the type and every
+   declaring source; with an override, the candidate declared by `prefer`
+   (`local` meaning this source) wins and the rest are dropped.
+4. An override at this source that names a non-colliding name, repeats a
+   name, prefers a source outside this source's transitive parents, or prefers
+   a source that declares no candidate for the name is
+   `corpus-federation-invalid-override`, the finding the artifact-override
+   family already uses for a malformed ADR-137 declaration.
+5. The effective registry is the built-ins in registry order followed by the
+   surviving elements in first-appearance order. The winner of a collision is
+   what descendants inherit; a descendant that declares yet another content
+   for the name collides afresh and needs its own override, mirroring the
+   override chains of ADR-147.
+
+**Rationale check.** `rationale` must resolve to exactly one live local
+Decision of the declaring source: one item whose origin is that source and
+whose canonical identifier matches, classified `decision`, and live by the
+same predicate the artifact overrides use. Items only exist after the
+closure's files are parsed, so this check runs immediately after parsing in
+both composition functions; a failure is `corpus-federation-invalid-override`
+and fails the composition like any other override defect. The registry is
+installed before parsing so inherited types classify; a failed rationale
+check stops the run before anything is served, so the ordering is not
+observable.
+
+**Process slot.** Built registries are memoised by a key over every source's
+`(source, config bytes)` in composition order, which fixes the pins and the
+overrides; the local-only registry of section 1 uses the same key shape with
+one frame. Bundle bytes are re-read and re-hashed against their pin on every
+sync before the memo is consulted, so a bundle edited without a re-pin fails
+closed on the next command or request rather than serving the previous
+registry. `sync_registry` keeps an installed federated registry while the
+local config bytes are unchanged and the manifest is still present, and
+composition replaces it whenever the closure's key changes.
+
+**Where it runs.** `graph_federated_corpus::compose_verified_federation`
+(version 2) and `federated_corpus::compose_verified_generation_from_snapshot`
+(version 1) install the effective registry before parsing any file and run
+the rationale check after; `decided-mcp` re-verifies and recomposes on every
+request, so a parent re-pin lands on the next call. `decided new` and
+single-file `validate` inside a federated repository compose the closure
+first so an inherited type scaffolds and validates; `schema` and `templates`
+take no corpus directory and list the local registry, which the CLI reference
+records.
+
+**Provenance and keys.** `validate --json` gains `artifact_spec_bundles`: one
+entry per source that pinned a bundle, in composition order, each with
+`source`, `layer`, `path`, `digest`, `admitted`, and `warnings`; the ADR-083
+`artifact_spec_bundle` object stays for the local bundle so existing readers
+are unchanged (ADR-007). The human renderer adds one `WARN` block per
+inherited bundle with skipped elements, labelled with its source; `doctor`
+carries the source in each inherited `artifact-spec-skipped` finding. The
+corpus hash folds every effective bundle digest in composition order, one
+frame each, so a corpus with exactly one local bundle keeps today's preimage.
 
 ## Constraints
 
@@ -284,9 +397,13 @@ rest.
 - **No new dependency (ADR-114, REQ-005).** `serde_json`, the bounded YAML
   reader, the engine's `Sha256`, and the federation containment helpers
   suffice; no bundle code is ever executed.
-- **Deferred boundaries.** No new edge kinds (ADR-055); no federation
-  propagation of bundles; no custom validators; any public invitation stays
-  behind GATE-2 (ADR-071).
+- **Federation rules, not a second precedence model (ADR-150).** Inherited
+  types compose bottom-up with no precedence; a collision is an error resolved
+  only by a Decision-backed override declared by the corpus that owns the
+  resolution; the pin the child already holds covers the parent's bundle.
+- **Deferred boundaries.** No new edge kinds (ADR-055); no custom validators;
+  a descendant cannot un-inherit a type short of overriding it; any public
+  invitation stays behind GATE-2 (ADR-071).
 
 ## Rationale
 
@@ -343,15 +460,21 @@ documentation follows the repository's readable-prose conventions.
   `&Registry` owned by the serving generation. The leak is now bounded to one
   registry per distinct pin a process has served (registries are memoised by
   pin), so the remaining cost is the `&'static` shape, not growth.
-- The federation-propagation decision: whether a child inherits a parent's
-  bundle, and how a same-name / different-spec collision across parents is
-  adjudicated (ADR-137, ADR-147 lineage).
+- Whether `schema --list` and `templates` should accept a corpus directory
+  so they can show the effective registry of a federated child; today they
+  list the local registry because they take no corpus context.
 - The trigger that schedules implementation, and the separate GATE-2 trigger
   for any public ecosystem invitation.
 
 ## Related Decisions
 
 - adr-083
+- adr-150
+- adr-137
+- adr-144
+- adr-146
+- adr-147
+- adr-148
 - adr-052
 - adr-055
 - adr-060
