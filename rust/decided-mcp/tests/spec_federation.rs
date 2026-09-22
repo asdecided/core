@@ -49,11 +49,17 @@ fn call(id: u32, name: &str, arguments: Value) -> String {
     .to_string()
 }
 
-fn spawn(root: &Path) -> (Child, ChildStdin, BufReader<ChildStdout>) {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_decided-mcp"))
-        .arg("--root")
-        .arg(root.join("decisions"))
-        .arg("--no-cache")
+fn spawn(root: &Path, cached: bool) -> (Child, ChildStdin, BufReader<ChildStdout>) {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_decided-mcp"));
+    command.arg("--root").arg(root.join("decisions"));
+    if cached {
+        command
+            .env("DECIDED_CACHE_DIR", root.join(".decided/cache"))
+            .env("XDG_CACHE_HOME", root.join(".xdg/cache"));
+    } else {
+        command.arg("--no-cache");
+    }
+    let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -99,8 +105,18 @@ fn sha256(bytes: &[u8]) -> String {
 
 #[test]
 fn a_served_child_answers_with_inherited_types_and_blocks_a_live_collision() {
-    let root = fixture_copy("spec-federation-live");
-    let (child, mut stdin, mut stdout) = spawn(&root);
+    live_collision("spec-federation-live", false);
+}
+
+/// The cached path reports the same finding; both name the code once.
+#[test]
+fn a_cached_server_blocks_a_live_collision_with_one_code_prefix() {
+    live_collision("spec-federation-live-cached", true);
+}
+
+fn live_collision(tag: &str, cached: bool) {
+    let root = fixture_copy(tag);
+    let (child, mut stdin, mut stdout) = spawn(&root, cached);
     send(&mut stdin, &mut stdout, &initialize());
 
     let summary = payload(&send(
@@ -154,7 +170,7 @@ fn a_served_child_answers_with_inherited_types_and_blocks_a_live_collision() {
     assert_eq!(frame["result"]["isError"], true, "{frame}");
     let text = frame["result"]["content"][0]["text"].as_str().unwrap();
     assert!(
-        text.starts_with("corpus-federation-artifact-type-conflict: "),
+        text.starts_with("corpus-federation-artifact-type-conflict: source "),
         "{text}"
     );
     assert!(text.contains("'runbook'"), "{text}");
