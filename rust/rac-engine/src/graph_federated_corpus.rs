@@ -243,8 +243,18 @@ pub fn compose_verified_federation(
         let registry = install_closure_registry(&federation)?;
         let parsed = parse_and_validate_snapshots(&federation)?;
         if let Some(registry) = registry {
-            crate::spec_composition::verify_override_rationales(registry, parsed.items.iter())
-                .map_err(|error| spec_error(&federation, error))?;
+            crate::spec_composition::verify_override_rationales(
+                registry,
+                &federation.root_source,
+                parsed.items.iter(),
+                || {
+                    crate::spec_composition::root_tree_items(
+                        &federation.repository_root,
+                        &federation.materialisation_roots,
+                    )
+                },
+            )
+            .map_err(|error| spec_error(&federation, error))?;
         }
 
         validate_nested_v1(

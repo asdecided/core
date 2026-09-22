@@ -361,7 +361,10 @@ pub struct SpecStanza {
 /// One source's contribution to the effective registry (ADR-150 decision 6).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceSpecBundle {
-    pub source: String,
+    /// The contributing corpus's `corpus.source`; `None` only for a local
+    /// bundle in a config that declares no source (serialised as `null`, never
+    /// as the `prefer: local` keyword).
+    pub source: Option<String>,
     pub layer: crate::corpus::Layer,
     pub bundle: SpecBundle,
 }
@@ -1494,7 +1497,10 @@ pub fn sync_registry(start_dir: &str) -> Result<(), SpecBundleError> {
         install(None);
         return Ok(());
     };
-    let source = local_source(&config_path, text).unwrap_or_else(|| OVERRIDE_PREFER_LOCAL.into());
+    let declared_source = local_source(&config_path, text);
+    let source = declared_source
+        .clone()
+        .unwrap_or_else(|| OVERRIDE_PREFER_LOCAL.into());
     if !manifest_present {
         if let Some(first) = stanza.overrides.first() {
             // Nothing can collide in a corpus that declares no parents.
@@ -1517,7 +1523,7 @@ pub fn sync_registry(start_dir: &str) -> Result<(), SpecBundleError> {
     let registry = registry_for_key(&key, || {
         let mut registry = admit_bundle(&path, &bundle_bytes, &pin)?;
         registry.sources = vec![SourceSpecBundle {
-            source: source.clone(),
+            source: declared_source.clone(),
             layer: crate::corpus::Layer::Local,
             bundle: registry
                 .bundle

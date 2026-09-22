@@ -184,7 +184,8 @@ fn spec_bundle_findings() -> Vec<DoctorFinding> {
                     problem: if inherited {
                         format!(
                             "inherited source '{}': {element} skipped: {}",
-                            source.source, warning.message
+                            source.source.as_deref().unwrap_or_default(),
+                            warning.message
                         )
                     } else {
                         format!("{element} skipped: {}", warning.message)
@@ -194,7 +195,7 @@ fn spec_bundle_findings() -> Vec<DoctorFinding> {
                             "Fix the element in the spec bundle of '{}' and re-pin its digest in \
                              that corpus's .decided/config.yaml; the child inherits the parent's \
                              admitted types as pinned (ADR-150).",
-                            source.source
+                            source.source.as_deref().unwrap_or_default()
                         )
                     } else {
                         "Fix the element in the spec bundle and re-pin its digest in \
