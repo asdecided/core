@@ -746,3 +746,27 @@ fn okf_types_are_emitted_as_safe_scalars() {
         .unwrap();
     assert!(policy.contains("type: Policy\n"), "{policy}");
 }
+
+#[test]
+fn a_local_bundle_without_a_declared_source_reports_a_null_source() {
+    let root = fixture_copy("null-source");
+    let named = json(&run_in(&root, &["validate", "decisions", "--json"]));
+    assert_eq!(
+        named["artifact_spec_bundles"][0]["source"],
+        "asdecided/fixtures-spec-bundle"
+    );
+    // Without `corpus.source` the label is null, never the `prefer: local`
+    // keyword a source name could be mistaken for.
+    let config = root.join(".decided/config.yaml");
+    let text = fs::read_to_string(&config)
+        .unwrap()
+        .replace("corpus:\n  source: asdecided/fixtures-spec-bundle\n", "");
+    assert!(!text.contains("corpus:"));
+    fs::write(&config, text).unwrap();
+    let output = run_in(&root, &["validate", "decisions", "--json"]);
+    let payload = json(&output);
+    let entry = &payload["artifact_spec_bundles"][0];
+    assert!(entry["source"].is_null(), "{entry}");
+    assert_eq!(entry["layer"], "local");
+    assert_eq!(entry["path"], ".decided/artifact-specs.json");
+}
