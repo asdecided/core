@@ -566,3 +566,59 @@ fn stdin_inspect_and_improve_see_the_bundle_types() {
         );
     }
 }
+
+#[test]
+fn an_unfederated_historical_export_uses_the_bundle_of_that_revision() {
+    let root = fixture_copy("export-at");
+    let git = |args: &[&str]| {
+        let status = Command::new("git")
+            .args(["-c", "user.name=t", "-c", "user.email=t@example.invalid"])
+            .args(args)
+            .current_dir(&root)
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?}");
+    };
+    git(&["init", "-q"]);
+    git(&["add", "-A"]);
+    git(&["commit", "-qm", "one"]);
+    // Commit two re-pins a bundle without `runbook`.
+    let path = root.join(".decided/artifact-specs.json");
+    let mut bundle: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    bundle["artifact_specs"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|e| e["name"] != "runbook");
+    let bytes = format!("{}\n", serde_json::to_string_pretty(&bundle).unwrap());
+    fs::write(&path, &bytes).unwrap();
+    let config = root.join(".decided/config.yaml");
+    let text = fs::read_to_string(&config).unwrap();
+    let start = text.find("digest: sha256:").unwrap();
+    let end = start + "digest: sha256:".len() + 64;
+    let digest = {
+        use sha2::{Digest, Sha256};
+        format!("{:x}", Sha256::digest(bytes.as_bytes()))
+    };
+    fs::write(
+        &config,
+        format!("{}digest: sha256:{digest}{}", &text[..start], &text[end..]),
+    )
+    .unwrap();
+    git(&["commit", "-qam", "two"]);
+
+    let types = |rev: &str| -> Vec<String> {
+        let output = run_in(&root, &["export", "decisions", "--at", rev, "--json"]);
+        assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+        let mut types: Vec<String> = json(&output)["artifacts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|a| a["type"].as_str().unwrap().to_string())
+            .collect();
+        types.sort();
+        types.dedup();
+        types
+    };
+    assert_eq!(types("HEAD~1"), ["decision", "policy", "runbook"]);
+    assert_eq!(types("HEAD"), ["decision", "policy"]);
+}
