@@ -622,3 +622,127 @@ fn an_unfederated_historical_export_uses_the_bundle_of_that_revision() {
     assert_eq!(types("HEAD~1"), ["decision", "policy", "runbook"]);
     assert_eq!(types("HEAD"), ["decision", "policy"]);
 }
+
+/// Append `element` to the fixture bundle and re-pin it.
+fn add_element_and_repin(root: &Path, element: &str) {
+    let path = root.join(".decided/artifact-specs.json");
+    let mut bundle: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    bundle["artifact_specs"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::from_str(element).unwrap());
+    let bytes = format!("{}\n", serde_json::to_string_pretty(&bundle).unwrap());
+    fs::write(&path, &bytes).unwrap();
+    let config = root.join(".decided/config.yaml");
+    let text = fs::read_to_string(&config).unwrap();
+    let start = text.find("digest: sha256:").unwrap();
+    let end = start + "digest: sha256:".len() + 64;
+    let digest = {
+        use sha2::{Digest, Sha256};
+        format!("{:x}", Sha256::digest(bytes.as_bytes()))
+    };
+    fs::write(
+        &config,
+        format!("{}digest: sha256:{digest}{}", &text[..start], &text[end..]),
+    )
+    .unwrap();
+}
+
+#[test]
+fn a_bundle_type_cannot_take_classification_from_a_builtin() {
+    let root = fixture_copy("builtins-win");
+    // `note` requires only `context`, which every ADR carries: it scores 1.0
+    // on the fixture ADR, which lacks a recommended section. Built-ins win.
+    add_element_and_repin(
+        &root,
+        r#"{"name":"note","display":"Note","required":["context"]}"#,
+    );
+    let inspected = run_in(
+        &root,
+        &["inspect", "decisions/decisions/adr-001-example.md"],
+    );
+    assert!(
+        stdout(&inspected).starts_with("Artifact Type: Decision"),
+        "{}",
+        stdout(&inspected)
+    );
+    let payload = json(&run_in(&root, &["validate", "decisions", "--json"]));
+    let adr = payload["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["path"] == "decisions/decisions/adr-001-example.md")
+        .unwrap();
+    assert_eq!(adr["artifact_type"], "decision");
+    // A document only the bundle type fits is still that type.
+    fs::create_dir_all(root.join("decisions/notes")).unwrap();
+    fs::write(
+        root.join("decisions/notes/n.md"),
+        "---\nschema_version: 1\nid: SPB-000000000007\ntype: note\n---\n# A Note\n\n## Context\n\nOnly context.\n",
+    )
+    .unwrap();
+    let inspected = run_in(&root, &["inspect", "decisions/notes/n.md"]);
+    assert!(
+        stdout(&inspected).starts_with("Artifact Type: Note"),
+        "{}",
+        stdout(&inspected)
+    );
+}
+
+#[test]
+fn an_unparseable_config_with_a_stanza_fails_instead_of_dropping_the_pin() {
+    let root = fixture_copy("unparseable");
+    let config = root.join(".decided/config.yaml");
+    let mut text = fs::read_to_string(&config).unwrap();
+    text.push_str("extra: [unclosed\n");
+    fs::write(&config, text).unwrap();
+    let output = run_in(&root, &["validate", "decisions", "--json"]);
+    assert_eq!(output.status.code(), Some(1), "{}", stdout(&output));
+    assert_eq!(
+        json(&output)["files"][0]["issues"][0]["code"],
+        "artifact-spec-bundle-config-invalid"
+    );
+}
+
+#[test]
+fn okf_types_are_emitted_as_safe_scalars() {
+    let root = fixture_copy("okf-scalar");
+    let path = root.join(".decided/artifact-specs.json");
+    let mut bundle: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    bundle["artifact_specs"][0]["okf_type"] = serde_json::json!("Run Book: Ops");
+    let bytes = format!("{}\n", serde_json::to_string_pretty(&bundle).unwrap());
+    fs::write(&path, &bytes).unwrap();
+    let config = root.join(".decided/config.yaml");
+    let text = fs::read_to_string(&config).unwrap();
+    let start = text.find("digest: sha256:").unwrap();
+    let end = start + "digest: sha256:".len() + 64;
+    let digest = {
+        use sha2::{Digest, Sha256};
+        format!("{:x}", Sha256::digest(bytes.as_bytes()))
+    };
+    fs::write(
+        &config,
+        format!("{}digest: sha256:{digest}{}", &text[..start], &text[end..]),
+    )
+    .unwrap();
+    let out = root.join("okf-out");
+    let export = run_in(
+        &root,
+        &[
+            "export",
+            "decisions",
+            "--okf",
+            "--out",
+            out.to_str().unwrap(),
+        ],
+    );
+    assert_eq!(export.status.code(), Some(0), "{}", stderr(&export));
+    let runbook = fs::read_to_string(out.join("runbooks/deploy-search-service.md"))
+        .or_else(|_| fs::read_to_string(out.join("decisions/runbooks/deploy-search-service.md")))
+        .unwrap();
+    assert!(runbook.contains("type: \"Run Book: Ops\"\n"), "{runbook}");
+    let policy = fs::read_to_string(out.join("policies/data-retention.md"))
+        .or_else(|_| fs::read_to_string(out.join("decisions/policies/data-retention.md")))
+        .unwrap();
+    assert!(policy.contains("type: Policy\n"), "{policy}");
+}
