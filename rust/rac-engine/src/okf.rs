@@ -96,8 +96,11 @@ fn yaml_string(value: &str) -> String {
 
 /// A plain YAML scalar when the value is a simple word or phrase (every
 /// built-in OKF type is, so their output is unchanged), else a quoted one, so
-/// a bundle's `okf_type` can never inject frontmatter keys.
+/// a bundle's `okf_type` can never inject frontmatter keys or read back as a
+/// YAML 1.1/1.2 boolean or null. A leading letter already rules out every
+/// other implicit type (numbers, timestamps, `.inf`, `.nan`).
 fn yaml_scalar(value: &str) -> String {
+    const IMPLICIT_WORDS: &[&str] = &["null", "true", "false", "yes", "no", "on", "off", "y", "n"];
     let plain = value
         .chars()
         .next()
@@ -105,7 +108,10 @@ fn yaml_scalar(value: &str) -> String {
         && value
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, ' ' | '.' | '_' | '-'))
-        && !value.ends_with(' ');
+        && !value.ends_with(' ')
+        && !IMPLICIT_WORDS
+            .iter()
+            .any(|word| word.eq_ignore_ascii_case(value));
     if plain {
         value.to_string()
     } else {
@@ -320,4 +326,31 @@ pub fn render_okf_bundle(
     files.insert(INDEX_PATH.to_string(), index(export, &rel));
     files.insert(LOG_PATH.to_string(), log(export, recency, &rel));
     Ok(files)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::yaml_scalar;
+
+    #[test]
+    fn plain_words_stay_plain_and_everything_else_is_quoted() {
+        for plain in ["ADR", "Requirement", "Runbook", "Run Book", "run-book_v2.1"] {
+            assert_eq!(yaml_scalar(plain), plain);
+        }
+        for (value, quoted) in [
+            ("Run Book: Ops", r#""Run Book: Ops""#),
+            ("Runbook\nid: FORGED", r#""Runbook\nid: FORGED""#),
+            ("Trailing ", r#""Trailing ""#),
+            ("1Runbook", r#""1Runbook""#),
+            ("#comment", r##""#comment""##),
+            // YAML 1.1/1.2 booleans and null must not read back as non-strings.
+            ("True", r#""True""#),
+            ("no", r#""no""#),
+            ("ON", r#""ON""#),
+            ("Null", r#""Null""#),
+            ("y", r#""y""#),
+        ] {
+            assert_eq!(yaml_scalar(value), quoted, "{value:?}");
+        }
+    }
 }
