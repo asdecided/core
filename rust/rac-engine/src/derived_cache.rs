@@ -538,6 +538,16 @@ impl FederatedCacheError {
             message: message.into(),
         }
     }
+
+    /// A composition failure whose display already leads with its stable
+    /// code (`<code>: <detail>`): the prefix is kept once, not twice.
+    fn from_composition_display(code: &str, text: String) -> Self {
+        let message = match text.strip_prefix(&format!("{code}: ")) {
+            Some(detail) => detail.to_string(),
+            None => text,
+        };
+        Self::composition(code, message)
+    }
 }
 
 impl From<crate::federation::ParentCorpusError> for FederatedCacheError {
@@ -984,7 +994,9 @@ pub fn compose_logical_generation(
         parent,
         child_files,
     )
-    .map_err(|error| FederatedCacheError::composition(error.stable_code(), error.to_string()))
+    .map_err(|error| {
+        FederatedCacheError::from_composition_display(error.stable_code(), error.to_string())
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -1109,7 +1121,7 @@ impl GraphFederatedCacheTracker {
         let corpus = match crate::graph_federated_corpus::compose_verified_federation(verified) {
             Ok(corpus) => corpus,
             Err(error) => {
-                return self.fail(FederatedCacheError::composition(
+                return self.fail(FederatedCacheError::from_composition_display(
                     error.stable_code(),
                     error.to_string(),
                 ));
