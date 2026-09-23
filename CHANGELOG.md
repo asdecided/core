@@ -46,6 +46,11 @@ details, release history over commit history.
 
 ### Fixed
 
+- `decided-mcp` `get_summary` now lists bundle-declared types in `by_type`
+  in registry order, as `stats` does, instead of the order the walk met
+  them; and `decided doctor`'s `orphaned-artifact` advice for a
+  bundle-declared type no longer suggests adding a reference, which such a
+  type can never receive (ADR-083 decision 4).
 - `decided gate`, `sentry`, `watchkeeper`, and `rename` now load a pinned spec
   bundle, so a bundle-type artifact that `validate` fails also fails the gate,
   a broken pin is refused (exit 1) instead of ignored, and `rename --apply`
