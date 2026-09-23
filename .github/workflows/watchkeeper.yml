@@ -44,7 +44,7 @@ jobs:
     name: watchkeeper
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           # The comparison needs the base revision's history.
           fetch-depth: 0
