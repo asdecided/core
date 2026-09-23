@@ -170,3 +170,50 @@ fn startup_probe_counts_bundle_type_artifacts() {
         "a corpus holding only bundle types is not empty: {stderr}"
     );
 }
+
+#[test]
+fn get_summary_lists_bundle_types_in_registry_order() {
+    // The bundle declares runbook before policy; the walk meets the policy
+    // first (`a-policies/` sorts before `runbooks/`).
+    let policy_element = r#"{"name":"policy","display":"Policy","required":["scope","rules"],"recommended":[],"optional":[],"metadata":{},"retired_status":[],"descriptions":{},"guidance":{},"synonyms":{},"id_field":null,"starter_bodies":{}}"#;
+    let elements = BUNDLE
+        .strip_suffix("]}")
+        .expect("the bundle ends its element array");
+    let bundle = format!("{elements},{policy_element}]}}");
+    let digest = rac_engine::sha256::hexdigest(bundle.as_bytes());
+    let cfg = config(&digest);
+    let policy = "---\nschema_version: 1\nid: MB-000000000002\ntype: policy\n---\n# Data Retention\n\n## Status\n\nActive\n\n## Scope\n\nAll data.\n\n## Rules\n\nKeep 30 days.\n";
+    let files = [
+        (".decided/config.yaml", cfg.as_str()),
+        (".decided/artifact-specs.json", bundle.as_str()),
+        ("a-policies/retention.md", policy),
+        ("runbooks/deploy.md", RUNBOOK),
+    ];
+    let frames = run_stdio_with_budget(
+        "spec-bundle-order",
+        16_384,
+        &files,
+        &[initialize(), call(2, "get_summary", serde_json::json!({}))],
+    );
+    let summary = text_payload(&parse(&frames[1]));
+    let keys: Vec<&str> = summary["artifacts"]["by_type"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert_eq!(
+        keys,
+        [
+            "requirement",
+            "decision",
+            "roadmap",
+            "prompt",
+            "design",
+            "unknown",
+            "runbook",
+            "policy"
+        ],
+        "{summary}"
+    );
+}
