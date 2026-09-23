@@ -125,7 +125,12 @@ What the engine does with it:
   and `decided new <type>` scaffolds them from their starter bodies. They are
   not relationship targets and add no edge kinds (ADR-055): a built-in
   `## Related Decisions` reference to a custom-type artifact still reports
-  `relationship-target-type-mismatch`.
+  `relationship-target-type-mismatch`. `decided doctor` therefore still
+  counts an unreferenced custom-type artifact as `orphaned-artifact` (the
+  portfolio's orphan count is unchanged) but advises that no action is
+  needed. Every per-type listing — `stats --json` families and the MCP
+  `get_summary` `by_type` counts — puts custom types after the built-ins in
+  registry order.
 - **`validate --json` reports the bundle.** `artifact_spec_bundle` carries the
   local bundle's `path`, `digest`, `admitted` names, and `warnings`, and
   `artifact_spec_bundles` lists one entry per source that pins a bundle, with
