@@ -394,6 +394,39 @@ fn doctor_reports_skipped_elements_as_warnings() {
 }
 
 #[test]
+fn doctor_orphan_advice_distinguishes_bundle_types_from_builtins() {
+    let root = fixture_copy("orphan-advice");
+    fs::write(
+        root.join("decisions/decisions/adr-009-standalone.md"),
+        "---\nschema_version: 1\nid: SPB-000000000009\ntype: decision\n---\n# ADR-009: Standalone\n\n## Status\n\nAccepted\n\n## Category\n\nTechnical\n\n## Context\n\nx\n\n## Decision\n\ny\n\n## Consequences\n\nz\n",
+    )
+    .unwrap();
+    let payload = json(&run_in(&root, &["doctor", "decisions", "--json"]));
+    let orphan_fix = |path: &str| -> String {
+        payload["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|f| f["code"] == "orphaned-artifact" && f["path"] == path)
+            .unwrap_or_else(|| panic!("no orphan finding for {path}: {payload}"))["fix"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    // A bundle type can never be a relationship target (ADR-083 decision 4),
+    // so the finding stays (the portfolio count is unchanged) but the advice
+    // is one that can be followed.
+    let runbook = orphan_fix("decisions/runbooks/deploy-search-service.md");
+    assert!(runbook.contains("never a relationship target"), "{runbook}");
+    assert!(!runbook.contains("Reference it"), "{runbook}");
+    let builtin = orphan_fix("decisions/decisions/adr-009-standalone.md");
+    assert!(
+        builtin.starts_with("Reference it from a related artifact"),
+        "{builtin}"
+    );
+}
+
+#[test]
 fn a_bundle_type_does_not_misclassify_as_a_builtin_and_vice_versa() {
     let root = fixture_copy("boundary");
     // Prompt-like headings under a runbook frontmatter: the prompt spec wins
