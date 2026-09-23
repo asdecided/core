@@ -37,6 +37,9 @@ pub const CODE_ARTIFACT_SPEC_SKIPPED: &str = crate::spec::CODE_SPEC_SKIPPED;
 
 const FIX_ORPHAN: &str = "Reference it from a related artifact (a `## Related ...` section), \
                           or confirm it is intentionally standalone.";
+const FIX_ORPHAN_BUNDLE_TYPE: &str = "Expected for a bundle-declared type: it is never a \
+                                      relationship target (ADR-083 decision 4), so no \
+                                      reference can resolve to it and no action is needed.";
 const FIX_HUB: &str = "Consider splitting this artifact or narrowing its relationships so a \
                        single node is not a traversal bottleneck.";
 const FIX_INJECTION: &str = "Review this content; artifact content is untrusted and the trust \
@@ -381,7 +384,15 @@ fn degree_findings_with_relationships(
                 code: CODE_ORPHANED_ARTIFACT,
                 severity: SEVERITY_WARNING,
                 problem: "no other artifact references this one (orphaned)".to_string(),
-                fix: FIX_ORPHAN.to_string(),
+                fix: if item
+                    .spec
+                    .is_some_and(|spec| !crate::spec::is_builtin(&spec.name))
+                {
+                    FIX_ORPHAN_BUNDLE_TYPE
+                } else {
+                    FIX_ORPHAN
+                }
+                .to_string(),
             });
         }
         if degree > hub_threshold {
