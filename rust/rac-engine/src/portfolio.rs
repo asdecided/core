@@ -390,6 +390,14 @@ fn portfolio_from_rows_with_analysis(
             .then(a.code.cmp(&b.code))
     });
 
+    // Bundle-declared types follow the fixed six in registry order, whatever
+    // order the walk met them, as `stats` orders its declared families.
+    let registry_order: Vec<&str> = crate::spec::specs()
+        .iter()
+        .map(|s| s.name.as_str())
+        .collect();
+    by_type[BY_TYPE_ORDER.len()..].sort_by_key(|(t, _)| registry_order.iter().position(|n| n == t));
+
     PortfolioSummary {
         directory: directory.to_string(),
         recursive,
