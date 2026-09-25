@@ -49,6 +49,10 @@ details, release history over commit history.
 - Documented that a bundle element's `synonyms` aid classification only:
   `decided validate` still requires each required section under its
   canonical heading, as SPEC §6.6 specifies for the built-in types.
+- A version-1 `decided-mcp` with the cache on kept serving after a type
+  override's rationale Decision outside the served root was retired; while
+  any type override is applied it now recomposes each request, as a
+  version-2 server always does, so the retirement fails the next call.
 - `decided-mcp` `get_summary` now lists bundle-declared types in `by_type`
   in registry order, as `stats` does, instead of the order the walk met
   them; and `decided doctor`'s `orphaned-artifact` advice for a

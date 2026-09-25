@@ -210,7 +210,10 @@ change its types without changing the digest the child verifies.
   effective bundle digest in composition order, so a re-pin anywhere in the
   closure rebuilds cached classification. A running `decided-mcp` re-verifies
   every pinned bundle in the closure on each request and rebuilds its served
-  model when the registry changes, so a re-pin lands on the next call.
+  model when the registry changes, so a re-pin lands on the next call. While
+  a type override is applied it also re-checks the override's rationale on
+  each request, wherever in the corpus that Decision lives, so retiring it
+  fails the next call.
 - **Unchanged boundaries.** Inherited types are structural only, are not
   relationship targets, and add no edge kinds; a parent's bundle cannot
   override a built-in. `decided schema --list` and `decided templates` list
