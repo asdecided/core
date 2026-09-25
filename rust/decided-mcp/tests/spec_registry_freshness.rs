@@ -223,3 +223,72 @@ fn a_version_one_parent_bundle_edited_without_a_repin_fails_the_warm_path() {
     );
     server.finish();
 }
+
+/// A type override's rationale that lives outside the served root is not in
+/// the version-1 generation; retiring it while the server runs must still
+/// fail the next cached request, as it fails a fresh process.
+#[test]
+fn a_version_one_override_rationale_retired_outside_the_served_root_fails_the_next_request() {
+    let root = fixture("eval/federation/child", "v1-rationale");
+    let parent = root.join("vendor/standards");
+    let bundle = fs::read(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../fixtures/spec-federation/vendor/standards/.decided/artifact-specs.json"),
+    )
+    .unwrap();
+    fs::write(parent.join(".decided/artifact-specs.json"), &bundle).unwrap();
+    let mut parent_config = fs::read_to_string(parent.join(".decided/config.yaml")).unwrap();
+    parent_config.push_str(&format!(
+        "artifact_types:\n  version: 1\n  bundle:\n    path: .decided/artifact-specs.json\n    digest: sha256:{}\n",
+        sha256(&bundle)
+    ));
+    fs::write(parent.join(".decided/config.yaml"), parent_config).unwrap();
+    let digest = rac_engine::federation::calculate_parent_digest(&parent, "decisions")
+        .unwrap()
+        .digest;
+    let manifest = root.join(".decided/corpus.md");
+    let text = fs::read_to_string(&manifest).unwrap();
+    let start = text.find("digest: sha256:").unwrap();
+    let end = start + "digest: ".len() + "sha256:".len() + 64;
+    fs::write(
+        &manifest,
+        format!("{}digest: {digest}{}", &text[..start], &text[end..]),
+    )
+    .unwrap();
+
+    // The child declares its own runbook and settles the collision with a
+    // Decision that sits in docs/, outside the served decisions/ root.
+    let local = br#"{"artifact_specs":[{"name":"runbook","display":"Run Book","required":["purpose"],"recommended":[],"optional":[],"metadata":{"status":["Active"]},"retired_status":[],"descriptions":{},"guidance":{},"synonyms":{},"id_field":null,"starter_bodies":{}}]}
+"#;
+    fs::write(root.join(".decided/artifact-specs.json"), local).unwrap();
+    let mut config = fs::read_to_string(root.join(".decided/config.yaml")).unwrap();
+    config.push_str(&format!(
+        "artifact_types:\n  version: 1\n  bundle:\n    path: .decided/artifact-specs.json\n    digest: sha256:{}\n  overrides:\n    - name: runbook\n      prefer: local\n      rationale: CHILD-000000000077\n",
+        sha256(local)
+    ));
+    fs::write(root.join(".decided/config.yaml"), config).unwrap();
+    let rationale = root.join("docs/adr-077-local-runbook.md");
+    let decision = |status: &str| {
+        format!(
+            "---\nschema_version: 1\nid: CHILD-000000000077\ntype: decision\n---\n# ADR-077: Local Runbook Shape\n\n## Status\n\n{status}\n\n## Category\n\nTechnical\n\n## Context\n\nx\n\n## Decision\n\ny\n\n## Consequences\n\nz\n"
+        )
+    };
+    fs::create_dir_all(rationale.parent().unwrap()).unwrap();
+    fs::write(&rationale, decision("Accepted")).unwrap();
+
+    let cache = scratch("v1-rationale-cache");
+    let mut server = Server::start(&root.join("decisions"), &cache);
+    server
+        .summary()
+        .expect("the override resolves outside the served root");
+    server.summary().expect("the same generation again");
+
+    fs::write(&rationale, decision("Proposed")).unwrap();
+    let error = server.summary().unwrap_err();
+    assert!(
+        error.starts_with("corpus-federation-invalid-override: ")
+            && error.contains("not a live Decision"),
+        "{error}"
+    );
+    server.finish();
+}
