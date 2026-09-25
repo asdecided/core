@@ -874,7 +874,13 @@ impl<C> FederatedCacheTracker<C> {
             capture_logical_generation(child_repository_root, child_corpus, recursive)?;
         let cache_key = generation.cache_key().to_string();
         if self.current_key.as_deref() == Some(cache_key.as_str()) {
-            if self.generation.as_ref() != Some(&generation) {
+            // A type override's rationale may resolve outside the captured
+            // snapshot (the root's whole working tree, ADR-150), which the
+            // generation does not cover; recompose every request while any
+            // override is applied, as the version-2 tracker always does.
+            let rationale_outside_snapshot = crate::spec::active_registry()
+                .is_some_and(|registry| !registry.overrides().is_empty());
+            if self.generation.as_ref() != Some(&generation) || rationale_outside_snapshot {
                 let built = build(&generation)?;
                 validate_federated_model(&generation, &built.model)?;
                 self.composed = Some(built.composed);
