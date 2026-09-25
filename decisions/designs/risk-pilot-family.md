@@ -1,0 +1,203 @@
+---
+schema_version: 1
+id: RAC-M3C0K39XB5DT
+type: design
+tags: [artifact-family, risk, schema, spec, contract]
+---
+# Design: Artifact Family Creation Contract and the Risk Pilot
+
+## Status
+
+Proposed
+
+The implementation contract for the `artifact-family-factory` roadmap: part
+one is the family-creation contract (`rac-family-creation-contract`), part
+two instantiates it for Risk (`rac-risk-pilot-family`), governed by ADR-151.
+Nothing here is built until ADR-151 is Accepted.
+
+## Context
+
+Five built-in families exist, each added as a bespoke effort; the steps are
+spread across two repositories and a dozen engine modules, and nothing
+writes them down. The engine is built for a repeatable contract —
+classification separate from validation, a shared structural validator
+(ADR-060) over one parser (ADR-059), templates as creation contracts
+(ADR-021), one registry both engines read (ADR-115) — but a contributor
+today learns the sequence by reading the last family's history.
+
+Since ADR-083 there is a second way to add a type: a spec bundle. A bundle
+type is structural only and is never a relationship target (ADR-083
+decision 4). The contract below is for **built-in** families: the ones that
+must participate in the relationship graph, and therefore change the
+specification's closed enums (SPEC §6.1, §8.2) in a minor version (§10.2).
+
+## User Need
+
+- A contributor adding a family follows one documented sequence and ends
+  with the same shape as every other family, without reading another
+  family's history (`rac-family-creation-contract` REQ-001).
+- A reviewer can reject a family carrying work or content semantics by
+  pointing at the contract (REQ-004).
+- A corpus that does not use the new family sees no change at all
+  (`rac-risk-pilot-family` REQ-007, ADR-007).
+
+## Design
+
+### Part 1 — The family-creation contract
+
+A built-in family is added in two repositories, specification first.
+
+**Step 0 — Decide.** Write the family's ADR (Proposed) recording its model
+and boundary: sections, status enum, relationship edges, OKF type, and the
+ADR-017/ADR-024 boundary check. Ratified by human review (ADR-065) before
+any code. The ADR must answer: *is it knowledge or work?* A field that
+names an owner, a date, a priority, or a workflow state fails the contract.
+
+**Step 1 — Specification (`asdecided/spec`, minor version).**
+
+1. `schema/artifact-specs.json`: append the registry element (name,
+   display, required, recommended, optional, metadata status enum,
+   retired_status, descriptions, guidance, synonyms, starter_bodies).
+2. `SPEC.md`: §6.1 type list, §6.6 sections table, §7 status table, §8.2
+   relationship vocabulary (new edge and its declared-by set), §9.3
+   `invalid-<type>-status` row, CHANGELOG, and the spec version bump.
+3. `vocabulary/` and `schema/*.schema.json`: the new type and edge in every
+   closed enum.
+4. `conformance/`: at least one output-parity vector over an example corpus
+   holding the new family (valid, invalid, linked).
+
+**Step 2 — Engine registry sync.** Vendor the new registry bytes
+(`rust/spec/sync_spec.py`); the embedded registry, `is_builtin`, and
+`available_schemas` pick the family up with no code.
+
+**Step 3 — Engine surfaces that enumerate built-ins.** Each is a closed list
+today; the contract names every one so none is missed:
+
+| Surface | Where | Change |
+| --- | --- | --- |
+| Validation dispatch | `validate.rs` | route the type to the shared generic validator plus the status check — no type-specific branch (REQ-005) |
+| Relationship edges | `relationships.rs` `EdgeSpec`, `spec.rs` `RELATIONSHIP_SECTIONS` | the new edge, its range, its declared-by set |
+| Stats families | `stats.rs`, `output.rs` | a family key that does not collide with an existing top-level key |
+| Portfolio | `portfolio.rs` `BY_TYPE_ORDER` | append after `design`, before `unknown` |
+| OKF | `okf.rs` `INDEX_SECTIONS`, `spec.rs` fixed OKF table, `validate.rs` `OKF_TYPES`, `docs/okf-profile.md` | the fixed row and index section |
+| Coverage / doctor | `coverage.rs`, `doctor.rs` | any per-type list |
+| MCP | tool input schemas accepting an artifact type | the new value |
+| Export contracts | export JSON schemas (corpus-export-shape-contract) | the new type and edge |
+
+**Step 4 — Tests (preconditions, not extras).**
+
+- Template round trip: `decided new <type>` validates clean.
+- Negative boundary: malformed-but-recognisable instances classify as the
+  type and fail with type-specific findings (REQ-002 of the contract).
+- Adjacent-type non-misclassification, both directions, against every type
+  that shares section vocabulary.
+- Relationship coverage: the new edge resolves, is range-checked, is
+  rejected on a type that does not declare it
+  (`relationship-edge-unsupported`), and appears in the graph export.
+- Golden guard: a corpus with no instance is byte-identical in every CLI
+  and MCP output; conformance vectors reproduce.
+
+**Step 5 — Docs.** `docs/validation.md` (sections, statuses), `docs/cli.md`
+(`new`, `schema`), the OKF profile, the relationships reference, CHANGELOG.
+
+### Part 2 — The Risk instantiation (ADR-151)
+
+- **Registry element `risk`.** Required `risk`, `likelihood`, `impact`;
+  recommended `context`, `mitigation`, `assumptions`; optional the four
+  relationship sections below; status enum `Proposed`, `Accepted`,
+  `Superseded`, `Deprecated` (retired: the last two); starter bodies and
+  guidance phrased as recorded judgement ("How likely, and on what
+  evidence?"), never as tasks.
+- **Edge `related_risks`**, range `risk`, undirected, `forbids_target_status`
+  (a retired Risk is not a valid target, like every related edge), declared
+  by requirement, decision, roadmap, design. Risk declares
+  `related_requirements`, `related_decisions`, `related_roadmaps`,
+  `related_designs`.
+- **Classification boundaries to prove.** `risk` (singular) never collides
+  with the prose `risks` section of Requirement and Roadmap; `context` is
+  shared with Decision and Design, so the adjacent-type suite covers a Risk
+  with `Context` against both, and a Decision or Design that happens to
+  carry a `## Risk` heading.
+- **Stats key `risk_artifacts`** (ADR-151 decision 6): the top-level
+  `risks` key is the existing Requirement risk-line count.
+- **OKF `type: Risk`**, index section `Risks`.
+
+### Sequencing and delivery
+
+1. Corpus PR (this design, ADR-151, roadmap status): ratification.
+2. `asdecided/spec` PR: registry, SPEC 0.2, vocabulary, schemas,
+   conformance vector.
+3. `asdecided/core` PR: registry sync plus the Step 3 surfaces, tests, and
+   docs, certified against the spec PR's conformance vectors.
+4. The roadmap moves to Achieved when the pilot passes its acceptance
+   criteria; each later family (Metric, Glossary) is its own roadmap item
+   that re-walks Part 1.
+
+## Constraints
+
+- No work-management or content-storage field, in the model or in any
+  guidance text (ADR-017, ADR-024).
+- No Risk-specific validation branch in the engine (REQ-005).
+- Additive only: existing families' classification, validation, JSON
+  contracts, and exit codes are unchanged (ADR-007).
+- The specification changes before the engine; the engine never ships a
+  built-in the specification does not name (ADR-115, ADR-116).
+
+## Rationale
+
+Writing the contract as a checklist of the surfaces that enumerate built-ins
+turns tribal knowledge into review criteria: a family PR either touches every
+row or says why a row does not apply. Proving it on Risk first keeps the
+factory honest — the contract is corrected by the first family that walks it,
+not by the fifth.
+
+## Alternatives
+
+- **Make the engine enumerate built-ins from the registry everywhere
+  first.** Deferred: the right end state (Step 3 would shrink to nothing),
+  but it rewrites stats, portfolio, and OKF output code paths that pin
+  released JSON shapes; it is a separate refactor with its own golden
+  guard, not a precondition of the pilot.
+- **Ship Risk as a bundle type.** Rejected in ADR-151: it cannot be a
+  relationship target.
+
+## Accessibility
+
+Not applicable — no user interface. The new family's CLI output reuses the
+existing, unchanged renderers.
+
+## Style Guidance
+
+- The type name is `risk`; the display name is `Risk`; the relationship
+  section is `## Related Risks` (`related_risks`).
+- Guidance and starter text describe a judgement ("how likely, and on what
+  evidence"), never an action ("assign", "due", "track").
+
+## Open Questions
+
+- Whether `mitigation` should be a recommended or optional section. It is
+  the section most likely to attract task lists; recommending it signals
+  value, making it optional signals restraint.
+- Whether `prompt` should declare `related_risks` (ADR-151 excludes it).
+
+## Related Decisions
+
+- adr-151
+- adr-083
+- adr-115
+- adr-116
+- adr-060
+- adr-059
+- adr-021
+- adr-017
+- adr-024
+- adr-007
+
+## Related Requirements
+
+- rac-family-creation-contract
+- rac-risk-pilot-family
+
+## Related Roadmaps
+
+- artifact-family-factory
