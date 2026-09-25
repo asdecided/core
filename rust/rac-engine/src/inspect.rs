@@ -50,9 +50,17 @@ impl DirectoryInspection {
         self.files.len()
     }
 
-    /// Known types first (in ARTIFACT_SPECS order), then `unknown`.
+    /// Known types first (in registry order), then `unknown`. The
+    /// hand-coded families always appear, zero or not; a registry-driven
+    /// type — `risk` (ADR-151) or a bundle type (ADR-083) — appears only when
+    /// the directory holds one, so a corpus without one is unchanged.
     pub fn counts(&self) -> Vec<(&str, usize)> {
-        let mut counts: Vec<(&str, usize)> = specs().iter().map(|s| (s.name.as_str(), 0)).collect();
+        let present = |name: &str| self.files.iter().any(|f| f.artifact_type == name);
+        let mut counts: Vec<(&str, usize)> = specs()
+            .iter()
+            .filter(|s| crate::spec::is_hand_coded(&s.name) || present(&s.name))
+            .map(|s| (s.name.as_str(), 0))
+            .collect();
         counts.push(("unknown", 0));
         for f in &self.files {
             if let Some(slot) = counts.iter_mut().find(|(name, _)| *name == f.artifact_type) {

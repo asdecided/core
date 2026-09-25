@@ -64,8 +64,10 @@ pub struct PortfolioStats {
     pub unrecognized: Vec<UnrecognizedStat>,
     /// `{canonical space section -> presence count}`, canonical order.
     pub relationship_counts: Vec<(String, usize)>,
-    /// Bundle-declared types (ADR-083) in registry order: `(type, rows)`.
-    /// Empty — and rendered as nothing — for a corpus with no pinned bundle.
+    /// Registry-driven families — a later built-in such as `risk` (ADR-151)
+    /// or a bundle-declared type (ADR-083) — in registry order:
+    /// `(type, rows)`. Empty — and rendered as nothing — for a corpus holding
+    /// no such artifact.
     pub declared: Vec<(String, Vec<ValidityStat>)>,
 }
 
@@ -418,7 +420,7 @@ fn collect_stats_from_projection(
                     origin,
                 });
             }
-            declared if !crate::spec::is_builtin(declared) && spec.is_some() => {
+            declared if !crate::spec::is_hand_coded(declared) && spec.is_some() => {
                 let codes = error_codes(artifact, type_name);
                 let row = ValidityStat {
                     path: path.clone(),

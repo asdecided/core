@@ -152,6 +152,7 @@ fn registry_order_is_builtins_then_bundle_in_file_order() {
             "roadmap",
             "prompt",
             "design",
+            "risk",
             "runbook",
             "policy"
         ]
@@ -184,7 +185,7 @@ fn golden_guard_no_bundle_means_exactly_the_builtins() {
         assert!(output.status.success());
         assert_eq!(
             stdout(&output),
-            "Available Schemas:\n- requirement\n- decision\n- roadmap\n- prompt\n- design\n"
+            "Available Schemas:\n- requirement\n- decision\n- roadmap\n- prompt\n- design\n- risk\n"
         );
     }
     fs::create_dir_all(root.join("decisions")).unwrap();

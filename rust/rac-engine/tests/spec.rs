@@ -1,6 +1,8 @@
 //! Artifact-spec conformance: the Rust structs loaded from the embedded
 //! `artifact-specs.json` must match the live oracle registry, field for field
-//! and in order. Regenerate the vector with `rust/spec/gen_vectors_spec.py`.
+//! and in order. The vector is the registry in the retired Python oracle's
+//! pair-list shape (`gen_vectors_spec.py`); it changes in lockstep with
+//! `assets/spec/artifact-specs.json` when a built-in is added (ADR-151).
 
 use std::fs;
 use std::path::Path;

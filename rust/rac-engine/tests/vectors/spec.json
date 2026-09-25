@@ -18,6 +18,7 @@
         "related prompts",
         "related designs",
         "related requirements",
+        "related risks",
         "related tickets",
         "verified by"
       ],
@@ -76,6 +77,10 @@
         [
           "related requirements",
           "Requirement artifacts this artifact references"
+        ],
+        [
+          "related risks",
+          "Risk artifacts this artifact references"
         ],
         [
           "related tickets",
@@ -188,6 +193,7 @@
         "related roadmaps",
         "related designs",
         "related decisions",
+        "related risks",
         "related tickets",
         "applies to"
       ],
@@ -240,6 +246,10 @@
         [
           "related decisions",
           "Decision artifacts this artifact references"
+        ],
+        [
+          "related risks",
+          "Risk artifacts this artifact references"
         ],
         [
           "related tickets",
@@ -348,6 +358,7 @@
         "related prompts",
         "related designs",
         "related roadmaps",
+        "related risks",
         "related tickets"
       ],
       "metadata": [
@@ -405,6 +416,10 @@
         [
           "related roadmaps",
           "Roadmap artifacts this artifact references"
+        ],
+        [
+          "related risks",
+          "Risk artifacts this artifact references"
         ],
         [
           "related tickets",
@@ -502,6 +517,7 @@
         "related decisions",
         "related roadmaps",
         "related designs",
+        "related risks",
         "related tickets"
       ],
       "metadata": [
@@ -560,6 +576,10 @@
         [
           "related designs",
           "Design artifacts this artifact references"
+        ],
+        [
+          "related risks",
+          "Risk artifacts this artifact references"
         ],
         [
           "related tickets",
@@ -692,6 +712,7 @@
         "related decisions",
         "related roadmaps",
         "related prompts",
+        "related risks",
         "related tickets"
       ],
       "metadata": [
@@ -761,6 +782,10 @@
         [
           "related prompts",
           "Prompt artifacts this artifact references"
+        ],
+        [
+          "related risks",
+          "Risk artifacts this artifact references"
         ],
         [
           "related tickets",
@@ -883,6 +908,154 @@
         "style guidance",
         "open questions"
       ]
+    },
+    {
+      "name": "risk",
+      "display": "Risk",
+      "required": [
+        "risk",
+        "likelihood",
+        "impact"
+      ],
+      "recommended": [
+        "context",
+        "assumptions"
+      ],
+      "optional": [
+        "mitigation",
+        "related requirements",
+        "related decisions",
+        "related roadmaps",
+        "related designs",
+        "related tickets"
+      ],
+      "metadata": [
+        [
+          "status",
+          [
+            "Proposed",
+            "Accepted",
+            "Superseded",
+            "Deprecated"
+          ]
+        ]
+      ],
+      "retired_status": [
+        "Superseded",
+        "Deprecated"
+      ],
+      "descriptions": [
+        [
+          "risk",
+          "The risk: what could happen, stated as recorded knowledge"
+        ],
+        [
+          "likelihood",
+          "How likely the risk is to materialise, and on what evidence"
+        ],
+        [
+          "impact",
+          "What happens if the risk materialises, and who or what it affects"
+        ],
+        [
+          "context",
+          "The situation or change that gives rise to this risk"
+        ],
+        [
+          "assumptions",
+          "What this assessment assumes to be true"
+        ],
+        [
+          "mitigation",
+          "The chosen response to the risk and why, recorded as knowledge rather than tasks"
+        ],
+        [
+          "related requirements",
+          "Requirement artifacts this artifact references"
+        ],
+        [
+          "related decisions",
+          "Decision artifacts this artifact references"
+        ],
+        [
+          "related roadmaps",
+          "Roadmap artifacts this artifact references"
+        ],
+        [
+          "related designs",
+          "Design artifacts this artifact references"
+        ],
+        [
+          "related tickets",
+          "External tickets this artifact traces to; provider set by .rac/config.yaml ticketing.provider (ADR-087)"
+        ]
+      ],
+      "guidance": [
+        [
+          "risk",
+          [
+            "What could happen?",
+            "What would it put at risk?"
+          ]
+        ],
+        [
+          "likelihood",
+          [
+            "How likely is this, and on what evidence?",
+            "What would make it more or less likely?"
+          ]
+        ],
+        [
+          "impact",
+          [
+            "What happens if it materialises?",
+            "Who or what does it affect, and how severely?"
+          ]
+        ],
+        [
+          "context",
+          [
+            "What situation or change gives rise to this risk?"
+          ]
+        ],
+        [
+          "assumptions",
+          [
+            "What does this assessment assume to be true?"
+          ]
+        ]
+      ],
+      "synonyms": [],
+      "id_field": null,
+      "starter_bodies": [
+        [
+          "risk",
+          "TODO: state the risk — what could happen and what it would put at risk."
+        ],
+        [
+          "likelihood",
+          "TODO: describe how likely the risk is, and on what evidence."
+        ],
+        [
+          "impact",
+          "TODO: describe what happens if the risk materialises, and who or what it affects."
+        ],
+        [
+          "context",
+          "TODO: describe the situation or change that gives rise to this risk."
+        ],
+        [
+          "assumptions",
+          "TODO: list what this assessment assumes to be true."
+        ]
+      ],
+      "expected": [
+        "risk",
+        "likelihood",
+        "impact",
+        "context",
+        "assumptions"
+      ]
     }
   ],
   "names": [
@@ -890,7 +1063,8 @@
     "decision",
     "roadmap",
     "prompt",
-    "design"
+    "design",
+    "risk"
   ],
   "relationship_sections": [
     "related requirements",
@@ -898,6 +1072,7 @@
     "related roadmaps",
     "related prompts",
     "related designs",
+    "related risks",
     "supersedes",
     "related tickets",
     "verified by",

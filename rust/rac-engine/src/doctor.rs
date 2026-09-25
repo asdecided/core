@@ -778,12 +778,13 @@ fn injection_findings(items: &[CorpusItem]) -> Vec<DoctorFinding> {
 
 /// Normalized relationship-section headings whose lines are declared edges,
 /// not body mentions (`RELATIONSHIP_SECTIONS`).
-const RELATIONSHIP_HEADINGS: [&str; 9] = [
+const RELATIONSHIP_HEADINGS: [&str; 10] = [
     "applies to",
     "related decisions",
     "related designs",
     "related prompts",
     "related requirements",
+    "related risks",
     "related roadmaps",
     "related tickets",
     "supersedes",

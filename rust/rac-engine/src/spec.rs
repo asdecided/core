@@ -110,17 +110,19 @@ impl ArtifactSpec {
 ///
 /// ```text
 /// RELATED_SECTIONS  = related requirements, related decisions,
-///                     related roadmaps, related prompts, related designs
+///                     related roadmaps, related prompts, related designs,
+///                     related risks
 /// EXTERNAL_SECTIONS = related tickets, verified by
 /// SCOPE_SECTIONS    = applies to
 /// RELATIONSHIP_SECTIONS = RELATED_SECTIONS + (supersedes,) + EXTERNAL + SCOPE
 /// ```
-pub const RELATIONSHIP_SECTIONS: [(&str, &str); 9] = [
+pub const RELATIONSHIP_SECTIONS: [(&str, &str); 10] = [
     ("related requirements", "related_requirements"),
     ("related decisions", "related_decisions"),
     ("related roadmaps", "related_roadmaps"),
     ("related prompts", "related_prompts"),
     ("related designs", "related_designs"),
+    ("related risks", "related_risks"),
     ("supersedes", "supersedes"),
     ("related tickets", "related_tickets"),
     ("verified by", "verified_by"),
@@ -267,12 +269,13 @@ const RESERVED_TYPE_NAMES: &[&str] = &[
     "designs",
     "unrecognized",
     "relationships",
+    "risk_artifacts",
 ];
 
-/// The OKF types the five built-ins export under (the fixed profile table).
+/// The OKF types the built-ins export under (the fixed profile table).
 /// A bundle type may not export under one of them: an OKF consumer could not
-/// tell it from the built-in (ADR-083 decision 6, ADR-122).
-const BUILTIN_OKF_TYPES: &[&str] = &["Requirement", "ADR", "Design", "Roadmap", "Prompt"];
+/// tell it from the built-in (ADR-083 decision 6, ADR-122, ADR-151).
+const BUILTIN_OKF_TYPES: &[&str] = &["Requirement", "ADR", "Design", "Roadmap", "Prompt", "Risk"];
 
 /// A label that is safe to render in headings and frontmatter: one line, no
 /// control characters, no surrounding whitespace, non-empty.
@@ -674,6 +677,29 @@ pub fn is_builtin(name: &str) -> bool {
     data().specs.iter().any(|s| s.name == name)
 }
 
+/// The built-in families whose validation, stats, and OKF surfaces are hand
+/// coded and pinned by released JSON shapes. Every other registered type —
+/// a later built-in such as `risk` (ADR-151 decision 7) or a bundle type —
+/// takes the registry-driven generic path.
+const HAND_CODED_FAMILIES: [&str; 5] = ["requirement", "decision", "roadmap", "prompt", "design"];
+
+/// Whether `name` is one of the hand-coded families (see
+/// [`HAND_CODED_FAMILIES`]); `false` for a registry-driven type.
+pub fn is_hand_coded(name: &str) -> bool {
+    HAND_CODED_FAMILIES.contains(&name)
+}
+
+/// The `stats --json` family key for a registry-driven type: the type name,
+/// except where an accepted decision fixes another to avoid confusion with an
+/// existing field (ADR-151 decision 6: `risks` already counts Requirement
+/// risk lines, so the Risk family is `risk_artifacts`).
+pub fn stats_family_key(name: &str) -> &str {
+    match name {
+        "risk" => "risk_artifacts",
+        other => other,
+    }
+}
+
 /// `available_schemas()` = the spec names in registry order.
 pub fn available_schemas() -> Vec<&'static str> {
     specs().iter().map(|s| s.name.as_str()).collect()
@@ -740,8 +766,8 @@ pub fn plural_display(display: &str) -> String {
     }
 }
 
-/// RAC `type` → OKF `type` (`docs/okf-profile.md`, ADR-048). The five
-/// built-in rows are fixed; a bundle type maps to its `okf_type`, defaulting
+/// RAC `type` → OKF `type` (`docs/okf-profile.md`, ADR-048). The built-in
+/// rows are fixed (`risk` → `Risk`, ADR-151 decision 6); a bundle type maps to its `okf_type`, defaulting
 /// to its `display` (ADR-083 decision 6). `None` for an unregistered type.
 pub fn okf_type_for(name: &str) -> Option<String> {
     match name {
@@ -750,6 +776,7 @@ pub fn okf_type_for(name: &str) -> Option<String> {
         "design" => Some("Design".to_string()),
         "roadmap" => Some("Roadmap".to_string()),
         "prompt" => Some("Prompt".to_string()),
+        "risk" => Some("Risk".to_string()),
         other => spec_for(other).map(|spec| {
             spec.okf_type
                 .clone()
@@ -1565,14 +1592,52 @@ mod tests {
     const RUNBOOK: &str = r#"{"name":"runbook","display":"Runbook","required":["purpose","steps"],"recommended":["rollback"],"optional":["related decisions"],"metadata":{"status":["Draft","Active","Retired"]},"retired_status":["Retired"],"descriptions":{"purpose":"Why"},"guidance":{"purpose":["What?"]},"synonyms":{"procedure":"steps"},"id_field":null,"starter_bodies":{"purpose":"TODO"},"okf_type":"Runbook"}"#;
 
     #[test]
-    fn embedded_registry_is_the_five_builtins_in_order() {
+    fn embedded_registry_is_the_six_builtins_in_order() {
         let names: Vec<&str> = builtin_specs().iter().map(|s| s.name.as_str()).collect();
         assert_eq!(
             names,
-            ["requirement", "decision", "roadmap", "prompt", "design"]
+            [
+                "requirement",
+                "decision",
+                "roadmap",
+                "prompt",
+                "design",
+                "risk"
+            ]
         );
         assert!(builtin_specs().iter().all(|s| s.okf_type.is_none()));
-        assert_eq!(Registry::builtin().specs().len(), 5);
+        assert_eq!(Registry::builtin().specs().len(), 6);
+    }
+
+    #[test]
+    fn risk_is_a_registry_driven_builtin_not_a_hand_coded_family() {
+        // Built-in precedence (classification, bundle names) sees six; the
+        // hand-coded output paths see five, so Risk takes the generic path
+        // (ADR-151 decision 7).
+        assert!(is_builtin("risk"));
+        assert!(!is_hand_coded("risk"));
+        for name in ["requirement", "decision", "roadmap", "prompt", "design"] {
+            assert!(is_builtin(name) && is_hand_coded(name), "{name}");
+        }
+        assert_eq!(stats_family_key("risk"), "risk_artifacts");
+        assert_eq!(stats_family_key("runbook"), "runbook");
+        assert_eq!(okf_type_for("risk").as_deref(), Some("Risk"));
+        let risk = spec_for("risk").unwrap();
+        assert_eq!(risk.required, ["risk", "likelihood", "impact"]);
+        assert_eq!(risk.recommended, ["context", "assumptions"]);
+        assert_eq!(risk.optional[0], "mitigation");
+        assert!(!risk.optional.iter().any(|s| s == "related prompts"));
+        for declarer in ["requirement", "decision", "roadmap", "prompt", "design"] {
+            assert!(
+                spec_for(declarer)
+                    .unwrap()
+                    .optional
+                    .iter()
+                    .any(|s| s == "related risks"),
+                "{declarer} declares related risks"
+            );
+        }
+        assert!(RELATIONSHIP_SECTIONS.contains(&("related risks", "related_risks")));
     }
 
     #[test]
@@ -1595,6 +1660,7 @@ mod tests {
                 "roadmap",
                 "prompt",
                 "design",
+                "risk",
                 "policy",
                 "runbook"
             ]
@@ -1702,6 +1768,18 @@ mod tests {
                 r#"{"name":"badguide","display":"x","required":["a"],"guidance":{"a":"Ask why"}}"#,
                 "'guidance.a'",
             ),
+            (
+                r#"{"name":"risk","display":"x","required":["a"]}"#,
+                "built-ins always win",
+            ),
+            (
+                r#"{"name":"risk_artifacts","display":"x","required":["a"]}"#,
+                "reserved",
+            ),
+            (
+                r#"{"name":"hazard","display":"x","required":["a"],"okf_type":"Risk"}"#,
+                "built-in OKF type",
+            ),
         ];
         let elements: Vec<&str> = cases.iter().map(|(json, _)| *json).collect();
         let pin = write_bundle(
@@ -1721,7 +1799,7 @@ mod tests {
             );
             assert_eq!(warning.code, CODE_SPEC_SKIPPED);
         }
-        assert_eq!(registry.specs().len(), 5);
+        assert_eq!(registry.specs().len(), 6);
     }
 
     #[test]
