@@ -66,14 +66,16 @@ tags: ["interoperability"]
 | `roadmap` | `Roadmap` |
 | `prompt` | `Prompt` |
 | `design` | `Design` |
+| `risk` | `Risk` |
 | a spec-bundle type (ADR-083) | its `okf_type`, defaulting to its `display` |
 
-The five built-in rows are fixed and a bundle cannot override them. A type a
+The six built-in rows are fixed and a bundle cannot override them. A type a
 repository declares through a pinned spec bundle is exported under the
 `okf_type` its element declares (defaulting to the element's `display`; never
-one of the five built-in OKF types, and written as a quoted scalar whenever it
+one of the six built-in OKF types, and written as a quoted scalar whenever it
 is not a plain word or phrase) and
-gets its own section in `index.md` after the five fixed ones. Unknown documents
+gets its own section in `index.md` after the fixed ones (a Risk section
+follows the five original sections, ADR-151). Unknown documents
 remain outside the derived export. OKF consumers must tolerate unknown types;
 that permissive read rule does not expand the built-in registry — a pinned
 bundle extends a repository's registry explicitly, and the export reports the

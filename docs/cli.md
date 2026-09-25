@@ -300,7 +300,7 @@ carries an additive `empty` boolean.
 decided stats decisions/
 ```
 
-Reports feature/requirement/decision/roadmap/design counts, missing recommended
+Reports feature/requirement/decision/roadmap/design/risk counts, missing recommended
 sections, and a list of files that matched no schema (not errors — see
 [ADR-010](artifacts.md#documents-vs-artifacts)).
 
@@ -376,14 +376,14 @@ decided improve login-flow.md --template  # emit Markdown stubs to paste in
 
 Show registered artifact schemas and starter templates.
 
-- **Input:** `decided schema [name]` — `requirement`, `decision`, `roadmap`, `prompt`, or `design`, or a type a pinned spec bundle declares.
+- **Input:** `decided schema [name]` — `requirement`, `decision`, `roadmap`, `prompt`, `design`, or `risk`, or a type a pinned spec bundle declares.
 - **Options:** `--list` (list all schema names) · `--json` *or* `--template`
   (mutually exclusive) · `--corpus <dir>` (list the effective registry of that
   corpus, inherited types included) · `--list` cannot be combined with a schema name
 - **Exit codes:** `0` success · `1` the corpus's federation or spec bundle cannot be composed · `2` unknown schema name, `--corpus` not a directory, or flag misuse
 
 ```bash
-decided schema --list                  # the five artifact types (plus the local corpus's pinned bundle types)
+decided schema --list                  # the six artifact types (plus the local corpus's pinned bundle types)
 decided schema --list --corpus decisions   # the same plus every type inherited from a federation parent
 decided schema requirement             # required / recommended / optional sections
 decided schema decision --template     # starter Markdown for a decision
@@ -1156,7 +1156,7 @@ the same structure the validators expect: edit the `TODO` placeholders and it
 passes `decided validate`.
 
 - **Input:** `decided new <type> <output-path>` — type is `requirement`,
-  `decision`, `roadmap`, `prompt`, or `design`; the output path is taken
+  `decision`, `roadmap`, `prompt`, `design`, or `risk`; the output path is taken
   literally (no filename derivation, no extension magic).
 - **Options:** `--json`
 - **Exit codes:** `0` created · `1` packaged template missing or malformed
@@ -1217,7 +1217,7 @@ decided templates --corpus decisions
 ```json
 {
   "schema_version": "1",
-  "templates": ["requirement", "decision", "roadmap", "prompt", "design"]
+  "templates": ["requirement", "decision", "roadmap", "prompt", "design", "risk"]
 }
 ```
 

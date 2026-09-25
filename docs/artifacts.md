@@ -1,6 +1,6 @@
 # Artifacts
 
-RAC understands five artifact types, all written in plain Markdown:
+RAC understands six artifact types, all written in plain Markdown:
 
 | Type | Captures | Typical filename |
 | --- | --- | --- |
@@ -9,6 +9,7 @@ RAC understands five artifact types, all written in plain Markdown:
 | **Roadmap** | Where the product is heading | `v0.7.6-document-structure.md` |
 | **Prompt** | A reusable AI collaboration pattern | `requirement-review.md` |
 | **Design** | Product experience thinking | `checkout-flow.md` |
+| **Risk** | A risk judgement worth its own record | `vendor-lock-in.md` |
 
 You never declare a type. RAC infers it from the `##` section headings in the file.
 
@@ -24,7 +25,7 @@ headings, normalizes them (case- and whitespace-insensitive, so `## Problem` and
 
 ```bash
 decided inspect login-flow.md      # Artifact Type: Requirement (71%)
-decided schema --list              # the five registered types
+decided schema --list              # the six built-in types
 ```
 
 ## Documents vs. artifacts
@@ -47,7 +48,7 @@ Ids are compared case-insensitively. Identity is what
 
 ---
 
-## The five types
+## The six types
 
 For each type, scaffold a starter file with `decided schema <type> --template` and read
 the full section guidance with `decided schema <type>`.
@@ -58,7 +59,7 @@ What the system must do.
 
 - **Required:** Problem · Requirements
 - **Recommended:** Success Metrics · Risks · Assumptions
-- **Optional:** Related Decisions · Related Roadmaps · Related Prompts · Related Designs · Related Requirements
+- **Optional:** Related Decisions · Related Roadmaps · Related Prompts · Related Designs · Related Requirements · Related Risks
 - **Naming:** a descriptive slug, e.g. `login-flow.md`. Write requirements as
   testable `[REQ-001]` statements.
 
@@ -69,7 +70,7 @@ are Decisions written in ADR format**, not a separate type.
 
 - **Required:** Context · Decision · Consequences
 - **Recommended:** Status · Category · Alternatives Considered
-- **Optional:** Supersedes · Related Requirements · Related Roadmaps · Related Designs · Related Decisions
+- **Optional:** Supersedes · Related Requirements · Related Roadmaps · Related Designs · Related Decisions · Related Risks
 - **Metadata values (validated when present):**
   - `Status`: `Proposed` | `Accepted` | `Superseded` | `Deprecated`
   - `Category`: `Architecture` | `Product` | `Process` | `Technical` | `Other`
@@ -82,7 +83,7 @@ Where the product is heading — outcomes and the work that supports them.
 
 - **Required:** Outcomes · Initiatives
 - **Recommended:** Success Measures · Assumptions · Risks
-- **Optional:** Related Decisions · Related Requirements · Related Prompts · Related Designs · Related Roadmaps
+- **Optional:** Related Decisions · Related Requirements · Related Prompts · Related Designs · Related Roadmaps · Related Risks
 - **Naming:** `vX.Y.Z-slug.md` (e.g. `v0.7.6-document-structure.md`), which gives the
   id `v0.7.6`.
 
@@ -92,7 +93,7 @@ A reusable pattern for collaborating with an AI model.
 
 - **Required:** Objective · Input · Instructions · Output
 - **Recommended:** Constraints · Examples · Evaluation
-- **Optional:** Related Requirements · Related Decisions · Related Roadmaps · Related Designs
+- **Optional:** Related Requirements · Related Decisions · Related Roadmaps · Related Designs · Related Risks
 - **Naming:** a descriptive slug, e.g. `requirement-review.md`.
 
 ### Design
@@ -101,8 +102,26 @@ Product experience thinking — flows, interactions, and the constraints around 
 
 - **Required:** Context · User Need · Design · Constraints
 - **Recommended:** Rationale · Alternatives · Accessibility · Style Guidance · Open Questions
-- **Optional:** Related Requirements · Related Decisions · Related Roadmaps · Related Prompts
+- **Optional:** Related Requirements · Related Decisions · Related Roadmaps · Related Prompts · Related Risks
 - **Naming:** a descriptive slug, e.g. `checkout-flow.md`.
+
+### Risk
+
+A risk worth its own linkable record — what could happen, how likely it is, and
+what it would affect (ADR-151). It records a judgement, not a register entry:
+likelihood and impact are prose, never a score, and nothing ranks by them.
+
+- **Required:** Risk · Likelihood · Impact
+- **Recommended:** Context · Assumptions
+- **Optional:** Mitigation · Related Requirements · Related Decisions · Related Roadmaps · Related Designs
+- **Metadata values (validated when present):**
+  - `Status`: `Proposed` | `Accepted` | `Superseded` | `Deprecated`
+- **Naming:** a descriptive slug, e.g. `vendor-lock-in.md`.
+
+`Mitigation` records the chosen response as knowledge — what reduces the risk
+and why — never tasks, owners, or dates; a risk that no longer applies is
+`Deprecated`. The `## Risks` section of a Requirement or Roadmap stays free
+prose: a Risk artifact is the typed form when a risk needs its own record.
 
 ---
 

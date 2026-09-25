@@ -70,7 +70,7 @@ cleaned up.
 
 ## Custom artifact types (spec bundles)
 
-The five built-in types come from the shared registry that ships inside the
+The six built-in types come from the shared registry that ships inside the
 binary. A repository can add its own types — a `runbook`, a `policy` — by
 committing one **spec bundle**: a JSON file in the same shape as
 `artifact-specs.json` (a top-level `artifact_specs` array of type elements),
@@ -91,7 +91,7 @@ Each element carries the registry keys — `name`, `display`, `required`,
 the element's `display`). Section names must already be normalised (trimmed,
 lower-case, single-spaced). `display` and `okf_type` are single-line labels
 with no surrounding whitespace, and `okf_type` may not be one of the built-in
-OKF types (`Requirement`, `ADR`, `Design`, `Roadmap`, `Prompt`).
+OKF types (`Requirement`, `ADR`, `Design`, `Roadmap`, `Prompt`, `Risk`).
 `descriptions` and `starter_bodies` map sections to strings and `guidance`
 maps sections to lists of strings. A `name` may not be `unknown` or a key the
 engine already emits beside the per-type families in `decided stats --json`
@@ -104,7 +104,7 @@ is `sha256sum` of the file; edit the bundle, then re-pin.
 
 What the engine does with it:
 
-- **Built-ins always win.** The merged registry is the five built-ins in their
+- **Built-ins always win.** The merged registry is the six built-ins in their
   fixed order, then admitted bundle elements in file order, so classification
   tie-breaks are stable. A bundle type classifies a document only when no
   built-in qualifies for it, so a bundle can never take a built-in artifact's
@@ -149,7 +149,7 @@ The repository's own `rust/fixtures/spec-bundle/` is a worked example with a
 ### Inherited types across a federation (ADR-150)
 
 In a federated repository a child inherits its parents' admitted bundle
-types. The effective registry is the five built-ins, then the child's own
+types. The effective registry is the six built-ins, then the child's own
 bundle elements in file order, then, for each parent in the manifest's
 canonical `parents` order, that parent's effective registry beyond the
 built-ins, recursively. A parent that declares `runbook` and publishes

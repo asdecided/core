@@ -18,13 +18,14 @@ referencing, one per line:
 - adr-007
 ```
 
-The five relationship sections, one per target type:
+The six relationship sections, one per target type:
 
 - `## Related Requirements`
 - `## Related Decisions`
 - `## Related Roadmaps`
 - `## Related Prompts`
 - `## Related Designs`
+- `## Related Risks`
 
 Decisions may also use `## Supersedes` to point at the decision they replace.
 
@@ -183,7 +184,7 @@ cycle:
   `related_*` links never cycle.
 - **Status-consistency.** A live artifact of *any* type must not point at a
   retired one. Lifecycle status (ADR-051) is an optional `## Status` section per
-  type — decisions/requirements/designs use `Proposed`/`Accepted` (live) and
+  type — decisions/requirements/designs/risks use `Proposed`/`Accepted` (live) and
   `Superseded`/`Deprecated` (retired); prompts use `Active`/`Deprecated`;
   roadmaps use `Planned` and `Superseded`/`Abandoned`. A reference to a retired
   target is `relationship-target-superseded`, except `supersedes` (by which a
