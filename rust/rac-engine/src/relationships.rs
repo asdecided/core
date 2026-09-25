@@ -68,7 +68,7 @@ pub struct EdgeSpec {
 
 /// `edge_spec(name)` over the built-in registry.
 pub fn edge_spec(name: &str) -> Option<&'static EdgeSpec> {
-    static REGISTRY: [EdgeSpec; 9] = [
+    static REGISTRY: [EdgeSpec; 10] = [
         EdgeSpec {
             name: "related_requirements",
             range: &["requirement"],
@@ -112,6 +112,16 @@ pub fn edge_spec(name: &str) -> Option<&'static EdgeSpec> {
         EdgeSpec {
             name: "related_designs",
             range: &["design"],
+            acyclic: false,
+            forbids_target_status: true,
+            external: false,
+            filesystem_scoped: false,
+            directional: false,
+            external_provider: false,
+        },
+        EdgeSpec {
+            name: "related_risks",
+            range: &["risk"],
             acyclic: false,
             forbids_target_status: true,
             external: false,

@@ -208,15 +208,16 @@ fn index(export: &CorpusExport, rel: &HashMap<&str, String>) -> String {
              this index is a generated entry point."
         ),
     ];
-    // The fixed five sections first, then one section per bundle-declared
-    // type in registry order (ADR-083 decision 6); a corpus without a
-    // bundle renders exactly the fixed five.
+    // The fixed five sections first, then one section per registry-driven
+    // type in registry order — `risk` (ADR-151 decision 6), then any
+    // bundle-declared type (ADR-083 decision 6); a section renders only when
+    // it has members, so a corpus of the five renders exactly as before.
     let mut sections: Vec<(String, String)> = INDEX_SECTIONS
         .iter()
         .map(|(type_name, heading)| (type_name.to_string(), heading.to_string()))
         .collect();
     for spec in crate::spec::specs() {
-        if !crate::spec::is_builtin(&spec.name) {
+        if !crate::spec::is_hand_coded(&spec.name) {
             sections.push((
                 spec.name.clone(),
                 crate::spec::plural_display(&spec.display),

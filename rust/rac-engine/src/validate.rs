@@ -291,11 +291,12 @@ pub fn validate(
             issues.extend(validate_status_metadata(artifact, spec));
             issues.extend(validate_requirement_standards(artifact));
         }
-        // A bundle-declared type (ADR-083 decision 3): generic structural
-        // validation only, keyed on the predicate, never on a type name. An
-        // unregistered type keeps the legacy requirement fallback.
+        // A registry-driven type — a later built-in such as `risk` (ADR-151
+        // decision 7) or a bundle-declared type (ADR-083 decision 3): generic
+        // structural validation only, keyed on the predicate, never on a type
+        // name. An unregistered type keeps the legacy requirement fallback.
         other => match spec_for(other) {
-            Some(spec) if !crate::spec::is_builtin(other) => {
+            Some(spec) if !crate::spec::is_hand_coded(other) => {
                 issues.extend(validate_generic(artifact, spec));
             }
             _ => issues.extend(validate_requirement(artifact)),
@@ -305,8 +306,8 @@ pub fn validate(
 }
 
 /// Pure composition of the shared structural validators (ADR-060) for a
-/// bundle-declared type: title, required sections, status metadata. No
-/// bespoke rule may be added here — a custom type gets exactly this.
+/// registry-driven type: title, required sections, status metadata. No
+/// bespoke rule may be added here — a registry-driven type gets exactly this.
 fn validate_generic(artifact: &Artifact, spec: &ArtifactSpec) -> Vec<Issue> {
     let mut issues = validate_title(artifact);
     issues.extend(validate_required_sections(artifact, spec));
@@ -818,7 +819,14 @@ pub fn apply_overrides(
 // OKF conformance (ADR-048)
 // ---------------------------------------------------------------------------
 
-pub const OKF_TYPES: [&str; 5] = ["requirement", "decision", "design", "roadmap", "prompt"];
+pub const OKF_TYPES: [&str; 6] = [
+    "requirement",
+    "decision",
+    "design",
+    "roadmap",
+    "prompt",
+    "risk",
+];
 pub const RESERVED_FILENAMES: [&str; 2] = ["index.md", "log.md"];
 
 #[derive(Debug, Clone)]

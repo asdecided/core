@@ -169,14 +169,15 @@ pub fn generate_id(repository_key: &str) -> String {
 // Canonical templates (decided.core.templates, ADR-021)
 // ---------------------------------------------------------------------------
 
-/// The embedded template bodies, index-aligned with `available_schemas()`
-/// registry order (requirement, decision, roadmap, prompt, design).
-const TEMPLATE_BYTES: [&str; 5] = [
+/// The embedded template bodies, index-aligned with the built-in registry
+/// order (requirement, decision, roadmap, prompt, design, risk).
+const TEMPLATE_BYTES: [&str; 6] = [
     include_str!("../assets/templates/requirement.md"),
     include_str!("../assets/templates/decision.md"),
     include_str!("../assets/templates/roadmap.md"),
     include_str!("../assets/templates/prompt.md"),
     include_str!("../assets/templates/design.md"),
+    include_str!("../assets/templates/risk.md"),
 ];
 
 /// `load_template(artifact_type)` — the canonical body, or
