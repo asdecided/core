@@ -8,13 +8,17 @@ tags: [artifact-family, risk, schema, spec]
 
 ## Status
 
-Proposed
+Accepted
+
+**Accepted 2026-09-25.** Ratified by the maintainer with two changes to the
+draft: `Mitigation` is optional rather than recommended, and `prompt`
+declares `related_risks`. The specification change (spec 0.2) and the engine
+change follow under the `artifact-family-factory` roadmap.
 
 Drafted when the `artifact-family-factory` roadmap was taken into build, as
 its family-creation contract requires (`rac-family-creation-contract`
 REQ-006): instantiating a family lands its own ADR recording the family's
-model and boundary. Ratification is by human review (ADR-065); the
-engine and specification changes follow only once this is Accepted.
+model and boundary, ratified by human review (ADR-065).
 
 ## Category
 
@@ -56,8 +60,11 @@ workflow (ADR-017), and stores no external content (ADR-010, ADR-024).
 
 2. **The Risk model is a recorded judgement, not a register entry.**
    - Required sections: `Risk` (the risk statement), `Likelihood`, `Impact`.
-   - Recommended: `Context`, `Mitigation`, `Assumptions`.
-   - Optional: the relationship sections of decision 4.
+   - Recommended: `Context`, `Assumptions`.
+   - Optional: `Mitigation`, and the relationship sections of decision 4.
+     `Mitigation` is optional rather than recommended because it is the
+     section most likely to attract task lists; a Risk is complete without
+     one.
    - `Likelihood` and `Impact` are descriptive prose — how likely and how
      severe, in the author's words — not an enum and not a score. Nothing in
      the engine ranks, sorts, or prioritises by them.
@@ -73,10 +80,11 @@ workflow (ADR-017), and stores no external content (ADR-010, ADR-024).
 
 4. **One new relationship edge, `related_risks`,** target `risk`,
    undirected, validated like every range-checked edge (resolve + range +
-   status). It is declared by `requirement`, `decision`, `roadmap`, and
-   `design`; a Risk declares `related_requirements`, `related_decisions`,
-   `related_roadmaps`, and `related_designs`. `prompt` neither declares nor
-   receives it.
+   status). It is declared by `requirement`, `decision`, `roadmap`,
+   `design`, and `prompt`; a Risk declares `related_requirements`,
+   `related_decisions`, `related_roadmaps`, and `related_designs`. A prompt
+   can therefore cite the risks it guards against; a Risk does not declare
+   `related_prompts`, keeping the new edge surface to what was ratified.
 
 5. **The free-text `## Risks` sections stay.** Requirement's and Roadmap's
    recommended `Risks` sections remain prose (`risks` ≠ `risk`); a Risk
