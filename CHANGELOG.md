@@ -46,6 +46,9 @@ details, release history over commit history.
 
 ### Fixed
 
+- Documented that a bundle element's `synonyms` aid classification only:
+  `decided validate` still requires each required section under its
+  canonical heading, as SPEC §6.6 specifies for the built-in types.
 - `decided-mcp` `get_summary` now lists bundle-declared types in `by_type`
   in registry order, as `stats` does, instead of the order the walk met
   them; and `decided doctor`'s `orphaned-artifact` advice for a

@@ -95,8 +95,12 @@ OKF types (`Requirement`, `ADR`, `Design`, `Roadmap`, `Prompt`).
 `descriptions` and `starter_bodies` map sections to strings and `guidance`
 maps sections to lists of strings. A `name` may not be `unknown` or a key the
 engine already emits beside the per-type families in `decided stats --json`
-(for example `decisions`, `invalid`, `metrics`). The digest is `sha256sum` of
-the file; edit the bundle, then re-pin.
+(for example `decisions`, `invalid`, `metrics`). `synonyms` map an
+alternative heading to a canonical section for classification only: as for
+the built-ins (SPEC §6.6), `decided validate` still requires each `required`
+section under its canonical heading, so a synonym helps a document be
+recognised as the type but does not satisfy a required section. The digest
+is `sha256sum` of the file; edit the bundle, then re-pin.
 
 What the engine does with it:
 
