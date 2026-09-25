@@ -32,6 +32,24 @@ details, release history over commit history.
   one entry per contributing source; the corpus hash folds every effective
   bundle digest. A closure in which no source pins a bundle is byte-for-byte
   unchanged.
+- Added Risk as the sixth built-in artifact type (ADR-151): `## Risk`,
+  `## Likelihood`, and `## Impact` are required, `## Context` and
+  `## Assumptions` recommended, `## Mitigation` optional, and `## Status` takes
+  `Proposed`/`Accepted`/`Superseded`/`Deprecated` (`invalid-risk-status`
+  otherwise). A new `## Related Risks` edge (`related_risks`) is declared by
+  requirements, decisions, roadmaps, prompts, and designs; a Risk links back
+  through Related Requirements, Decisions, Roadmaps, and Designs. Risk
+  validates through the shared structural validator, scaffolds with
+  `decided new risk`, exports to OKF as `type: Risk` under its own `index.md`
+  section, and reports in `decided stats --json` under `risk_artifacts` — the
+  existing `risks` key still counts Requirement risk lines. `decided schema`
+  for the five existing types now lists `Related Risks` among their optional
+  sections. A spec bundle can no longer declare a type named `risk` or
+  `risk_artifacts`; such an element is skipped with `artifact-spec-skipped`.
+  `decided inspect <dir>` counts Risk, and any bundle-declared type, only when
+  the directory holds one, where it previously listed every bundle type with
+  a zero. A repository with no Risk artifacts is otherwise byte-for-byte
+  unchanged.
 - Added deterministic point-in-time JSON exports with `decided export --at
   <revision>` for the viewer, documents, and graph projections. Historical
   exports materialise the bounded configured corpus and federation closure so
