@@ -160,6 +160,11 @@ part of the contract every future family repeats.
 - ADR-060
 - ADR-061
 - ADR-065
+- ADR-151
+
+## Related Designs
+
+- risk-pilot-family
 
 ## Related Roadmaps
 
