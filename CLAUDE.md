@@ -23,7 +23,7 @@ to the corpus artifact and they load through the imports below.
 - Historical roadmaps: `decisions/roadmaps/archive/`
 - Decisions (ADRs): `decisions/decisions/`
 
-<!-- BEGIN RAC MANAGED BLOCK (digest: cf2a1c260f881be0dead5b6f927f3666f27900a6ad8de0f802bb173043c78eb6) -->
+<!-- BEGIN RAC MANAGED BLOCK (digest: f7595002194d8afb89f36ffe98aa8192696a193df4b2e6203e78956536300aef) -->
 <!-- Managed by `decided export --agent-rules`. Edit decisions in decisions/, not here; content outside this block is preserved. -->
 ## Settled decisions (AsDecided)
 
@@ -140,6 +140,7 @@ These decisions are already accepted. Do not re-open or contradict them; ask the
 - **RAC-KZN54DB4QY0R** — ADR-147: Permit Decision-Backed Override Chains Across the Federation Graph _(Architecture)_
 - **RAC-KZN54DB55X9R** — ADR-148: Key Serving State to the Entire Federated Closure _(Technical)_
 - **RAC-M32XGEVNX50E** — ADR-150: Inherit Parent Spec Bundles Across the Federation Graph _(Architecture)_
+- **RAC-M3C0K38CZYQ1** — ADR-151: Risk Is a Built-In Knowledge Family _(Architecture)_
 - **RAC-MCP20260728A** — ADR-121: Dual-Era MCP Protocol Compatibility _(Architecture)_
 - **RAC-P55FRE5HNE55** — ADR-118: Native Event Freshness Acceleration
 - **RAC-P61BA5EDE7A0** — ADR-119: Base-Plus-Delta Serving Generations

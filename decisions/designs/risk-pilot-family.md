@@ -8,12 +8,15 @@ tags: [artifact-family, risk, schema, spec, contract]
 
 ## Status
 
-Proposed
+Accepted
+
+**Accepted 2026-09-25** with ADR-151, which resolves the draft's open
+questions: `Mitigation` is optional, and `prompt` declares `related_risks`.
 
 The implementation contract for the `artifact-family-factory` roadmap: part
 one is the family-creation contract (`rac-family-creation-contract`), part
 two instantiates it for Risk (`rac-risk-pilot-family`), governed by ADR-151.
-Nothing here is built until ADR-151 is Accepted.
+ADR-151 is Accepted; the build follows the sequencing below.
 
 ## Context
 
@@ -103,14 +106,14 @@ today; the contract names every one so none is missed:
 ### Part 2 — The Risk instantiation (ADR-151)
 
 - **Registry element `risk`.** Required `risk`, `likelihood`, `impact`;
-  recommended `context`, `mitigation`, `assumptions`; optional the four
+  recommended `context`, `assumptions`; optional `mitigation` and the four
   relationship sections below; status enum `Proposed`, `Accepted`,
   `Superseded`, `Deprecated` (retired: the last two); starter bodies and
   guidance phrased as recorded judgement ("How likely, and on what
   evidence?"), never as tasks.
 - **Edge `related_risks`**, range `risk`, undirected, `forbids_target_status`
   (a retired Risk is not a valid target, like every related edge), declared
-  by requirement, decision, roadmap, design. Risk declares
+  by requirement, decision, roadmap, design, and prompt. Risk declares
   `related_requirements`, `related_decisions`, `related_roadmaps`,
   `related_designs`.
 - **Classification boundaries to prove.** `risk` (singular) never collides
@@ -175,10 +178,9 @@ existing, unchanged renderers.
 
 ## Open Questions
 
-- Whether `mitigation` should be a recommended or optional section. It is
-  the section most likely to attract task lists; recommending it signals
-  value, making it optional signals restraint.
-- Whether `prompt` should declare `related_risks` (ADR-151 excludes it).
+- None open for the pilot; the draft's two questions were resolved at
+  ratification (ADR-151): `mitigation` is optional, and `prompt` declares
+  `related_risks`.
 
 ## Related Decisions
 
