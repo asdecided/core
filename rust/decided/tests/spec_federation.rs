@@ -704,6 +704,7 @@ fn schema_and_templates_list_the_effective_registry_of_a_given_corpus() {
             "roadmap",
             "prompt",
             "design",
+            "risk",
             "policy"
         ]
     );
@@ -729,6 +730,7 @@ fn schema_and_templates_list_the_effective_registry_of_a_given_corpus() {
             "roadmap",
             "prompt",
             "design",
+            "risk",
             "policy",
             "runbook"
         ]

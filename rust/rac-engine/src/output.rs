@@ -1508,8 +1508,13 @@ pub fn render_dir_inspect_human(d: &DirectoryInspection) -> String {
         bold(&format!("Files Inspected: {}", d.total_files())),
         String::new(),
     ];
+    // Registry-driven types (ADR-151, ADR-083) render only when present,
+    // as in the JSON counts.
     for spec in specs() {
-        lines.push(format!("{}s: {}", spec.display, count_of(&spec.name)));
+        let count = count_of(&spec.name);
+        if crate::spec::is_hand_coded(&spec.name) || count > 0 {
+            lines.push(format!("{}s: {}", spec.display, count));
+        }
     }
     lines.push(format!("Unknown: {}", count_of("unknown")));
     lines.join("\n")
@@ -1885,8 +1890,8 @@ pub fn render_stats_json(s: &PortfolioStats) -> String {
             .collect();
         family("designs", s.design_count(), s.valid_designs(), invalid);
     }
-    // Bundle-declared families (ADR-083): one additive key per declared
-    // type, present only when the corpus pins a bundle and holds such rows.
+    // Registry-driven families (ADR-151, ADR-083): one additive key per
+    // type, present only when the corpus holds such rows.
     for (type_name, rows) in &s.declared {
         let invalid: Vec<(&str, &[String], Option<&crate::corpus::ArtifactOrigin>)> = rows
             .iter()
@@ -1894,7 +1899,12 @@ pub fn render_stats_json(s: &PortfolioStats) -> String {
             .map(|r| (r.path.as_str(), r.error_codes.as_slice(), r.origin.as_ref()))
             .collect();
         let valid = rows.iter().filter(|r| r.valid).count();
-        family(type_name, rows.len(), valid, invalid);
+        family(
+            crate::spec::stats_family_key(type_name),
+            rows.len(),
+            valid,
+            invalid,
+        );
     }
 
     if !s.unrecognized.is_empty() {
