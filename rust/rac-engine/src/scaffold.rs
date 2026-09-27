@@ -957,6 +957,25 @@ mod tests {
     use super::*;
 
     #[test]
+    fn every_builtin_template_matches_its_registry_rendering() {
+        // The embedded template bytes and the registry's sections, starter
+        // bodies, and guidance are two sources of truth for the same text; a
+        // registry change that is not regenerated into `assets/templates/`
+        // must fail here, not ship a drifted template (ADR-021).
+        assert_eq!(TEMPLATE_BYTES.len(), crate::spec::builtin_specs().len());
+        for spec in crate::spec::builtin_specs() {
+            let embedded = load_template(&spec.name).expect("built-in template");
+            let rendered = crate::output::render_schema_template(spec);
+            assert_eq!(
+                embedded, rendered,
+                "assets/templates/{}.md drifted from the registry; regenerate it with \
+                 `decided schema {} --template`",
+                spec.name, spec.name
+            );
+        }
+    }
+
+    #[test]
     fn id_shape_is_key_dash_twelve_crockford() {
         let id = generate_id("RAC");
         assert!(id.starts_with("RAC-"));
