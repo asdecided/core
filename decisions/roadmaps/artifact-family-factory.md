@@ -7,20 +7,19 @@ type: roadmap
 
 ## Status
 
-Planned
+Achieved
 
-Prioritised as the rank-7 Tranche C item of the deterministic-substrate
-programme, graduated out of `future/` as the programme's ordered
-extensibility step — deliberately ahead of third-party artifact types
-(ADR-083), whose entry-point work builds on the contract proven here. This
-is the mechanism for growing RAC's *artifact* footprint on-thesis: more
-typed, deterministic, human-ratified families, never more stored content
-(ADR-024) and never work-tracking (ADR-017). It is scoped by proving the
-mechanism with one pilot family, not by adding an open-ended set at once.
-Instantiating a family — including the Risk pilot — lands its own ADR at
-implementation, scheduled here, not pre-drafted. Execution is tracked in
-GitHub (ADR-093): the epic in `## Related Tickets` carries ordering and
-task state.
+The v0.30.0 release delivers the pilot: Risk is the sixth built-in family
+(ADR-151), shipped end to end by walking the family-creation contract in
+`risk-pilot-family` — specification first (asdecided/spec v0.2.0), then the
+engine, with the template, the `related_risks` edge, the boundary and
+adjacent-type suites, and a byte-identical golden guard for corpora without a
+Risk. The pilot corrected the contract's surface table where it was wrong,
+which is how the contract is meant to improve. Later families (Metric,
+Glossary) are their own future items, each re-walking the contract.
+
+Execution history remains in GitHub under ADR-093; the epic in
+`## Related Tickets` carried ordering and task state.
 
 ## Context
 

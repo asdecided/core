@@ -7,7 +7,7 @@ type: requirement
 
 ## Status
 
-Proposed
+Accepted
 
 Classification: `[external]` — a new user-facing artifact type. Initiatives
 2 and 3 of the `artifact-family-factory` roadmap: the single end-to-end
