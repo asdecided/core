@@ -6,127 +6,96 @@ details, release history over commit history.
 
 ## Unreleased
 
-### Added
+## v0.30.0 — 2026-09-27
+
+Implements the RAC specification v0.2.0. Every addition is opt-in: a
+repository with no Risk artifact and no pinned spec bundle reads, validates,
+and exports exactly as before, and only the type listings (`schema`,
+`templates`) now name Risk.
+
+### Risk: a sixth built-in artifact family
+
+- Added Risk as a built-in type (ADR-151), the first family built by the
+  documented family-creation contract. `## Risk`, `## Likelihood`, and
+  `## Impact` are required, `## Context` and `## Assumptions` recommended, and
+  `## Mitigation` optional. `## Status` takes `Proposed`, `Accepted`,
+  `Superseded`, or `Deprecated` (`invalid-risk-status` otherwise); there are
+  no delivery states, and likelihood and impact are prose, never a score.
+- Added the `## Related Risks` edge (`related_risks`). Requirements,
+  decisions, roadmaps, prompts, and designs declare it; a Risk links back
+  through Related Requirements, Decisions, Roadmaps, and Designs. It resolves,
+  is range- and status-checked, and appears in the graph export like every
+  other edge.
+- Risk scaffolds with `decided new risk`, validates through the shared
+  structural validator, exports to OKF as `type: Risk` under its own
+  `index.md` section, and reports in `decided stats --json` under
+  `risk_artifacts`; the existing `risks` key still counts Requirement risk
+  lines. `decided schema` for the five existing types lists `Related Risks`
+  among their optional sections, and `schema --list` and `templates` list
+  six types.
+
+### Your own artifact types: pinned spec bundles
 
 - Added corpus-declared artifact types through a pinned spec bundle (ADR-083,
-  revised): `.decided/config.yaml` pins one JSON file in the shape of
-  `artifact-specs.json` by path and `sha256:` digest, and its elements join the
-  registry after the five built-ins in file order. Custom types classify,
-  validate structurally, scaffold with `decided new <type>`, appear in
-  `schema --list`, `stats`, `find`, exports, and every MCP tool, and export to
-  OKF under an `okf_type` field that defaults to the type's display name. An
-  element that collides with a built-in or fails the contract is skipped with
-  an `artifact-spec-skipped` warning; a bundle whose bytes do not match the pin
-  is a hard error (`artifact-spec-bundle-digest-mismatch`), as a federation pin
-  failure is. Repositories without the stanza are byte-for-byte unchanged.
-- Added inherited artifact types across a federation (ADR-150): a child
-  composes its parents' admitted bundle types after its own, bottom-up in the
-  manifest's canonical parent order, so a parent's runbooks are runbooks in
-  every child under the pin the child already holds. Identical declarations
-  are silent; a same-name, different-content declaration fails every command
-  and MCP tool with `corpus-federation-artifact-type-conflict`, resolved only
-  by a Decision-backed `artifact_types.overrides` entry (`name`, `prefer`,
-  `rationale`); a defective override is `corpus-federation-invalid-override`.
-  A parent's bundle is re-verified against the digest in its captured config
-  on every command. `decided validate --json` gains `artifact_spec_bundles`,
-  one entry per contributing source; the corpus hash folds every effective
-  bundle digest. A closure in which no source pins a bundle is byte-for-byte
-  unchanged.
-- Added Risk as the sixth built-in artifact type (ADR-151): `## Risk`,
-  `## Likelihood`, and `## Impact` are required, `## Context` and
-  `## Assumptions` recommended, `## Mitigation` optional, and `## Status` takes
-  `Proposed`/`Accepted`/`Superseded`/`Deprecated` (`invalid-risk-status`
-  otherwise). A new `## Related Risks` edge (`related_risks`) is declared by
-  requirements, decisions, roadmaps, prompts, and designs; a Risk links back
-  through Related Requirements, Decisions, Roadmaps, and Designs. Risk
-  validates through the shared structural validator, scaffolds with
-  `decided new risk`, exports to OKF as `type: Risk` under its own `index.md`
-  section, and reports in `decided stats --json` under `risk_artifacts` — the
-  existing `risks` key still counts Requirement risk lines. `decided schema`
-  for the five existing types now lists `Related Risks` among their optional
-  sections. A spec bundle can no longer declare a type named `risk` or
-  `risk_artifacts`; such an element is skipped with `artifact-spec-skipped`.
-  `decided inspect <dir>` counts Risk, and any bundle-declared type, only when
-  the directory holds one, where it previously listed every bundle type with
-  a zero. A repository with no Risk artifacts is otherwise byte-for-byte
-  unchanged.
+  revised). `.decided/config.yaml` pins one JSON file in the shape of
+  `artifact-specs.json` by path and `sha256:` digest, and its elements join
+  the registry after the built-ins in file order. Custom types classify,
+  validate structurally, scaffold with `decided new <type>`, and appear in
+  `schema --list`, `stats`, `find`, `inspect`, exports, `gate`, `sentry`,
+  `watchkeeper`, `rename`, and every MCP tool. They export to OKF under an
+  `okf_type` field that defaults to the type's display name.
+- A bundle type classifies a document only when no built-in qualifies, so a
+  bundle can never take a built-in artifact's type. Synonyms aid
+  classification only; `validate` still requires each required section under
+  its canonical heading (SPEC §6.6).
+- An element that collides with a built-in, claims a built-in OKF type, would
+  overwrite an existing `stats --json` key, or fails the element contract is
+  skipped with an `artifact-spec-skipped` warning. A bundle whose bytes do not
+  match the pin, or a config that declares `artifact_types` but cannot be
+  parsed, is a hard error (`artifact-spec-bundle-digest-mismatch` and
+  siblings).
+- A running `decided-mcp` follows the registry: a re-pinned bundle or a
+  removed stanza lands on the next tool call without a restart.
+
+### Inherited artifact types across a federation
+
+- Added inherited artifact types (ADR-150): a child composes its parents'
+  admitted bundle types after its own, bottom-up in the manifest's canonical
+  parent order, under the pins the child already holds. A parent's bundle is
+  re-verified against its captured config on every command. Identical
+  declarations are one type; a same-name, different-content declaration fails
+  every command and MCP tool with `corpus-federation-artifact-type-conflict`,
+  resolved only by a Decision-backed `artifact_types.overrides` entry
+  (`name`, `prefer`, `rationale`); a defective override is
+  `corpus-federation-invalid-override`.
+- `decided validate --json` gains `artifact_spec_bundles`, one entry per
+  contributing source, and the corpus hash folds every effective bundle
+  digest.
+- Added `--corpus <dir>` to `decided schema` and `decided templates`: the
+  listing is that corpus's effective registry, inherited types included.
+  Without the flag both commands list the local registry as before.
+
+### Point-in-time exports
+
 - Added deterministic point-in-time JSON exports with `decided export --at
   <revision>` for the viewer, documents, and graph projections. Historical
-  exports materialise the bounded configured corpus and federation closure so
-  identity and inherited records match that revision without changing `.git`.
-
-- Added `--corpus <dir>` to `decided schema` and `decided templates`: the
-  listing is the effective registry of that corpus, so in a federated
-  repository the types inherited from parents (ADR-150) appear after the
-  corpus's own bundle types, and `schema <type>` and `schema <type>
-  --template` render an inherited type. Without the flag both commands list
-  the local registry exactly as before.
+  exports materialise the bounded configured corpus and federation closure,
+  including the spec bundles pinned at that revision, so identity, inherited
+  records, and classification match that revision without changing `.git`.
 
 ### Fixed
 
-- Documented that a bundle element's `synonyms` aid classification only:
-  `decided validate` still requires each required section under its
-  canonical heading, as SPEC §6.6 specifies for the built-in types.
-- A version-1 `decided-mcp` with the cache on kept serving after a type
-  override's rationale Decision outside the served root was retired; while
-  any type override is applied it now recomposes each request, as a
-  version-2 server always does, so the retirement fails the next call.
-- `decided-mcp` `get_summary` now lists bundle-declared types in `by_type`
-  in registry order, as `stats` does, instead of the order the walk met
-  them; and `decided doctor`'s `orphaned-artifact` advice for a
-  bundle-declared type no longer suggests adding a reference, which such a
-  type can never receive (ADR-083 decision 4).
-- `decided gate`, `sentry`, `watchkeeper`, and `rename` now load a pinned spec
-  bundle, so a bundle-type artifact that `validate` fails also fails the gate,
-  a broken pin is refused (exit 1) instead of ignored, and `rename --apply`
-  rewrites references held by bundle-type artifacts instead of leaving them
-  dangling. `inspect` and `improve` compose a federated closure, including
-  version 1, so inherited types classify, and read stdin (`-`) with the
-  working directory's registry. The `decided-mcp` startup probe no longer
-  warns that a corpus holding only bundle types is empty.
-- A running `decided-mcp` with the cache on (the default) now follows the
-  artifact-type registry: a re-pinned bundle or a removed `artifact_types`
-  stanza lands on the next tool call instead of after a restart. On a
-  version-1 federation the warm path re-verifies every pinned bundle, so a
-  parent bundle edited without a re-pin fails the next call, and cached stores
-  written before inherited types existed are no longer served for a closure
-  that pins a bundle.
-- `decided export --at <revision>` works in a federated repository whose
-  corpus or parents pin a spec bundle (it failed with
-  `artifact-spec-bundle-missing` because the historical snapshot omitted the
-  bundle files), and every historical export now classifies artifacts under
-  the bundles pinned at that revision rather than the working tree's, so a
-  broken working-tree pin no longer blocks exporting history.
-- Hardened spec-bundle input: a bundle type classifies a document only when
-  no built-in qualifies, so a bundle can no longer take a built-in artifact's
-  type; a config that declares `artifact_types` but cannot be parsed is a hard
-  error instead of silently dropping the pin; a long multibyte bundle path is
-  an error instead of a crash; `okf_type` and `display` must be single-line,
-  `okf_type` may not claim a built-in OKF type and is written as a safe YAML
-  scalar; a type name may not overwrite an existing `stats --json` key; and
-  ill-typed `descriptions`, `starter_bodies`, and `guidance` values are skipped
-  with `artifact-spec-skipped` instead of being admitted as empty.
-- ADR-150 composition correctness: a type override's rationale resolves
-  across the declaring corpus instead of only the directory or `--top-level`
-  scope a command names, and ignores case as ADR-137 rationales do; two
-  declarations that differ only in JSON key order are one type instead of a
-  `corpus-federation-artifact-type-conflict`; the composed-registry memo is
-  keyed on the federation topology as well as the configs, so a long-running
-  process sees a changed parent graph; `decided new` and `decided migrate` in a
-  version-2 repository again count identifiers in sibling top-level
-  directories as issued; and `artifact_spec_bundles` reports `source: null`,
-  not the `prefer: local` keyword, for a local bundle without `corpus.source`.
-- `decided-mcp` named the stable code twice when a federation composition
-  failed mid-session, with or without the cache (for example
-  `corpus-federation-artifact-type-conflict: corpus-federation-artifact-type-conflict: …`);
-  it now names it once, as the CLI does.
 - `decided new` and `decided migrate` in a repository with a version-2
-  federation manifest, which failed with `federated-corpus-snapshot-failed`
-  because the identifier-collision scan composed the repository root, a path
-  the version-2 graph rejects. The scan now composes the top-level corpus
+  federation manifest failed with `federated-corpus-snapshot-failed`, because
+  the identifier-collision scan composed the repository root, a path the
+  version-2 graph rejects. The scan now composes the top-level corpus
   directory holding the target, inherited layer included, so an identifier a
-  parent already issued is not reused; unconfigured and version-1
+  parent already issued is not reused. Unconfigured and version-1
   repositories keep their released root walk.
+- `decided-mcp` named a federation composition failure's stable code twice
+  (for example `corpus-federation-artifact-type-conflict:
+  corpus-federation-artifact-type-conflict: …`), with or without the cache; it
+  now names it once, as the CLI does.
 
 ## v0.29.0 — 2026-08-30
 
