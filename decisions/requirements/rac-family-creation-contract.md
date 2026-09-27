@@ -7,7 +7,7 @@ type: requirement
 
 ## Status
 
-Proposed
+Accepted
 
 Classification: `[internal]` — a documented, repeatable engineering
 contract. Initiative 1 of the `artifact-family-factory` roadmap.
