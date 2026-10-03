@@ -17,6 +17,15 @@ recorded boundaries, and collision-free across corpora. Execution is tracked
 in GitHub per ADR-093: the epic in `## Related Tickets` carries ordering
 and task state, with a sub-issue per initiative.
 
+Three initiatives have shipped. v0.29.0 delivered export contract schemas
+(`decided export --schema`) and multi-corpus source identity
+(`corpus.source`); v0.30.0 delivered point-in-time export
+(`decided export --at`). The incremental change feed and section anchors
+with ingest filters remain unbuilt, and scale and retrieval evidence is
+partial: a deterministic corpus generator (`rust/tools/gen_corpus.py`) and
+eval floors exist, but `decided find` pagination does not. The programme stays
+Planned until those land.
+
 ## Context
 
 RAC already emits three deterministic projections — the viewer JSON, the
