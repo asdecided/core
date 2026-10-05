@@ -6,6 +6,17 @@ details, release history over commit history.
 
 ## Unreleased
 
+### Added
+
+- `decided export --documents|--graph --since <revision>` emits a change feed
+  from the corpus at that revision to the working tree, or to a second
+  revision with `--at`. Records are keyed on source and canonical id, so a
+  move that keeps the id is `modified`. Each feed carries resolved `base` and
+  `head` cursors, and nothing is persisted. Applying a documents feed to the
+  base export reproduces the head export byte-for-byte; a graph feed
+  reproduces the head node and edge sets. An unchanged corpus yields an empty
+  feed and exit code 0.
+
 ### Fixed
 
 - In a repository with a version-2 federation manifest, relationship

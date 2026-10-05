@@ -941,14 +941,15 @@ artifacts — existing output is overwritten.
 
 - **Input:** `decided export [directory]` — scanned recursively for `*.md` (default: current directory).
 - **Modes:** *(default)* viewer JSON to stdout · `--html` (self-contained Portal file) · `--okf` (OKF v0.2 Markdown bundle) · `--documents` (JSONL for memory/RAG backends) · `--graph` (typed node+edge JSON for graph backends) · `--schema <viewer|documents|graph>` (the packaged JSON Schema, without reading a corpus) · `--agent-rules` (per-client agent-context files; see its own behaviour)
-- **Options:** `--out <path>` (only `--html`/`--okf`/`--agent-rules`; the stdout modes are pipeable) · `--json` (no-op for the default mode) · `--local-only` (viewer/HTML, documents, and graph projections only) · `--at <revision>` (read-only point-in-time viewer, documents, or graph export)
-- **Exit codes:** `0` success · `1` historical object, materialization, or federation validation failure · `2` not a directory, an unknown revision, a non-Git directory used with `--at`, an unsupported option combination, or `--out` given to a stdout mode
+- **Options:** `--out <path>` (only `--html`/`--okf`/`--agent-rules`; the stdout modes are pipeable) · `--json` (no-op for the default mode) · `--local-only` (viewer/HTML, documents, and graph projections only) · `--at <revision>` (read-only point-in-time viewer, documents, or graph export) · `--since <revision>` (documents or graph change feed from that revision to the working tree, or to `--at`)
+- **Exit codes:** `0` success, including an empty change feed · `1` historical object, materialization, or federation validation failure · `2` not a directory, an unknown revision, a non-Git directory used with `--at` or `--since`, an unsupported option combination, or `--out` given to a stdout mode
 
 ```bash
 decided export decisions/                      # viewer JSON to stdout
 decided export decisions/ --documents          # JSONL, one record per artifact
 decided export decisions/ --graph              # typed node+edge graph
 decided export decisions/ --documents --at v0.29.0 # historical JSONL
+decided export decisions/ --documents --since v0.29.0 --at v0.30.0 # change feed
 decided export decisions/ --local-only         # writable child records only
 decided export --schema documents              # Draft 2020-12 record schema
 decided export decisions/ --html --out asdecided.html
@@ -975,6 +976,37 @@ When worktree bytes match the committed blobs, the same submodule object
 closure is available locally, and the corpus is within the snapshot safety
 limits documented below, `--at HEAD` is byte-identical to a plain export.
 HTML, OKF, agent-rules, and schema modes do not accept `--at`.
+
+`--since <revision>` turns `--documents` or `--graph` into a change feed
+between the corpus at that revision and the working tree, or a second revision
+when combined with `--at`. Both sides come from the same exporter as a full
+export, materialised through the same read-only snapshot, so no new Git access
+is involved and nothing is persisted: the consumer stores the cursor and
+passes it back as the next `--since`. Change identity is the record's source
+plus its canonical id, so moving a file without changing its id is reported as
+`modified`, never as `removed` plus `added`.
+
+- **Documents feed** (JSON Lines): the first line is the cursor,
+  `{"schema_version": "1", "feed": "documents", "base": <sha>, "head": <sha>}`,
+  where `head` is the literal `working-tree` without `--at`. Each further line
+  is one change: `added` and `modified` lines embed the full documents record
+  under `document`, in exactly the `--documents` shape, and `removed` lines
+  carry `id`, `source`, and the last-known `path`. Lines are ordered by path
+  (component by component), then source, id, and change.
+- **Graph feed** (one JSON object): the cursor fields, the head `source`, and
+  `nodes_added`, `nodes_modified`, `nodes_removed`, `edges_added`, and
+  `edges_removed` in the graph node and edge shapes.
+- **Replay:** removing the `removed` and `modified` records from the base
+  documents export, adding the `added` and `modified` records, and sorting by
+  `metadata.path` component by component, then source and id, reproduces the
+  head documents export byte-for-byte. Records are serialised as the export
+  serialises them: compact JSON with `", "` and `": "` separators and no ASCII
+  escaping (Python's `json.dumps(record, ensure_ascii=False)`). A graph feed
+  reproduces the head node and edge sets; graph nodes carry no path, so their
+  order is not recoverable.
+- An unchanged corpus produces only the cursor line (documents) or empty
+  arrays (graph), with exit code `0`. `--since` requires `--documents` or
+  `--graph` and is CLI-only.
 
 The bounded snapshot admits at most 50,000 Markdown files, 200,000 visited
 entries, 16 MiB per file, and 512 MiB of selected physical bytes. A selected
