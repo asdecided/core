@@ -31,6 +31,8 @@ deterministically without overstating coverage.
 - [REQ-011] Enforcement MUST remain local and MUST NOT use embeddings, model calls, an LLM judge, or a network service.
 - [REQ-012] Core pull requests MUST dogfood Sentry as a blocking check against the pull request base branch.
 
+- [REQ-013] Gate policy loading MUST distinguish loaded, absent, invalid and unreadable configuration; invalid or unreadable selected policy MUST fail closed, and explicit required-policy mode MUST reject absent enforcement mappings. Optional absence MUST retain documented finding defaults.
+
 ## Success Metrics
 
 - A prohibited changed line fails locally and in pull-request CI with the same

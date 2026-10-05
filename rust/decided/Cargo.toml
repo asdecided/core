@@ -12,8 +12,19 @@ keywords = ["decisions", "architecture", "agents", "cli", "offline"]
 categories = ["command-line-utilities", "development-tools"]
 publish = ["crates-io"]
 
+# `cargo binstall decided` downloads the prebuilt release archive instead of
+# compiling. Every native release archive carries both executables at its root.
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/asdecided-{ target }.tar.gz"
+bin-dir = "{ bin }{ binary-ext }"
+pkg-fmt = "tgz"
+
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-url = "{ repo }/releases/download/v{ version }/asdecided-{ target }.zip"
+pkg-fmt = "zip"
+
 [dependencies]
-rac-engine = { package = "asdecided-core", version = "=0.30.0", path = "../rac-engine" }
+rac-engine = { package = "asdecided-core", version = "=0.31.1", path = "../rac-engine" }
 
 [dev-dependencies]
 serde_json = "1"

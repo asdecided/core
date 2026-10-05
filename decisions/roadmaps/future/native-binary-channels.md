@@ -59,6 +59,10 @@ re-enters only if raw browser-download distribution is ever added.
 - Byte-parity discipline is unchanged: the channel binaries are the same
   cargo artifacts the wheel bundles, built from the same tagged commit
   with the same compiled-in version.
+- Linux binaries hold a fixed glibc floor (2.17), built with
+  `scripts/build-linux-release.sh` and run on that floor in CI before
+  release; raising it drops supported distributions and is a deliberate
+  change, never a side effect of the runner image.
 - No code signing dependency: channels are chosen so unsigned binaries
   are first-class (brew, Scoop, pip). Adding a channel that requires
   signing (raw GitHub Release downloads as a promoted path, MSIX) is a

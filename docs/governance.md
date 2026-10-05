@@ -210,3 +210,27 @@ platform API exists for that, so those clients rely on the post-edit guard.
 - [Security posture](security.md) — the offline guarantee behind the gate.
 - [Repository Workflow](repo-workflow.md) — `decided init` and `.decided/config.yaml`.
 - [CLI Reference](cli.md) — `decided gate` flags and exit codes.
+
+## Required policy and load failures
+
+Use `decided gate decisions --require-policy` in CI when the enforcement mapping
+must exist. Missing files or missing/null `enforcement` mappings fail with exit 1.
+An empty mapping is valid and deliberately selects the documented finding defaults.
+Without the flag, optional absence retains those defaults; it does not suppress
+all findings. Neither mode tolerates invalid YAML, a non-mapping document root,
+an unreadable file, a directory at the config path, or a broken config symlink.
+Discovery stops at an unusable nearest path instead of inheriting a parent policy.
+Valid symlinks remain supported.
+
+The loader exposes loaded, absent, invalid and unreadable states to Rust callers.
+A loaded config may omit optional enforcement overrides. Parse errors omit source
+excerpts; inspect the named file locally. Gate output contracts remain unchanged.
+The required check and classification use the same loaded enforcement policy;
+a later invocation loads current policy rather than reusing approval state.
+Config directories must be protected from untrusted writes: this is not an atomic
+filesystem sandbox or a substitute for reviewing policy changes.
+
+This hardens configuration loading. AsDecided still enforces deterministic corpus
+and source constraints after edits. It does not choose providers, execute shell
+commands, grant agent approvals or govern third-party MCP metadata. Host-agent
+approval, shell expansion and IDE read-denial fixes must be applied in that host.

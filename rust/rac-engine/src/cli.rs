@@ -969,6 +969,7 @@ fn run_gate(rest: &[&String]) -> u8 {
     let mut sarif = false;
     let mut top_level = false;
     let mut code = false;
+    let mut require_policy = false;
     let mut repository = ".".to_string();
     let mut base: Option<String> = None;
     let mut full = false;
@@ -1004,6 +1005,7 @@ fn run_gate(rest: &[&String]) -> u8 {
             }
             "--top-level" => top_level = true,
             "--code" => code = true,
+            "--require-policy" => require_policy = true,
             "--full" => full = true,
             "--repository" | "--base" => {
                 i += 1;
@@ -1037,6 +1039,7 @@ fn run_gate(rest: &[&String]) -> u8 {
         sarif,
         top_level,
         code,
+        require_policy,
         repository,
         base,
         full,
@@ -2309,6 +2312,7 @@ fn run_export(rest: &[&String]) -> u8 {
     let mut client: Vec<String> = Vec::new();
     let mut out: Option<String> = None;
     let mut at: Option<String> = None;
+    let mut since: Option<String> = None;
     let mut local_only = false;
     let mut extras: Vec<String> = Vec::new();
     let mut positional_only = false;
@@ -2451,6 +2455,15 @@ fn run_export(rest: &[&String]) -> u8 {
                     Err(code) => return code,
                 }
             }
+            other if other == "--since" || other.starts_with("--since=") => {
+                match take_opt_value(prog, "--since", other, rest, &mut i) {
+                    Ok(v) if !v.is_empty() => since = Some(v),
+                    Ok(_) => {
+                        return argparse_error(prog, "argument --since: expected one argument")
+                    }
+                    Err(code) => return code,
+                }
+            }
             other => extras.push(other.to_string()),
         }
         i += 1;
@@ -2476,6 +2489,7 @@ fn run_export(rest: &[&String]) -> u8 {
             local_only,
         },
         at.as_deref(),
+        since.as_deref(),
     ) as u8
 }
 
