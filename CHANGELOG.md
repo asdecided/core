@@ -6,6 +6,11 @@ details, release history over commit history.
 
 ## Unreleased
 
+## v0.31.2 — 2026-10-05
+
+A compatibility release: the Linux release binaries run on older
+distributions again, and the bundled dependencies are refreshed.
+
 ### Fixed
 
 - The Linux release archives (x86_64 and aarch64) run on glibc 2.17 and newer
@@ -13,6 +18,12 @@ details, release history over commit history.
   and Debian 12. Archives up to v0.31.1 were linked on the runner's glibc 2.39
   and failed on those systems with `GLIBC_2.39 not found`. CI now runs every
   Linux build on a CentOS 7 (glibc 2.17) userland so the floor cannot drift.
+
+### Changed
+
+- Rust dependencies are refreshed (serde, serde_json, globset, regex, inotify,
+  libc and sha2), as are the release workflow actions. No CLI, MCP or export
+  contract changes.
 
 ## v0.31.1 — 2026-10-05
 

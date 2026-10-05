@@ -30,7 +30,7 @@ In CI, pin a release tag rather than `latest`, or pin by digest for
 immutable builds (the release run prints the pushed digest in its summary):
 
 ```bash
-docker pull ghcr.io/asdecided/core:v0.31.1
+docker pull ghcr.io/asdecided/core:v0.31.2
 docker pull ghcr.io/asdecided/core@sha256:<digest>
 ```
 
@@ -41,7 +41,7 @@ can run script steps):
 ```yaml
 rac-gate:
   image:
-    name: ghcr.io/asdecided/core:v0.31.1
+    name: ghcr.io/asdecided/core:v0.31.2
     entrypoint: [""]
   script:
     - decided gate decisions/
@@ -55,7 +55,7 @@ pipelines:
     '**':
       - step:
           name: decided gate
-          image: ghcr.io/asdecided/core:v0.31.1
+          image: ghcr.io/asdecided/core:v0.31.2
           script:
             - decided gate decisions/
 ```
@@ -64,7 +64,7 @@ Jenkins (declarative pipeline, docker agent):
 
 ```groovy
 pipeline {
-  agent { docker { image 'ghcr.io/asdecided/core:v0.31.1' } }
+  agent { docker { image 'ghcr.io/asdecided/core:v0.31.2' } }
   stages {
     stage('decided gate') {
       steps { sh 'decided gate decisions/' }
