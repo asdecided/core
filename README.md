@@ -27,6 +27,14 @@ cargo install decided
 cargo install decided-mcp
 ```
 
+`cargo install` compiles from source. To install the prebuilt release binaries
+instead, use [`cargo binstall`](https://github.com/cargo-bins/cargo-binstall).
+Crates published after v0.31.0 point it at the GitHub release archives:
+
+```sh
+cargo binstall decided decided-mcp
+```
+
 Windows users can install both native executables through Scoop:
 
 ```powershell

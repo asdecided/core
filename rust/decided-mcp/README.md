@@ -5,7 +5,7 @@ in an AsDecided repository. It runs locally and deterministically: no hosted
 index, embeddings, model call, or Python runtime is required.
 
 ```sh
-cargo install decided-mcp
+cargo install decided-mcp      # or: cargo binstall decided-mcp (prebuilt binary)
 decided-mcp --root /path/to/repository
 ```
 

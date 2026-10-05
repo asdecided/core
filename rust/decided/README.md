@@ -8,7 +8,7 @@ constraints against source code. It runs offline: no embeddings, model call,
 hosted index, or Python runtime.
 
 ```sh
-cargo install decided
+cargo install decided          # or: cargo binstall decided (prebuilt binary)
 
 decided quickstart
 decided validate decisions/
