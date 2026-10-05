@@ -631,7 +631,10 @@ fn an_unfederated_historical_export_uses_the_bundle_of_that_revision() {
     let end = start + "digest: sha256:".len() + 64;
     let digest = {
         use sha2::{Digest, Sha256};
-        format!("{:x}", Sha256::digest(bytes.as_bytes()))
+        Sha256::digest(bytes.as_bytes())
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
     };
     fs::write(
         &config,
@@ -673,7 +676,10 @@ fn add_element_and_repin(root: &Path, element: &str) {
     let end = start + "digest: sha256:".len() + 64;
     let digest = {
         use sha2::{Digest, Sha256};
-        format!("{:x}", Sha256::digest(bytes.as_bytes()))
+        Sha256::digest(bytes.as_bytes())
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
     };
     fs::write(
         &config,
@@ -752,7 +758,10 @@ fn okf_types_are_emitted_as_safe_scalars() {
     let end = start + "digest: sha256:".len() + 64;
     let digest = {
         use sha2::{Digest, Sha256};
-        format!("{:x}", Sha256::digest(bytes.as_bytes()))
+        Sha256::digest(bytes.as_bytes())
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
     };
     fs::write(
         &config,
