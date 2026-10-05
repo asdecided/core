@@ -15,6 +15,10 @@ details, release history over commit history.
 
 - `decided gate --require-policy` requires an explicit enforcement mapping and
   fails closed when it is absent, invalid or unreadable.
+- `cargo binstall decided` and `cargo binstall decided-mcp` now download the
+  prebuilt executables from the GitHub release archives instead of compiling.
+  Targets without a published archive fall back to binstall's other strategies,
+  ending with a build from source.
 
 ## v0.31.0 — 2026-10-05
 
