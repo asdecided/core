@@ -400,9 +400,15 @@ impl ResolutionCandidate {
 }
 
 /// Insertion-ordered `{casefold(ident) -> [source-aware candidate]}` index.
+///
+/// A version-2 federation resolves references in the context of the source
+/// that authored them, so a graph composition also records each reference's
+/// resolution per source key. A contextual entry takes precedence over the
+/// source-blind map; without one the released lookup is unchanged.
 pub struct ResolutionIndex {
     order: Vec<String>,
     map: HashMap<String, Vec<ResolutionCandidate>>,
+    contextual: HashMap<ArtifactKey, HashMap<String, Vec<ResolutionCandidate>>>,
 }
 
 impl ResolutionIndex {
@@ -410,7 +416,37 @@ impl ResolutionIndex {
         ResolutionIndex {
             order: Vec::new(),
             map: HashMap::new(),
+            contextual: HashMap::new(),
         }
+    }
+
+    /// Record how `reference`, authored by `source`, resolves.
+    pub(crate) fn insert_contextual(
+        &mut self,
+        source: ArtifactKey,
+        reference: &str,
+        candidates: Vec<ResolutionCandidate>,
+    ) {
+        self.contextual
+            .entry(source)
+            .or_default()
+            .insert(Self::reference_key(reference), candidates);
+    }
+
+    /// Candidates for `reference` as authored by `source`.
+    pub(crate) fn get_reference_from(
+        &self,
+        reference: &str,
+        source: &ArtifactKey,
+    ) -> &[ResolutionCandidate] {
+        if let Some(candidates) = self
+            .contextual
+            .get(source)
+            .and_then(|by_reference| by_reference.get(&Self::reference_key(reference)))
+        {
+            return candidates;
+        }
+        self.get_reference(reference)
     }
 
     pub(crate) fn insert(&mut self, key: String, value: ResolutionCandidate) {
@@ -580,7 +616,7 @@ fn resolved_unique<'a>(
     reference: &str,
     source_key: &ArtifactKey,
 ) -> Option<&'a ResolutionCandidate> {
-    let targets = index.get_reference(reference);
+    let targets = index.get_reference_from(reference, source_key);
     if targets.len() != 1 || targets[0].key == *source_key {
         return None;
     }
@@ -602,7 +638,7 @@ fn classify_reference<'a>(
     reference: &str,
     source_key: &ArtifactKey,
 ) -> ReferenceResolution<'a> {
-    let targets = index.get_reference(reference);
+    let targets = index.get_reference_from(reference, source_key);
     if targets.is_empty() {
         ReferenceResolution::NotFound
     } else if targets.len() > 1 {
