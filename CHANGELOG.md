@@ -6,6 +6,13 @@ details, release history over commit history.
 
 ## Unreleased
 
+## v0.31.0 — 2026-10-05
+
+Adds an incremental change feed for consumers that sync the corpus into
+memory, RAG, or graph backends, and fixes relationship validation in
+repositories with a version-2 federation manifest. Repositories without a
+federation manifest, or with a version-1 manifest, validate exactly as before.
+
 ### Added
 
 - `decided export --documents|--graph --since <revision>` emits a change feed
