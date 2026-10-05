@@ -56,6 +56,7 @@ pub mod diff;
 pub mod doctor;
 pub mod eval;
 pub mod export;
+pub mod export_feed;
 pub mod federated_corpus;
 pub mod federation;
 pub mod federation_generation;

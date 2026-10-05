@@ -235,6 +235,11 @@ impl Drop for RevisionSnapshot {
 
 impl RevisionSnapshot {
     /// Open a strict snapshot guard for `rev` without materializing any path.
+    /// The full commit SHA the requested revision resolved to.
+    pub fn commit(&self) -> &str {
+        &self.commit
+    }
+
     pub fn open(repo_root: &str, rev: &str) -> Result<Self, RevisionSnapshotError> {
         let repository_root = std::fs::canonicalize(repo_root).map_err(|error| {
             RevisionSnapshotError::NotAGitRepository(format!("not a git repository: {error}"))
