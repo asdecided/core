@@ -44,6 +44,9 @@ scoop install asdecided
 
 Native `decided` and `decided-mcp` archives are also published on
 [GitHub Releases](https://github.com/asdecided/core/releases).
+The Linux archives (x86_64 and aarch64) need glibc 2.17 or newer, so they run
+on RHEL/CentOS 7 and later, Amazon Linux 2 and 2023, and current Debian and
+Ubuntu releases.
 
 Python API consumers should use the
 [`asdecided/sdk`](https://github.com/asdecided/sdk) client SDK. It talks to the
