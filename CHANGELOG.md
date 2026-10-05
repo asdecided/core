@@ -6,10 +6,11 @@ details, release history over commit history.
 
 ## Unreleased
 
-### Fixed
+## v0.31.1 — 2026-10-05
 
-- The gate no longer skips unusable config paths or accepts non-mapping YAML
-  roots as default policy. Parse diagnostics omit source excerpts.
+A small follow-up to v0.31.0: the gate can require an explicit enforcement
+policy and no longer falls back silently when the policy is unusable, and
+`cargo binstall` installs the prebuilt release binaries.
 
 ### Added
 
@@ -19,6 +20,11 @@ details, release history over commit history.
   prebuilt executables from the GitHub release archives instead of compiling.
   Targets without a published archive fall back to binstall's other strategies,
   ending with a build from source.
+
+### Fixed
+
+- The gate no longer skips unusable config paths or accepts non-mapping YAML
+  roots as default policy. Parse diagnostics omit source excerpts.
 
 ## v0.31.0 — 2026-10-05
 

@@ -24,7 +24,7 @@ pkg-url = "{ repo }/releases/download/v{ version }/asdecided-{ target }.zip"
 pkg-fmt = "zip"
 
 [dependencies]
-rac-engine = { package = "asdecided-core", version = "=0.31.0", path = "../rac-engine" }
+rac-engine = { package = "asdecided-core", version = "=0.31.1", path = "../rac-engine" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 
