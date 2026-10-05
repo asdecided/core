@@ -35,6 +35,20 @@ enter the payload; paths and display identity retain the requested-directory
 spelling, and `rac_version` remains the version of the CLI producing the
 export.
 
+Documents and graph exports can also be consumed incrementally:
+
+```sh
+decided export decisions/ --documents --since <revision> [--at <revision>]
+decided export decisions/ --graph --since <revision> [--at <revision>]
+```
+
+A change feed compares the same exporter's output at two corpus states, so an
+`added` or `modified` documents record embeds a record that validates against
+the documents schema unchanged. The feed's cursor, the resolved base and head
+commits, is the consumer's to store; AsDecided keeps no sync state. The feed
+shapes and the replay rule are described under
+[`export`](cli.md#export) in the CLI reference.
+
 Those files are the machine-readable source of truth. CI validates exports of
 both a fixed fixture corpus and AsDecided's own decision corpus against them. A
 separate field-set guard also requires the producer and schema to name exactly

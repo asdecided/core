@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useState } from 'react';
-import type { RefObject } from 'react';
+import type { Ref } from 'react';
 import { KeyboardHint } from '../components';
 import type { CorpusIndex } from './data';
 import { artifactKey, displayName } from './data';
@@ -16,7 +16,7 @@ export interface ListViewProps {
   index: CorpusIndex;
   filters: ListFilters;
   onFilters: (next: ListFilters) => void;
-  searchRef: RefObject<HTMLInputElement>;
+  searchRef: Ref<HTMLInputElement>;
 }
 
 /** Debounce a value so filtering does not run on every keystroke. */

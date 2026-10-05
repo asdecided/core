@@ -209,7 +209,14 @@ pub fn calculate_v2_digest(root: &Path, corpus: &str, source: &str) -> String {
         frame(&mut hasher, 0x05, relative.as_bytes());
         frame(&mut hasher, 0x06, &bytes);
     }
-    format!("sha256-v2:{:x}", hasher.finalize())
+    format!(
+        "sha256-v2:{}",
+        hasher
+            .finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
+    )
 }
 
 fn frame(hasher: &mut Sha256, tag: u8, payload: &[u8]) {

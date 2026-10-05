@@ -14,7 +14,7 @@ jobs:
     name: Verify release changelog
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.release.tag_name }}
       - name: Require one matching SemVer entry
@@ -35,7 +35,7 @@ jobs:
     needs: [verification, changelog]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.release.tag_name }}
       - name: Install pinned Rust toolchain
@@ -43,7 +43,7 @@ jobs:
         run: rustup show
       - name: Generate Cargo dependency notices
         run: ./scripts/generate-third-party-notices.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: asdecided-third-party-notices
           path: THIRD-PARTY-NOTICES
@@ -72,10 +72,10 @@ jobs:
             archive: zip
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.release.tag_name }}
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: asdecided-third-party-notices
       - name: Install pinned Rust toolchain
@@ -84,13 +84,28 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust
+      # Linux builds link against an old glibc (scripts/build-linux-release.sh)
+      # so the archives run on distributions older than the runner image.
+      - name: Install pinned cargo-zigbuild
+        if: endsWith(matrix.target, '-linux-gnu')
+        run: ./scripts/install-cargo-zigbuild.sh
       - name: Build native binaries
         shell: bash
         env:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
+          TARGET: ${{ matrix.target }}
         run: |
-          VERSION="${RELEASE_TAG#v}"
-          (cd rust && DECIDED_RS_VERSION="$VERSION" cargo build --release --locked -p decided -p decided-mcp)
+          export DECIDED_RS_VERSION="${RELEASE_TAG#v}"
+          if [[ "$TARGET" == *-linux-gnu ]]; then
+            ./scripts/build-linux-release.sh "$TARGET"
+            echo "BIN_DIR=rust/target/$TARGET/release" >> "$GITHUB_ENV"
+          else
+            (cd rust && cargo build --release --locked -p decided -p decided-mcp)
+            echo "BIN_DIR=rust/target/release" >> "$GITHUB_ENV"
+          fi
+      - name: Run Linux binaries on the glibc floor
+        if: endsWith(matrix.target, '-linux-gnu')
+        run: ./scripts/smoke-linux-floor.sh "$BIN_DIR"
       - name: Package Unix binaries
         if: matrix.archive == 'tar.gz'
         shell: bash
@@ -100,7 +115,7 @@ jobs:
           mkdir -p dist
           mkdir -p package
           cp LICENSE NOTICE THIRD-PARTY-NOTICES package/
-          cp rust/target/release/decided rust/target/release/decided-mcp package/
+          cp "$BIN_DIR/decided" "$BIN_DIR/decided-mcp" package/
           tar -C package -czf "dist/asdecided-${TARGET}.tar.gz" .
       - name: Package Windows binaries
         if: matrix.archive == 'zip'
@@ -111,7 +126,7 @@ jobs:
           Copy-Item rust/target/release/decided.exe,rust/target/release/decided-mcp.exe -Destination package
           Compress-Archive -Path package\* -DestinationPath dist/asdecided-${{ matrix.target }}.zip
       - name: Attest release archive
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: dist/asdecided-${{ matrix.target }}.${{ matrix.archive }}
       - name: Attach binaries to GitHub Release
@@ -129,7 +144,7 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.release.tag_name }}
       - name: Download release archives
@@ -164,11 +179,11 @@ jobs:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: gh release upload "$RELEASE_TAG" "dist/asdecided-${RELEASE_TAG}-sbom.cdx.json" --repo "$GITHUB_REPOSITORY" --clobber
       - name: Attest SHA256SUMS
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: dist/SHA256SUMS
       - name: Attest CycloneDX SBOM
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: dist/asdecided-${{ github.event.release.tag_name }}-sbom.cdx.json
 
@@ -183,10 +198,10 @@ jobs:
       IMAGE: ghcr.io/asdecided/core
       TAG: ${{ github.event.release.tag_name }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.release.tag_name }}
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: asdecided-third-party-notices
       - name: Build and smoke-test CLI image

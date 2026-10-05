@@ -1428,6 +1428,7 @@ pub struct GateArgs {
     pub sarif: bool,
     pub top_level: bool,
     pub code: bool,
+    pub require_policy: bool,
     pub repository: String,
     pub base: Option<String>,
     pub full: bool,
@@ -1441,6 +1442,12 @@ pub struct GateArgs {
 pub fn cmd_gate(args: &GateArgs) -> i32 {
     if !Path::new(&args.directory).is_dir() {
         return usage_error(&format!("not a directory: {}", args.directory));
+    }
+    if args.require_policy {
+        if let Err(error) = crate::gate::require_enforcement_policy(&args.directory) {
+            eprintln!("decided: {}", error.message());
+            return EXIT_VALIDATION_FAILED;
+        }
     }
     // The registry must be the one `validate` uses, or bundle-type artifacts
     // escape the gate as unknown documents and a broken pin passes (ADR-083).
@@ -1461,16 +1468,13 @@ pub fn cmd_gate(args: &GateArgs) -> i32 {
             full_tree: args.full,
         })
     };
-    let report = match if let Some(composed) = &composed {
-        crate::gate::build_gate_with_composed(
-            &args.directory,
-            !args.top_level,
-            code_options(),
-            composed,
-        )
-    } else {
-        crate::gate::build_gate_with_code(&args.directory, !args.top_level, code_options())
-    } {
+    let report = match crate::gate::build_gate_with_policy_requirement(
+        &args.directory,
+        !args.top_level,
+        code_options(),
+        composed.as_ref(),
+        args.require_policy,
+    ) {
         Ok(report) => report,
         Err(exc) => {
             eprintln!("decided: {}", exc.message());
@@ -1829,6 +1833,8 @@ pub struct ExportArgs {
 struct HistoricalExportRevision {
     /// Owns the temporary snapshot through rendering and emission.
     _snapshot: crate::revisions::RevisionSnapshot,
+    /// The full commit SHA the requested revision resolved to.
+    commit: String,
     boundary: PathBuf,
     directory: String,
     corpus_existed: bool,
@@ -2213,21 +2219,161 @@ fn materialize_export_revision(
     }
     let boundary = snapshot.root().to_path_buf();
     let directory = corpus.path.to_string_lossy().into_owned();
+    let commit = snapshot.commit().to_string();
     Ok(HistoricalExportRevision {
         _snapshot: snapshot,
+        commit,
         boundary,
         directory,
         corpus_existed: corpus.existed,
     })
 }
 
-pub fn cmd_export(args: &ExportArgs) -> i32 {
-    cmd_export_at(args, None)
+/// One rendered documents or graph payload.
+struct RenderedExportPayload {
+    text: String,
+    /// The resolved commit when the payload was rendered at a revision.
+    commit: Option<String>,
+    historical_corpus_absent: bool,
 }
 
-/// CLI-only revision projection, kept separate so adding `--at` does not
-/// change the released public [`ExportArgs`] construction contract.
-pub(crate) fn cmd_export_at(args: &ExportArgs, at: Option<&str>) -> i32 {
+/// Render the documents or graph payload of `args.directory`, at `at` when
+/// given. The working tree's spec sync is the caller's responsibility; a
+/// revision is synced from its own snapshot here.
+fn render_export_payload(
+    args: &ExportArgs,
+    at: Option<&str>,
+) -> Result<RenderedExportPayload, i32> {
+    let historical = match at {
+        Some(revision) => match materialize_export_revision(&args.directory, revision) {
+            Ok(snapshot) => Some(snapshot),
+            Err(HistoricalExportError::Usage(message)) => return Err(usage_error(&message)),
+            Err(HistoricalExportError::Materialization(message)) => {
+                eprintln!("decided: {message}");
+                return Err(EXIT_VALIDATION_FAILED);
+            }
+        },
+        None => None,
+    };
+    let export_directory = historical
+        .as_ref()
+        .map_or(args.directory.as_str(), |snapshot| {
+            snapshot.directory.as_str()
+        });
+    if historical.is_some() {
+        if let Some(code) = spec_sync_or_exit(export_directory) {
+            return Err(code);
+        }
+    }
+    let identity_directory = args.directory.as_str();
+    let snapshot_boundary = historical
+        .as_ref()
+        .map(|snapshot| snapshot.boundary.as_path());
+    let historical_corpus_absent = historical
+        .as_ref()
+        .is_some_and(|snapshot| !snapshot.corpus_existed);
+    let composed = if historical_corpus_absent {
+        None
+    } else {
+        load_composed_or_exit_with_boundary(export_directory, true, snapshot_boundary)?
+    };
+    let text = if args.documents {
+        let export = match composed.as_ref() {
+            Some(corpus) => crate::export::build_documents_export_from_composed_for(
+                export_directory,
+                identity_directory,
+                corpus,
+                args.local_only,
+                snapshot_boundary,
+            )
+            .map_err(|error| error.message().to_string()),
+            None => crate::export::build_documents_export_for(
+                export_directory,
+                identity_directory,
+                snapshot_boundary,
+            )
+            .map_err(|error| error.message().to_string()),
+        };
+        match export {
+            Ok(export) => output::render_documents_jsonl(&export),
+            Err(message) => {
+                eprintln!("decided: {message}");
+                return Err(EXIT_VALIDATION_FAILED);
+            }
+        }
+    } else {
+        let export = match composed.as_ref() {
+            Some(corpus) => crate::export::build_graph_export_from_composed_for(
+                export_directory,
+                identity_directory,
+                corpus,
+                args.local_only,
+                snapshot_boundary,
+            )
+            .map_err(|error| error.message().to_string()),
+            None => crate::export::build_graph_export_for(
+                export_directory,
+                identity_directory,
+                snapshot_boundary,
+            )
+            .map_err(|error| error.message().to_string()),
+        };
+        match export {
+            Ok(export) => output::render_graph_json(&export),
+            Err(message) => {
+                eprintln!("decided: {message}");
+                return Err(EXIT_VALIDATION_FAILED);
+            }
+        }
+    };
+    Ok(RenderedExportPayload {
+        text,
+        commit: historical.map(|snapshot| snapshot.commit),
+        historical_corpus_absent,
+    })
+}
+
+/// `export --documents|--graph --since <rev> [--at <rev2>]`: the change feed
+/// from the corpus at `since` to the corpus at `at` or the working tree.
+fn cmd_export_feed(args: &ExportArgs, since: &str, at: Option<&str>) -> i32 {
+    let base = match render_export_payload(args, Some(since)) {
+        Ok(payload) => payload,
+        Err(code) => return code,
+    };
+    let head = match render_export_payload(args, at) {
+        Ok(payload) => payload,
+        Err(code) => return code,
+    };
+    let cursor = crate::export_feed::FeedCursor {
+        base: base.commit.unwrap_or_default(),
+        head: head
+            .commit
+            .unwrap_or_else(|| crate::export_feed::WORKING_TREE.to_string()),
+    };
+    let feed = if args.documents {
+        crate::export_feed::documents_feed(&base.text, &head.text, &cursor)
+    } else {
+        crate::export_feed::graph_feed(&base.text, &head.text, &cursor)
+    };
+    match feed {
+        Ok(text) => {
+            emit(text);
+            EXIT_OK
+        }
+        Err(message) => {
+            eprintln!("decided: {message}");
+            EXIT_VALIDATION_FAILED
+        }
+    }
+}
+
+pub fn cmd_export(args: &ExportArgs) -> i32 {
+    cmd_export_at(args, None, None)
+}
+
+/// CLI-only revision projection, kept separate so adding `--at` and
+/// `--since` does not change the released public [`ExportArgs`] contract.
+pub(crate) fn cmd_export_at(args: &ExportArgs, at: Option<&str>, since: Option<&str>) -> i32 {
     if args.schema.is_none() && at.is_none() && !Path::new(&args.directory).is_dir() {
         return usage_error(&format!("not a directory: {}", args.directory));
     }
@@ -2245,6 +2391,9 @@ pub(crate) fn cmd_export_at(args: &ExportArgs, at: Option<&str>) -> i32 {
     }
     if at.is_some() && (args.html || args.okf || args.agent_rules || args.schema.is_some()) {
         return usage_error("--at is available only for viewer, documents, and graph exports");
+    }
+    if since.is_some() && !(args.documents || args.graph) {
+        return usage_error("--since is available only for documents and graph exports");
     }
     // Agent-rules is a distinct mode (ADR-067) owning --out/--client/--check
     // and --json; it dispatches before the export-payload guards.
@@ -2286,6 +2435,21 @@ pub(crate) fn cmd_export_at(args: &ExportArgs, at: Option<&str>) -> i32 {
         emit_exact(schema);
         return EXIT_OK;
     }
+    if let Some(base) = since {
+        return cmd_export_feed(args, base, at);
+    }
+    if args.documents || args.graph {
+        let payload = match render_export_payload(args, at) {
+            Ok(payload) => payload,
+            Err(code) => return code,
+        };
+        if args.documents && payload.historical_corpus_absent && payload.text.is_empty() {
+            emit_exact("");
+        } else {
+            emit(payload.text);
+        }
+        return EXIT_OK;
+    }
     let historical = match at {
         Some(revision) => match materialize_export_revision(&args.directory, revision) {
             Ok(snapshot) => Some(snapshot),
@@ -2322,65 +2486,6 @@ pub(crate) fn cmd_export_at(args: &ExportArgs, at: Option<&str>) -> i32 {
             Err(code) => return code,
         }
     };
-    if args.documents {
-        let export = match composed.as_ref() {
-            Some(corpus) => crate::export::build_documents_export_from_composed_for(
-                export_directory,
-                identity_directory,
-                corpus,
-                args.local_only,
-                snapshot_boundary,
-            )
-            .map_err(|error| error.message().to_string()),
-            None => crate::export::build_documents_export_for(
-                export_directory,
-                identity_directory,
-                snapshot_boundary,
-            )
-            .map_err(|error| error.message().to_string()),
-        };
-        let export = match export {
-            Ok(export) => export,
-            Err(message) => {
-                eprintln!("decided: {message}");
-                return EXIT_VALIDATION_FAILED;
-            }
-        };
-        let rendered = output::render_documents_jsonl(&export);
-        if historical_corpus_absent && rendered.is_empty() {
-            emit_exact("");
-        } else {
-            emit(rendered);
-        }
-        return EXIT_OK;
-    }
-    if args.graph {
-        let export = match composed.as_ref() {
-            Some(corpus) => crate::export::build_graph_export_from_composed_for(
-                export_directory,
-                identity_directory,
-                corpus,
-                args.local_only,
-                snapshot_boundary,
-            )
-            .map_err(|error| error.message().to_string()),
-            None => crate::export::build_graph_export_for(
-                export_directory,
-                identity_directory,
-                snapshot_boundary,
-            )
-            .map_err(|error| error.message().to_string()),
-        };
-        let export = match export {
-            Ok(export) => export,
-            Err(message) => {
-                eprintln!("decided: {message}");
-                return EXIT_VALIDATION_FAILED;
-            }
-        };
-        emit(output::render_graph_json(&export));
-        return EXIT_OK;
-    }
     // OKF consumes source Markdown directly, so its projection skips the
     // unrelated HTML rendering used by the viewer export.
     if args.okf {

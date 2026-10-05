@@ -6,6 +6,63 @@ details, release history over commit history.
 
 ## Unreleased
 
+### Fixed
+
+- The Linux release archives (x86_64 and aarch64) run on glibc 2.17 and newer
+  again, which covers RHEL and Rocky 8 and 9, Amazon Linux 2023, Ubuntu 22.04
+  and Debian 12. Archives up to v0.31.1 were linked on the runner's glibc 2.39
+  and failed on those systems with `GLIBC_2.39 not found`. CI now runs every
+  Linux build on a CentOS 7 (glibc 2.17) userland so the floor cannot drift.
+
+## v0.31.1 — 2026-10-05
+
+A small follow-up to v0.31.0: the gate can require an explicit enforcement
+policy and no longer falls back silently when the policy is unusable, and
+`cargo binstall` installs the prebuilt release binaries.
+
+### Added
+
+- `decided gate --require-policy` requires an explicit enforcement mapping and
+  fails closed when it is absent, invalid or unreadable.
+- `cargo binstall decided` and `cargo binstall decided-mcp` now download the
+  prebuilt executables from the GitHub release archives instead of compiling.
+  Targets without a published archive fall back to binstall's other strategies,
+  ending with a build from source.
+
+### Fixed
+
+- The gate no longer skips unusable config paths or accepts non-mapping YAML
+  roots as default policy. Parse diagnostics omit source excerpts.
+
+## v0.31.0 — 2026-10-05
+
+Adds an incremental change feed for consumers that sync the corpus into
+memory, RAG, or graph backends, and fixes relationship validation in
+repositories with a version-2 federation manifest. Repositories without a
+federation manifest, or with a version-1 manifest, validate exactly as before.
+
+### Added
+
+- `decided export --documents|--graph --since <revision>` emits a change feed
+  from the corpus at that revision to the working tree, or to a second
+  revision with `--at`. Records are keyed on source and canonical id, so a
+  move that keeps the id is `modified`. Each feed carries resolved `base` and
+  `head` cursors, and nothing is persisted. Applying a documents feed to the
+  base export reproduces the head export byte-for-byte; a graph feed
+  reproduces the head node and edge sets. An unchanged corpus yields an empty
+  feed and exit code 0.
+
+### Fixed
+
+- In a repository with a version-2 federation manifest, relationship
+  validation now runs over the verified graph. Before this, `relationships
+  --validate`, `gate`, `doctor`, `portfolio` and the MCP summary reported
+  0 relationships checked and skipped the non-fatal checks: a missing
+  `## Applies To` path did not block the gate, and warnings such as a citation
+  of a superseded parent decision were not reported. Errors that make the
+  graph invalid were already fatal and still are. Version-1 and single-corpus
+  repositories are unchanged.
+
 ## v0.30.0 — 2026-09-27
 
 Implements the RAC specification v0.2.0. Every addition is opt-in: a

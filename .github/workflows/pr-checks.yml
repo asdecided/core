@@ -16,7 +16,7 @@ jobs:
     name: release changelog contract
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Verify current version has one changelog entry
         run: |
           VERSION="$(cargo metadata --manifest-path rust/Cargo.toml --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "decided") | .version')"
@@ -29,7 +29,7 @@ jobs:
     name: watchkeeper (dogfood, native)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -49,7 +49,7 @@ jobs:
       contents: read
       security-events: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -73,7 +73,7 @@ jobs:
       contents: read
       security-events: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -93,7 +93,7 @@ jobs:
       contents: read
       security-events: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -117,7 +117,7 @@ jobs:
 
       - name: Upload Sentry SARIF
         if: ${{ always() && !github.event.pull_request.head.repo.fork }}
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: decided-sarif/sentry.sarif
           category: decided-sentry
@@ -139,7 +139,7 @@ jobs:
     name: public docs and guidance drift
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Build native AsDecided
         working-directory: rust
@@ -156,7 +156,7 @@ jobs:
     name: mcp distribution metadata
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Verify Registry and OCI metadata agree
         run: |
           WORKSPACE_VERSION="$(cargo metadata --manifest-path rust/Cargo.toml --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "decided-mcp") | .version')"

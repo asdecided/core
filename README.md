@@ -27,6 +27,14 @@ cargo install decided
 cargo install decided-mcp
 ```
 
+`cargo install` compiles from source. To install the prebuilt release binaries
+instead, use [`cargo binstall`](https://github.com/cargo-bins/cargo-binstall).
+Crates published after v0.31.0 point it at the GitHub release archives:
+
+```sh
+cargo binstall decided decided-mcp
+```
+
 Windows users can install both native executables through Scoop:
 
 ```powershell
@@ -36,6 +44,9 @@ scoop install asdecided
 
 Native `decided` and `decided-mcp` archives are also published on
 [GitHub Releases](https://github.com/asdecided/core/releases).
+The Linux archives (x86_64 and aarch64) need glibc 2.17 or newer, so they run
+on RHEL/CentOS 7 and later, Amazon Linux 2 and 2023, and current Debian and
+Ubuntu releases.
 
 Python API consumers should use the
 [`asdecided/sdk`](https://github.com/asdecided/sdk) client SDK. It talks to the
