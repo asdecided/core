@@ -21,6 +21,10 @@ on:
       - "deny.toml"
       - ".github/dependabot.yml"
       - ".github/workflows/rust-spike.yml"
+      - "scripts/build-linux-release.sh"
+      - "scripts/install-cargo-zigbuild.sh"
+      - "scripts/cargo-zigbuild-requirements.txt"
+      - "scripts/smoke-linux-floor.sh"
   push:
     branches: [main]
     paths:
@@ -29,12 +33,29 @@ on:
       - "deny.toml"
       - ".github/dependabot.yml"
       - ".github/workflows/rust-spike.yml"
+      - "scripts/build-linux-release.sh"
+      - "scripts/install-cargo-zigbuild.sh"
+      - "scripts/cargo-zigbuild-requirements.txt"
+      - "scripts/smoke-linux-floor.sh"
 
 jobs:
-  linux-arm64-build:
-    name: Linux ARM64 release build
-    runs-on: ubuntu-24.04-arm
-    timeout-minutes: 20
+  # Builds the Linux binaries exactly as native-publish.yml ships them, then
+  # runs them on the glibc floor so a dependency or toolchain bump that raises
+  # the floor fails here instead of on users' machines.
+  linux-release-build:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x64 release build
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - name: Linux ARM64 release build
+            os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
         with:
@@ -47,9 +68,14 @@ jobs:
         with:
           workspaces: rust
 
-      - name: Build shipped native binaries
-        working-directory: rust
-        run: cargo build --release --locked -p decided -p decided-mcp
+      - name: Install pinned cargo-zigbuild
+        run: ./scripts/install-cargo-zigbuild.sh
+
+      - name: Build shipped native binaries against the glibc floor
+        run: ./scripts/build-linux-release.sh "${{ matrix.target }}"
+
+      - name: Run shipped binaries on the glibc floor
+        run: ./scripts/smoke-linux-floor.sh "rust/target/${{ matrix.target }}/release"
 
   windows-runtime:
     name: Windows native runtime smoke

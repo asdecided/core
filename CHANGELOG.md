@@ -6,6 +6,14 @@ details, release history over commit history.
 
 ## Unreleased
 
+### Fixed
+
+- The Linux release archives (x86_64 and aarch64) run on glibc 2.17 and newer
+  again, which covers RHEL and Rocky 8 and 9, Amazon Linux 2023, Ubuntu 22.04
+  and Debian 12. Archives up to v0.31.1 were linked on the runner's glibc 2.39
+  and failed on those systems with `GLIBC_2.39 not found`. CI now runs every
+  Linux build on a CentOS 7 (glibc 2.17) userland so the floor cannot drift.
+
 ## v0.31.1 — 2026-10-05
 
 A small follow-up to v0.31.0: the gate can require an explicit enforcement

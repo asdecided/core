@@ -84,13 +84,28 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust
+      # Linux builds link against an old glibc (scripts/build-linux-release.sh)
+      # so the archives run on distributions older than the runner image.
+      - name: Install pinned cargo-zigbuild
+        if: endsWith(matrix.target, '-linux-gnu')
+        run: ./scripts/install-cargo-zigbuild.sh
       - name: Build native binaries
         shell: bash
         env:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
+          TARGET: ${{ matrix.target }}
         run: |
-          VERSION="${RELEASE_TAG#v}"
-          (cd rust && DECIDED_RS_VERSION="$VERSION" cargo build --release --locked -p decided -p decided-mcp)
+          export DECIDED_RS_VERSION="${RELEASE_TAG#v}"
+          if [[ "$TARGET" == *-linux-gnu ]]; then
+            ./scripts/build-linux-release.sh "$TARGET"
+            echo "BIN_DIR=rust/target/$TARGET/release" >> "$GITHUB_ENV"
+          else
+            (cd rust && cargo build --release --locked -p decided -p decided-mcp)
+            echo "BIN_DIR=rust/target/release" >> "$GITHUB_ENV"
+          fi
+      - name: Run Linux binaries on the glibc floor
+        if: endsWith(matrix.target, '-linux-gnu')
+        run: ./scripts/smoke-linux-floor.sh "$BIN_DIR"
       - name: Package Unix binaries
         if: matrix.archive == 'tar.gz'
         shell: bash
@@ -100,7 +115,7 @@ jobs:
           mkdir -p dist
           mkdir -p package
           cp LICENSE NOTICE THIRD-PARTY-NOTICES package/
-          cp rust/target/release/decided rust/target/release/decided-mcp package/
+          cp "$BIN_DIR/decided" "$BIN_DIR/decided-mcp" package/
           tar -C package -czf "dist/asdecided-${TARGET}.tar.gz" .
       - name: Package Windows binaries
         if: matrix.archive == 'zip'
