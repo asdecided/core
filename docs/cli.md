@@ -1784,3 +1784,11 @@ decided hook list                          # what is bundled
   }
 }
 ```
+
+### Require an enforcement policy
+
+`decided gate <directory> --require-policy` fails with exit 1 unless the nearest
+`.decided/config.yaml` contains a valid `enforcement` mapping. Required loading
+never substitutes defaults for missing/invalid/unreadable policy. An empty mapping
+explicitly selects default classifications. Invalid roots and unusable discovered
+paths now fail in optional mode too. See [Governance](governance.md).

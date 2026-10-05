@@ -969,6 +969,7 @@ fn run_gate(rest: &[&String]) -> u8 {
     let mut sarif = false;
     let mut top_level = false;
     let mut code = false;
+    let mut require_policy = false;
     let mut repository = ".".to_string();
     let mut base: Option<String> = None;
     let mut full = false;
@@ -1004,6 +1005,7 @@ fn run_gate(rest: &[&String]) -> u8 {
             }
             "--top-level" => top_level = true,
             "--code" => code = true,
+            "--require-policy" => require_policy = true,
             "--full" => full = true,
             "--repository" | "--base" => {
                 i += 1;
@@ -1037,6 +1039,7 @@ fn run_gate(rest: &[&String]) -> u8 {
         sarif,
         top_level,
         code,
+        require_policy,
         repository,
         base,
         full,

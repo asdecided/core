@@ -19,7 +19,7 @@ use crate::relationships::{
     corpus_items, relationship_severity, validate_relationships, RelationshipValidation,
 };
 use crate::review::{review_from_portfolio, ReviewReport, PRIORITY_BROKEN_RELATIONSHIP};
-use crate::validate::find_config_file;
+use std::path::PathBuf;
 
 pub const ENFORCEMENT_BLOCKING: &str = "blocking";
 pub const ENFORCEMENT_ADVISORY: &str = "advisory";
@@ -28,6 +28,66 @@ pub const SOURCE_VALIDATE: &str = "validate";
 pub const SOURCE_RELATIONSHIPS: &str = "relationships";
 pub const SOURCE_REVIEW: &str = "review";
 pub const SOURCE_SENTRY: &str = "sentry";
+
+/// Observable policy load outcome. Absence is permitted only for optional policy.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PolicyLoadState {
+    Loaded,
+    Absent,
+    Invalid,
+    Unreadable,
+}
+
+/// Discover without treating a broken symlink, directory, or access error as absence.
+fn find_config_file(start_dir: &str) -> Result<Option<PathBuf>, MalformedConfig> {
+    let resolved = crate::validate::resolve_path(start_dir);
+    for directory in resolved.ancestors() {
+        let candidate = directory.join(".decided/config.yaml");
+        match std::fs::symlink_metadata(&candidate) {
+            Ok(_) => return Ok(Some(candidate)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                let parent = directory.join(".decided");
+                if std::fs::symlink_metadata(&parent).is_ok()
+                    && !std::fs::metadata(&parent).is_ok_and(|meta| meta.is_dir())
+                {
+                    return Err(MalformedConfig {
+                        config_path: candidate.display().to_string(),
+                        reason: "policy unreadable: check .decided directory".into(),
+                    });
+                }
+                continue;
+            }
+            Err(_) => {
+                return Err(MalformedConfig {
+                    config_path: candidate.display().to_string(),
+                    reason: "policy unreadable: check path and access permissions".into(),
+                })
+            }
+        }
+    }
+    Ok(None)
+}
+
+/// Inspect the strict enforcement policy without exposing document contents.
+pub fn policy_load_state(start_dir: &str) -> PolicyLoadState {
+    let path = match find_config_file(start_dir) {
+        Ok(Some(path)) => path,
+        Ok(None) => return PolicyLoadState::Absent,
+        Err(_) => return PolicyLoadState::Unreadable,
+    };
+    if !std::fs::metadata(&path).is_ok_and(|meta| meta.is_file()) || std::fs::read(&path).is_err() {
+        return PolicyLoadState::Unreadable;
+    }
+    match load_enforcement_policy(start_dir) {
+        Ok(_) => PolicyLoadState::Loaded,
+        Err(_) => PolicyLoadState::Invalid,
+    }
+}
+
+/// Explicit required-policy mode never substitutes built-in classifications.
+pub fn require_enforcement_policy(start_dir: &str) -> Result<(), MalformedConfig> {
+    load_enforcement_policy_with_requirement(start_dir, true).map(|_| ())
+}
 
 // ---------------------------------------------------------------------------
 // MalformedRepositoryConfig (decided.services.init)
@@ -92,16 +152,25 @@ fn parse_config_pairs(
     config_path: &std::path::Path,
 ) -> Result<Option<Vec<(Yaml, Yaml)>>, MalformedConfig> {
     let display = config_path.to_string_lossy().into_owned();
-    let text = std::fs::read_to_string(config_path).map_err(|e| MalformedConfig {
+    if !std::fs::metadata(config_path).is_ok_and(|meta| meta.is_file()) {
+        return Err(MalformedConfig {
+            config_path: display,
+            reason: "policy unreadable: expected a readable regular file".into(),
+        });
+    }
+    let text = std::fs::read_to_string(config_path).map_err(|_| MalformedConfig {
         config_path: display.clone(),
-        reason: format!("invalid YAML: {e}"),
+        reason: "policy unreadable: check UTF-8 encoding, path and access permissions".into(),
     })?;
     match yaml_load_config(&text) {
         Ok(Yaml::Map(pairs)) => Ok(Some(pairs)),
-        Ok(_) => Ok(None),
-        Err(problem) => Err(MalformedConfig {
+        Ok(_) => Err(MalformedConfig {
             config_path: display,
-            reason: format!("invalid YAML: {problem}"),
+            reason: "policy invalid: document root must be a mapping".into(),
+        }),
+        Err(_) => Err(MalformedConfig {
+            config_path: display,
+            reason: "policy invalid: invalid YAML; inspect the config locally".into(),
         }),
     }
 }
@@ -145,14 +214,34 @@ fn parse_code_list(
 /// spellings are accepted, `off` winning (`section["off"] if "off" in
 /// section else section.get(False)`).
 pub fn load_enforcement_policy(start_dir: &str) -> Result<EnforcementPolicy, MalformedConfig> {
-    let Some(config_path) = find_config_file(start_dir) else {
+    load_enforcement_policy_with_requirement(start_dir, false)
+}
+
+fn load_enforcement_policy_with_requirement(
+    start_dir: &str,
+    required: bool,
+) -> Result<EnforcementPolicy, MalformedConfig> {
+    let absent = || MalformedConfig {
+        config_path: start_dir.into(),
+        reason: "required policy absent: create .decided/config.yaml with an enforcement mapping"
+            .into(),
+    };
+    let Some(config_path) = find_config_file(start_dir)? else {
+        if required {
+            return Err(absent());
+        }
         return Ok(EnforcementPolicy::default());
     };
     let Some(pairs) = parse_config_pairs(&config_path)? else {
         return Ok(EnforcementPolicy::default());
     };
     let section = match yaml_get(&pairs, "enforcement") {
-        None | Some(Yaml::Null) => return Ok(EnforcementPolicy::default()),
+        None | Some(Yaml::Null) => {
+            if required {
+                return Err(absent());
+            }
+            return Ok(EnforcementPolicy::default());
+        }
         Some(Yaml::Map(section)) => section,
         Some(_) => {
             return Err(MalformedConfig {
@@ -247,7 +336,7 @@ fn check_severity_map(
 /// loader inside `validate_directory` — identical whenever this check
 /// passes (the lenient reader only ever drops entries this one rejects).
 pub fn check_overrides(start_dir: &str) -> Result<(), MalformedConfig> {
-    let Some(config_path) = find_config_file(start_dir) else {
+    let Some(config_path) = find_config_file(start_dir)? else {
         return Ok(());
     };
     let Some(pairs) = parse_config_pairs(&config_path)? else {
@@ -387,7 +476,7 @@ pub fn build_gate_with_code(
     recursive: bool,
     code: Option<CodeGateOptions<'_>>,
 ) -> Result<GateReport, MalformedConfig> {
-    build_gate_internal(directory, recursive, code, None)
+    build_gate_internal(directory, recursive, code, None, false)
 }
 
 /// Unified gate over one verified effective composition.
@@ -397,7 +486,19 @@ pub fn build_gate_with_composed(
     code: Option<CodeGateOptions<'_>>,
     corpus: &crate::composition::ComposedCorpus,
 ) -> Result<GateReport, MalformedConfig> {
-    build_gate_internal(directory, recursive, code, Some(corpus))
+    build_gate_internal(directory, recursive, code, Some(corpus), false)
+}
+
+/// Gate entry point with explicit required-policy semantics. The same loaded
+/// policy supplies both the presence check and finding classification.
+pub fn build_gate_with_policy_requirement(
+    directory: &str,
+    recursive: bool,
+    code: Option<CodeGateOptions<'_>>,
+    composed: Option<&crate::composition::ComposedCorpus>,
+    required: bool,
+) -> Result<GateReport, MalformedConfig> {
+    build_gate_internal(directory, recursive, code, composed, required)
 }
 
 fn build_gate_internal(
@@ -405,11 +506,12 @@ fn build_gate_internal(
     recursive: bool,
     code: Option<CodeGateOptions<'_>>,
     composed: Option<&crate::composition::ComposedCorpus>,
+    required: bool,
 ) -> Result<GateReport, MalformedConfig> {
     // The oracle raises from load_enforcement_policy first, then
     // load_overrides — mirror that order so a doubly-malformed config
     // reports the enforcement error.
-    let policy = load_enforcement_policy(directory)?;
+    let policy = load_enforcement_policy_with_requirement(directory, required)?;
     check_overrides(directory)?;
 
     let items: Vec<_> = composed
