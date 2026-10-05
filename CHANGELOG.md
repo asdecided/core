@@ -6,6 +6,17 @@ details, release history over commit history.
 
 ## Unreleased
 
+### Fixed
+
+- In a repository with a version-2 federation manifest, relationship
+  validation now runs over the verified graph. Before this, `relationships
+  --validate`, `gate`, `doctor`, `portfolio` and the MCP summary reported
+  0 relationships checked and skipped the non-fatal checks: a missing
+  `## Applies To` path did not block the gate, and warnings such as a citation
+  of a superseded parent decision were not reported. Errors that make the
+  graph invalid were already fatal and still are. Version-1 and single-corpus
+  repositories are unchanged.
+
 ## v0.30.0 — 2026-09-27
 
 Implements the RAC specification v0.2.0. Every addition is opt-in: a

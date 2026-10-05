@@ -956,6 +956,9 @@ impl ComposedCorpus {
     /// Portfolio relationship metrics through the same qualified/redirect
     /// index as lookup and graph construction.
     pub fn relationship_summary(&self) -> RelationshipSummary {
+        if let Some(graph) = &self.graph {
+            return graph.relationship_summary();
+        }
         let mut summary = crate::relationships::summary_from_rows_with_index(
             &self.effective_rows,
             &self.resolution_index,
@@ -975,6 +978,14 @@ impl ComposedCorpus {
     }
 
     pub fn local_relationship_summary(&self) -> RelationshipSummary {
+        if let Some(graph) = &self.graph {
+            let projection = graph.validation_projection();
+            return crate::relationships::summary_from_rows_with_index(
+                &projection.local_rows,
+                &projection.index,
+                true,
+            );
+        }
         let rows: Vec<ValidationRow> = self
             .local
             .iter()
@@ -991,12 +1002,28 @@ impl ComposedCorpus {
         child_directory: &str,
         recursive: bool,
     ) -> RelationshipValidation {
+        let projection = self
+            .graph
+            .as_ref()
+            .map(GraphComposition::validation_projection);
+        let (rows, target_rows, index) = match &projection {
+            Some(projection) => (
+                &projection.effective_rows,
+                &projection.catalog_rows,
+                &projection.index,
+            ),
+            None => (
+                &self.effective_rows,
+                &self.catalog_rows,
+                &self.resolution_index,
+            ),
+        };
         let mut validation = validation_from_rows_with_index(
             child_directory,
-            &self.effective_rows,
-            &self.catalog_rows,
+            rows,
+            target_rows,
             recursive,
-            &self.resolution_index,
+            index,
             false,
             true,
         );
@@ -1014,6 +1041,18 @@ impl ComposedCorpus {
         child_directory: &str,
         recursive: bool,
     ) -> RelationshipValidation {
+        if let Some(graph) = &self.graph {
+            let projection = graph.validation_projection();
+            return validation_from_rows_with_index(
+                child_directory,
+                &projection.local_rows,
+                &projection.catalog_rows,
+                recursive,
+                &projection.index,
+                false,
+                true,
+            );
+        }
         let rows: Vec<ValidationRow> = self
             .local
             .iter()

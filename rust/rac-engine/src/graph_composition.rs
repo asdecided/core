@@ -12,8 +12,9 @@ use crate::corpus::{ArtifactKey, Layer};
 use crate::identity::artifact_identifiers;
 use crate::pycompat::py_casefold;
 use crate::relationships::{
-    edge_spec, extract_relationships_full, relationship_severity, CorpusItem, Relationship,
-    RelationshipIssue, RelationshipSummary, ISSUE_SELF_REFERENCE, ISSUE_TARGET_AMBIGUOUS,
+    edge_spec, extract_relationships_full, relationship_severity, validation_row_from_item,
+    CorpusItem, Relationship, RelationshipIssue, RelationshipSummary, ResolutionCandidate,
+    ResolutionIndex, ValidationRow, ISSUE_SELF_REFERENCE, ISSUE_TARGET_AMBIGUOUS,
     ISSUE_TARGET_NOT_FOUND,
 };
 use crate::resolve::{
@@ -299,6 +300,14 @@ pub struct GraphRelationship {
     pub effective_terminal: Option<ArtifactKey>,
     pub issue: Option<GraphRelationshipIssue>,
     pub external: bool,
+}
+
+/// Row-based validator inputs projected from a graph composition.
+pub(crate) struct GraphValidationProjection {
+    pub catalog_rows: Vec<ValidationRow>,
+    pub effective_rows: Vec<ValidationRow>,
+    pub local_rows: Vec<ValidationRow>,
+    pub index: ResolutionIndex,
 }
 
 type OverrideRoute = Vec<CompiledOverride>;
@@ -872,6 +881,71 @@ impl GraphComposition {
             orphaned,
             coverage,
             issues,
+        }
+    }
+
+    /// Rows and a source-contextual index for the row-based relationship
+    /// validator. Each reference an effective or root-local record authors is
+    /// recorded with the candidates graph lookup gives it from that record's
+    /// source, so validation and lookup cannot disagree.
+    pub(crate) fn validation_projection(&self) -> GraphValidationProjection {
+        let catalog_rows: Vec<ValidationRow> =
+            self.items.iter().map(validation_row_from_item).collect();
+        let by_key: BTreeMap<&ArtifactKey, &ValidationRow> =
+            catalog_rows.iter().map(|row| (&row.key, row)).collect();
+        let candidate = |key: &ArtifactKey, token: &str| {
+            by_key
+                .get(key)
+                .map(|row| ResolutionCandidate::from_row(row, token.to_string()))
+        };
+        let mut index = ResolutionIndex::new();
+        let authors: BTreeSet<usize> = self
+            .root_effective
+            .iter()
+            .chain(self.root_local.iter())
+            .copied()
+            .collect();
+        for position in authors {
+            for relationship in self.relationships_for(&self.items[position], true) {
+                if relationship.external {
+                    continue;
+                }
+                let token = relationship.authored_token.as_str();
+                let candidates: Vec<ResolutionCandidate> = match relationship.issue {
+                    Some(GraphRelationshipIssue::TargetNotFound) => Vec::new(),
+                    Some(GraphRelationshipIssue::TargetAmbiguous) => relationship
+                        .historical_candidates
+                        .iter()
+                        .filter_map(|key| candidate(key, token))
+                        .collect(),
+                    Some(GraphRelationshipIssue::SelfReference) => {
+                        candidate(&relationship.source, token).into_iter().collect()
+                    }
+                    None => relationship
+                        .effective_terminal
+                        .as_ref()
+                        .and_then(|key| candidate(key, token))
+                        .into_iter()
+                        .collect(),
+                };
+                index.insert_contextual(relationship.source.clone(), token, candidates);
+            }
+        }
+        let effective_rows = self
+            .root_effective
+            .iter()
+            .map(|position| catalog_rows[*position].clone())
+            .collect();
+        let local_rows = self
+            .root_local
+            .iter()
+            .map(|position| catalog_rows[*position].clone())
+            .collect();
+        GraphValidationProjection {
+            catalog_rows,
+            effective_rows,
+            local_rows,
+            index,
         }
     }
 
