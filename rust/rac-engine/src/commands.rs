@@ -1428,6 +1428,7 @@ pub struct GateArgs {
     pub sarif: bool,
     pub top_level: bool,
     pub code: bool,
+    pub require_policy: bool,
     pub repository: String,
     pub base: Option<String>,
     pub full: bool,
@@ -1441,6 +1442,12 @@ pub struct GateArgs {
 pub fn cmd_gate(args: &GateArgs) -> i32 {
     if !Path::new(&args.directory).is_dir() {
         return usage_error(&format!("not a directory: {}", args.directory));
+    }
+    if args.require_policy {
+        if let Err(error) = crate::gate::require_enforcement_policy(&args.directory) {
+            eprintln!("decided: {}", error.message());
+            return EXIT_VALIDATION_FAILED;
+        }
     }
     // The registry must be the one `validate` uses, or bundle-type artifacts
     // escape the gate as unknown documents and a broken pin passes (ADR-083).
@@ -1461,16 +1468,13 @@ pub fn cmd_gate(args: &GateArgs) -> i32 {
             full_tree: args.full,
         })
     };
-    let report = match if let Some(composed) = &composed {
-        crate::gate::build_gate_with_composed(
-            &args.directory,
-            !args.top_level,
-            code_options(),
-            composed,
-        )
-    } else {
-        crate::gate::build_gate_with_code(&args.directory, !args.top_level, code_options())
-    } {
+    let report = match crate::gate::build_gate_with_policy_requirement(
+        &args.directory,
+        !args.top_level,
+        code_options(),
+        composed.as_ref(),
+        args.require_policy,
+    ) {
         Ok(report) => report,
         Err(exc) => {
             eprintln!("decided: {}", exc.message());

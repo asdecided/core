@@ -6,6 +6,16 @@ details, release history over commit history.
 
 ## Unreleased
 
+### Fixed
+
+- The gate no longer skips unusable config paths or accepts non-mapping YAML
+  roots as default policy. Parse diagnostics omit source excerpts.
+
+### Added
+
+- `decided gate --require-policy` requires an explicit enforcement mapping and
+  fails closed when it is absent, invalid or unreadable.
+
 ## v0.31.0 — 2026-10-05
 
 Adds an incremental change feed for consumers that sync the corpus into
