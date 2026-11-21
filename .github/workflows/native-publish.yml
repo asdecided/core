@@ -166,26 +166,29 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: gh release upload "$RELEASE_TAG" dist/SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber
-      - name: Generate CycloneDX SBOM
-        uses: anchore/sbom-action@v0
-        with:
-          path: rust
-          format: cyclonedx-json
-          output-file: dist/asdecided-${{ github.event.release.tag_name }}-sbom.cdx.json
-          upload-artifact: false
-      - name: Attach CycloneDX SBOM
+      - name: Generate and audit CycloneDX SBOMs
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          cargo install sbom-attest --version 0.4.2 --locked
+          for target in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu aarch64-apple-darwin x86_64-apple-darwin x86_64-pc-windows-msvc; do
+            sbom="dist/asdecided-${RELEASE_TAG}-${target}-sbom.cdx.json"
+            (cd rust && sbom-attest generate --locked -p decided,decided-mcp --target "$target" --name asdecided --product-version "$RELEASE_TAG" --cdx "../$sbom")
+            (cd rust && sbom-attest audit "../$sbom" --target "$target" --summary "$GITHUB_STEP_SUMMARY")
+          done
+      - name: Attach CycloneDX SBOMs
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
-        run: gh release upload "$RELEASE_TAG" "dist/asdecided-${RELEASE_TAG}-sbom.cdx.json" --repo "$GITHUB_REPOSITORY" --clobber
+        run: gh release upload "$RELEASE_TAG" dist/asdecided-"${RELEASE_TAG}"-*-sbom.cdx.json --repo "$GITHUB_REPOSITORY" --clobber
       - name: Attest SHA256SUMS
         uses: actions/attest-build-provenance@v4
         with:
           subject-path: dist/SHA256SUMS
-      - name: Attest CycloneDX SBOM
+      - name: Attest CycloneDX SBOMs
         uses: actions/attest-build-provenance@v4
         with:
-          subject-path: dist/asdecided-${{ github.event.release.tag_name }}-sbom.cdx.json
+          subject-path: dist/asdecided-${{ github.event.release.tag_name }}-*-sbom.cdx.json
 
   image:
     needs: [verification, changelog, metadata]
