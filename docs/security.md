@@ -70,7 +70,7 @@ gh attestation verify asdecided-x86_64-unknown-linux-gnu.tar.gz \
   --repo asdecided/core
 ```
 
-The SBOM is the `asdecided-<tag>-sbom.cdx.json` release asset. Verify a GHCR
+Each archive's SBOM is the `asdecided-<tag>-<target>-sbom.cdx.json` release asset. Verify a GHCR
 image's keyless signature with the GitHub Actions OIDC issuer and the exact
 release workflow identity:
 
